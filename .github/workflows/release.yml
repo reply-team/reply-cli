@@ -1,0 +1,48 @@
+name: release
+
+# Promote a tested build to the `latest` dist-tag — the manual, human-gated
+# "ship it" step. No rebuild: the exact bytes testers ran on @next become
+# @latest. Also tags the exact source commit the build came from.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Tested version to promote to @latest (e.g. 0.1.42)'
+        required: true
+
+permissions:
+  contents: write   # push the release tag
+  packages: write   # move the dist-tag
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://npm.pkg.github.com
+          scope: '@reply-team'
+
+      - name: Promote to @latest and tag the source commit
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VER='${{ github.event.inputs.version }}'
+          # Fail fast if the version was never published.
+          npm view "@reply-team/reply-cli@${VER}" version
+          npm dist-tag add "@reply-team/reply-cli@${VER}" latest
+          echo "Promoted @reply-team/reply-cli@${VER} to @latest"
+          SHA=$(npm view "@reply-team/reply-cli@${VER}" commit 2>/dev/null || true)
+          if [ -n "$SHA" ] && ! git rev-parse "v${VER}" >/dev/null 2>&1; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "v${VER}" -m "release ${VER}" "$SHA"
+            git push origin "v${VER}"
+            echo "Tagged v${VER} at ${SHA}"
+          fi
