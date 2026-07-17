@@ -9,7 +9,7 @@ import {run_login} from '../auth/oauth-flow';
 import {describe_status} from '../auth/status';
 import {UsageError} from '../utils/errors';
 import {success, info, warn, print, pc, type Print_opts} from '../utils/output';
-import type {Api_key_record, Principal} from '../credentials/types';
+import type {Api_key_record, Credential_record, Principal} from '../credentials/types';
 
 type Global_opts = {
     apiKey?: string;
@@ -85,13 +85,38 @@ const fetch_whoami = async(
     return raw ?? {};
 };
 
+// The credential is already valid here; persist it before the identity lookup
+// so a transient /whoami failure can't discard it. Enriching the stored record
+// with the principal is best-effort.
+const enrich_identity = async(
+    ctx: Cli_context,
+    token: string,
+    headers: Record<string, string>,
+    record: Credential_record,
+): Promise<Principal | undefined>=>{
+    try {
+        const user = normalize_principal(await fetch_whoami(ctx.api_base, token, headers));
+        record.user = user;
+        await ctx.store.set(ctx.key, record);
+        return user;
+    } catch (e) {
+        warn(`Signed in, but could not fetch your identity: ${(e as Error).message}`);
+        return undefined;
+    }
+};
+
 const read_token_from_stdin = async(): Promise<string>=>{
     if (process.stdin.isTTY)
     {
-        const rl = readline.createInterface({input: process.stdin, output: process.stderr});
-        const line = await new Promise<string>(resolve=>
-            rl.question('Paste your API key, then press Enter: ', resolve));
+        const rl = readline.createInterface({input: process.stdin, output: process.stderr, terminal: true});
+        const line = await new Promise<string>(resolve=>{
+            rl.question('Paste your API key, then press Enter: ', resolve);
+            // The prompt is already written; swallow the echo of typed characters
+            // so the key never appears on screen (the piped path never echoes).
+            (rl as unknown as {_writeToOutput: (s: string) => void})._writeToOutput = ()=>{};
+        });
         rl.close();
+        process.stderr.write('\n');
         return line.trim();
     }
     const chunks: Buffer[] = [];
@@ -102,27 +127,31 @@ const read_token_from_stdin = async(): Promise<string>=>{
     return Buffer.concat(chunks).toString('utf8').trim();
 };
 
-const handle_login = async(ctx: Cli_context, g: Global_opts): Promise<void>=>{
+const handle_login = async(
+    ctx: Cli_context, g: Global_opts, login: typeof run_login = run_login,
+): Promise<void>=>{
     // Validate identity flags before opening the browser, so a bad combo fails fast.
     const identity = resolve_identity(g, ctx, 'oauth');
     identity.warnings.forEach(w=>warn(w));
-    const record = await run_login({authority: ctx.authority});
-    const raw = await fetch_whoami(ctx.api_base, record.access_token, identity.headers);
-    const user = normalize_principal(raw);
-    record.user = user;
+    const record = await login({authority: ctx.authority});
+    // Persist first — a good login must survive a transient /whoami failure
+    // (else the user pays another browser round-trip).
     await ctx.store.set(ctx.key, record);
+    const user = await enrich_identity(ctx, record.access_token, identity.headers, record);
     if (wants_json(g))
     {
         print({logged_in: true, method: 'oauth', profile: ctx.profile, user}, print_opts(g));
         return;
     }
-    success(`Logged in as ${principal_label(user)}${profile_note(ctx.profile)}.`);
+    success(`Logged in${user ? ` as ${principal_label(user)}` : ''}${profile_note(ctx.profile)}.`);
 };
 
-const handle_login_token = async(ctx: Cli_context, g: Global_opts): Promise<void>=>{
+const handle_login_token = async(
+    ctx: Cli_context, g: Global_opts, read_token: () => Promise<string> = read_token_from_stdin,
+): Promise<void>=>{
     // Validate identity flags before consuming stdin.
     const identity = resolve_identity(g, ctx, 'api_key');
-    const key = await read_token_from_stdin();
+    const key = await read_token();
     if (!key)
     {
         throw new UsageError('No API key was provided on stdin.', {
@@ -291,4 +320,6 @@ export {
     principal_label,
     handle_status,
     handle_whoami,
+    handle_login,
+    handle_login_token,
 };

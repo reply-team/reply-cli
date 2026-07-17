@@ -10,7 +10,6 @@ const RETRY_BASE_MS = 500;
 const RETRY_AFTER_CAP_MS = 30_000;
 
 type Request_opts = {
-    timing?: boolean;
     headers?: Record<string, string>;   // extra request headers (e.g. X-TEAM-ID)
 };
 
@@ -77,7 +76,6 @@ const request = async<T = unknown>(
         init.body = JSON.stringify(body);
     }
     let attempt = 0;
-    const start = opts.timing ? Date.now() : 0;
     while (attempt <= MAX_RETRIES)
     {
         let res: Response;
@@ -95,10 +93,6 @@ const request = async<T = unknown>(
                 detail: (e as Error).message,
                 hint: 'Check your connection and try again.',
             });
-        }
-        if (opts.timing)
-        {
-            console.error(`Timing: ${Date.now() - start}ms (attempt ${attempt + 1})`);
         }
         if (res.ok)
         {

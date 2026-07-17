@@ -38,10 +38,15 @@ const build_authorize_url = (p: {
     return url.toString();
 };
 
+const html_escape = (s: string): string=>s.replace(/[&<>"']/g, c=>
+    ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c] as string));
+
+// Escapes both args so any reflected value (e.g. the `error` query param) can
+// never inject markup into the loopback page.
 const success_page = (title: string, body: string): string=>
-    `<!doctype html><meta charset="utf-8"><title>${title}</title>`
+    `<!doctype html><meta charset="utf-8"><title>${html_escape(title)}</title>`
     + `<body style="font-family:system-ui;max-width:32rem;margin:4rem auto;text-align:center">`
-    + `<h1>${title}</h1><p>${body}</p></body>`;
+    + `<h1>${html_escape(title)}</h1><p>${html_escape(body)}</p></body>`;
 
 // The opener + args for a platform. On Windows we use rundll32's
 // FileProtocolHandler rather than `cmd /c start`, because `start` treats an

@@ -77,5 +77,12 @@ describe('auth/token', ()=>{
             const rec = to_oauth_record({access_token: 'at2', refresh_token: 'new', expires_in: 3600}, NOW, {refresh_token: 'old'});
             expect(rec.refresh_token).toBe('new');
         });
+
+        it('carries the previous principal forward on refresh (token endpoint returns no user)', ()=>{
+            const rec = to_oauth_record(
+                {access_token: 'at2', expires_in: 3600}, NOW,
+                {refresh_token: 'old', user: {id: 1223, username: 'v@r.io', team_id: 1045}});
+            expect(rec.user).toEqual({id: 1223, username: 'v@r.io', team_id: 1045});
+        });
     });
 });

@@ -25,6 +25,19 @@ const hit_callback = (authorize_url: string, over: {code?: string; state?: strin
     http.get(cb, res=>{res.resume();});
 };
 
+// Hit the loopback callback with an ?error and capture the served HTML body.
+const get_callback_body = (authorize_url: string, over: {error: string}): Promise<string>=>
+    new Promise(resolve=>{
+        const u = new URL(authorize_url);
+        const redirect = new URL(u.searchParams.get('redirect_uri')!);
+        const cb = `${redirect.origin}${redirect.pathname}?error=${encodeURIComponent(over.error)}`;
+        http.get(cb, res=>{
+            let body = '';
+            res.on('data', d=>{ body += d; });
+            res.on('end', ()=>resolve(body));
+        });
+    });
+
 describe('auth/oauth-flow', ()=>{
     beforeEach(()=>{
         vi.clearAllMocks();
@@ -93,6 +106,19 @@ describe('auth/oauth-flow', ()=>{
                 authority: AUTHORITY, now: NOW, timeout_ms: 3000,
                 open: (url: string)=>hit_callback(url, {state: 'WRONG'}),
             })).rejects.toBeInstanceOf(RuntimeError);
+            expect(mock_fetch).not.toHaveBeenCalled();
+        });
+
+        it('HTML-escapes a reflected ?error on the loopback page (no injection)', async()=>{
+            const payload = '<img src=x onerror=alert(1)>';
+            let body: Promise<string> | undefined;
+            await expect(run_login({
+                authority: AUTHORITY, now: NOW, timeout_ms: 3000,
+                open: (url: string)=>{ body = get_callback_body(url, {error: payload}); },
+            })).rejects.toBeInstanceOf(RuntimeError);
+            const html = await body!;
+            expect(html).not.toContain('<img src=x');
+            expect(html).toContain('&lt;img src=x');
             expect(mock_fetch).not.toHaveBeenCalled();
         });
     });

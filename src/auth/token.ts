@@ -1,4 +1,4 @@
-import type {Oauth_record} from '../credentials/types';
+import type {Oauth_record, Principal} from '../credentials/types';
 
 // Refresh this many ms before the real expiry, so a token isn't sent right
 // as it lapses mid-flight.
@@ -46,16 +46,19 @@ const build_refresh_body = (p: {
 });
 
 // A token endpoint may rotate the refresh token or omit it; when omitted, keep
-// the previous one so subsequent refreshes still work.
+// the previous one so subsequent refreshes still work. The token endpoint never
+// returns the principal, so carry the previous `user` forward — otherwise the
+// first silent refresh would wipe the identity shown by `auth status`.
 const to_oauth_record = (
     resp: Token_response,
     now: number,
-    prev?: {refresh_token?: string},
+    prev?: {refresh_token?: string; user?: Principal},
 ): Oauth_record=>({
     type: 'oauth',
     access_token: resp.access_token,
     refresh_token: resp.refresh_token ?? prev?.refresh_token,
     expires_at: expires_at_from(resp, now),
+    user: prev?.user,
 });
 
 export {
