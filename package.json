@@ -1,0 +1,42 @@
+{
+    "name": "@reply-team/reply-cli",
+    "version": "0.1.0",
+    "description": "Command-line interface for Reply.io. v1: authentication (OAuth + API key) and identity.",
+    "main": "dist/index.js",
+    "bin": {
+        "reply": "dist/index.js"
+    },
+    "scripts": {
+        "build": "tsc",
+        "dev": "tsc --watch",
+        "start": "node dist/index.js",
+        "clean": "rm -rf dist",
+        "test": "vitest run",
+        "test:watch": "vitest"
+    },
+    "author": "Reply.io",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/reply-team/reply-cli.git"
+    },
+    "publishConfig": {
+        "registry": "https://npm.pkg.github.com"
+    },
+    "engines": {
+        "node": ">=20.0.0"
+    },
+    "files": [
+        "dist",
+        "README.md"
+    ],
+    "devDependencies": {
+        "@types/node": "^20.0.0",
+        "typescript": "^5.6.0",
+        "vitest": "^4.0.0"
+    },
+    "dependencies": {
+        "commander": "^14.0.2",
+        "picocolors": "^1.1.1"
+    }
+}
