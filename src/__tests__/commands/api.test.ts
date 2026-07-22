@@ -86,6 +86,24 @@ describe('handle_api', ()=>{
         expect(process.exitCode).toBe(1);
     });
 
+    it('--verbose prints a redacted req/resp trace to stderr (stdout stays {code,data})', async()=>{
+        mock_fetch.mockResolvedValue(res({ok: true}, 200));
+        const secret_store: CredentialStore = {
+            get: async()=>({type: 'api_key', key: 'SEKRET-TOKEN', user: {id: 1}}),
+            set: async()=>{}, remove: async()=>true, keys: async()=>['dev'],
+        };
+        const c: Cli_context = {
+            profile: 'dev', authority: 'https://auth', api_base: 'https://api', key: 'dev',
+            store: secret_store, refresh: async(r)=>r,
+        };
+        const {out, err} = await capture(()=>handle_api('/v3/whoami', {}, c, {verbose: true}));
+        expect(err).toContain('> GET https://api/v3/whoami');
+        expect(err).toMatch(/> Authorization: Bearer •+/);
+        expect(err).toContain('< 200');
+        expect(err).not.toContain('SEKRET-TOKEN');
+        expect(JSON.parse(out).code).toBe(200);
+    });
+
     it('prints team-conflict guidance to stderr on TEAM_REQUIRED', async()=>{
         mock_fetch.mockResolvedValue(res({code: 'TEAM_REQUIRED', teams: [{teamId: 1045, teamName: 'Acme'}]}, 403));
         const {out, err} = await capture(()=>handle_api('/contacts', {}, ctx(), {}));

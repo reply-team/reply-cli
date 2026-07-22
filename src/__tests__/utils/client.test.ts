@@ -140,10 +140,13 @@ describe('utils/client', ()=>{
     });
 
     describe('request_raw', ()=>{
-        it('returns {status,data} for a 2xx without throwing', async()=>{
+        it('returns {status,data,…} for a 2xx without throwing, Authorization redacted', async()=>{
             mock_fetch.mockResolvedValue(json_res({ok: true}, 200));
             const {request_raw} = await import('../../utils/client');
-            expect(await request_raw(BASE, 'tok', 'GET', '/x')).toEqual({status: 200, data: {ok: true}});
+            const r = await request_raw(BASE, 'tok', 'GET', '/x');
+            expect(r).toMatchObject({status: 200, data: {ok: true}});
+            expect(r.request.headers.Authorization).toMatch(/^Bearer •+$/);
+            expect(JSON.stringify(r)).not.toContain('tok');
         });
         it('returns {status,data} for a 4xx without throwing', async()=>{
             mock_fetch.mockResolvedValue(err_res(403, {code: 'TEAM_REQUIRED', teams: []}));

@@ -1,11 +1,11 @@
 import fs from 'fs';
 import {Command} from 'commander';
 import {build_context, type Cli_context} from '../context';
-import {request_raw} from '../utils/client';
+import {request_raw, type Raw_response} from '../utils/client';
 import {team_error_guidance} from '../teams';
 import {authed} from './authed';
 import {UsageError} from '../utils/errors';
-import {print, warn, type Print_opts} from '../utils/output';
+import {print, warn, REDACTED, type Print_opts} from '../utils/output';
 
 type Global_opts = {
     apiKey?: string;
@@ -15,6 +15,7 @@ type Global_opts = {
     userEmail?: string;
     json?: boolean;
     pretty?: boolean;
+    verbose?: boolean;
 };
 
 const read_globals = (cmd: Command): Global_opts=>{
@@ -22,8 +23,29 @@ const read_globals = (cmd: Command): Global_opts=>{
     return {
         apiKey: o.apiKey, profile: o.profile,
         teamId: o.teamId, userId: o.userId, userEmail: o.userEmail,
-        json: o.json, pretty: o.pretty,
+        json: o.json, pretty: o.pretty, verbose: o.verbose,
     };
+};
+
+// curl -v-style request/response trace to stderr (keeps stdout the clean
+// {code, data}). Authorization is already redacted by request_raw; redact any
+// cookie header defensively.
+const print_trace = (r: Raw_response): void=>{
+    const lines = [`> ${r.request.method} ${r.request.url}`];
+    for (const [k, v] of Object.entries(r.request.headers))
+    {
+        lines.push(`> ${k}: ${v}`);
+    }
+    if (r.request.body)
+    {
+        lines.push('>', `> ${r.request.body}`);
+    }
+    lines.push(`< ${r.status}`);
+    for (const [k, v] of Object.entries(r.response_headers))
+    {
+        lines.push(`< ${k}: ${/cookie/i.test(k) ? REDACTED : v}`);
+    }
+    console.error(lines.join('\n'));
 };
 
 const print_opts = (g: Global_opts): Print_opts=>({json: g.json, pretty: g.pretty});
@@ -96,7 +118,12 @@ const handle_api = async(
     const method = resolve_method(opts.method, body !== undefined);
     const {token, headers} = await authed(ctx, g);
     // Literal: the request URL is exactly api_base + the path the caller typed.
-    const {status, data} = await request_raw(ctx.api_base, token, method, path, body, {headers});
+    const resp = await request_raw(ctx.api_base, token, method, path, body, {headers});
+    const {status, data} = resp;
+    if (g.verbose)
+    {
+        print_trace(resp);
+    }
     print({code: status, data}, print_opts(g));
     if (status >= 400)
     {

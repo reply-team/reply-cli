@@ -9,7 +9,7 @@ import {default_credential_store} from '../credentials/file-store';
 import {describe_status, type Auth_status} from '../auth/status';
 import {principal_label} from './auth';
 import {UsageError} from '../utils/errors';
-import {get_env, env_var, type Env} from '../config';
+import {PROGRAM_NAME, get_env, env_var, type Env} from '../config';
 import {success, info, print, pc, type Print_opts} from '../utils/output';
 import type {CredentialStore, Credential_record} from '../credentials/types';
 
@@ -270,6 +270,9 @@ profile_command
     .option('--authority <url>', 'Override the OAuth authority (advanced; defaults to prod)')
     .option('--api-base <url>', 'Override the API base (advanced; defaults to prod)')
     .description('Create a profile (URLs optional — omitted fields inherit the default/prod)')
+    .addHelpText('after',
+        `\nExamples:\n  ${PROGRAM_NAME} profile add alice@reply.io`
+        + `\n  ${PROGRAM_NAME} profile add dev --api-base https://api.dev.reply.io --team-id 1045`)
     .action(function(this: Command, name: string) {
         const g = read_globals(this);
         const opts = this.optsWithGlobals();
@@ -291,6 +294,9 @@ profile_command
     .option('--authority <url>', 'Override the OAuth authority (advanced)')
     .option('--api-base <url>', 'Override the API base (advanced)')
     .description('Edit an existing profile in place — only the fields you pass change')
+    .addHelpText('after',
+        `\nExamples:\n  ${PROGRAM_NAME} profile set alice@reply.io --team-id 1045`
+        + `\n  ${PROGRAM_NAME} profile set default --team-id 1045   # pin a team globally`)
     .action(function(this: Command, name: string) {
         const g = read_globals(this);
         const opts = this.optsWithGlobals();
@@ -310,6 +316,7 @@ profile_command
     .argument('<old>', 'Existing profile to rename')
     .argument('<new>', 'New name')
     .description('Rename a profile (also moves its stored credential)')
+    .addHelpText('after', `\nExamples:\n  ${PROGRAM_NAME} profile rename alice@reply.io ally`)
     .action(async function(this: Command, old_name: string, new_name: string) {
         const g = read_globals(this);
         await handle_rename(old_name, new_name, g, {store: default_credential_store()});
@@ -321,6 +328,9 @@ profile_command
     .argument('<name>', 'Profile to delete')
     .option('-y, --yes', 'Skip the confirmation prompt')
     .description('Delete a profile and its stored credential')
+    .addHelpText('after',
+        `\nExamples:\n  ${PROGRAM_NAME} profile delete ally          # confirm y/N (interactive)`
+        + `\n  ${PROGRAM_NAME} profile delete ally --yes    # skip the prompt (required in scripts)`)
     .action(async function(this: Command, name: string) {
         const g = read_globals(this);
         await handle_delete(name, {yes: Boolean(this.opts().yes)}, g, {store: default_credential_store()});
@@ -330,6 +340,8 @@ profile_command
     .command('use')
     .argument('<name>', 'Profile to make current (a user-defined profile, or "default" for prod)')
     .description('Set the current profile, used until changed')
+    .addHelpText('after',
+        `\nExamples:\n  ${PROGRAM_NAME} profile use dev\n  ${PROGRAM_NAME} profile use default`)
     .action(function(this: Command, name: string) {
         const g = read_globals(this);
         set_current_profile(name);
@@ -346,6 +358,7 @@ profile_command
     .argument('<name>', 'Profile to edit (or "default")')
     .argument('<field>', 'Field to clear: authority | api_base | team-id')
     .description('Clear a config field on a profile (reverts to inherited/unset)')
+    .addHelpText('after', `\nExamples:\n  ${PROGRAM_NAME} profile unset dev team-id`)
     .action(function(this: Command, name: string, field: string) {
         const g = read_globals(this);
         const mapped = map_clearable(field);
@@ -394,6 +407,9 @@ profile_command
     .command('show')
     .argument('[name]', 'Profile to show (default: current)')
     .description('Show a profile\'s backend, team, and authorization (no secrets)')
+    .addHelpText('after',
+        `\nExamples:\n  ${PROGRAM_NAME} profile show          # the current profile`
+        + `\n  ${PROGRAM_NAME} profile show dev --json`)
     .action(async function(this: Command, name?: string) {
         const g = read_globals(this);
         await handle_show(name, g, {store: default_credential_store(), api_key_flag: g.apiKey});

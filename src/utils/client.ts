@@ -1,4 +1,5 @@
 import {PROGRAM_NAME, user_agent} from '../config';
+import {REDACTED} from './output';
 import {Api_error, RuntimeError, type Api_error_body} from './errors';
 
 // The v3 API auto-detects JWT (OAuth) vs API key from the same
@@ -35,6 +36,12 @@ const sleep = (ms: number): Promise<void>=>new Promise(resolve=>setTimeout(resol
 // the base or a missing leading slash on the endpoint (a query string rides along).
 const join_url = (base: string, endpoint: string): string=>
     `${base.replace(/\/+$/, '')}/${endpoint.replace(/^\/+/, '')}`;
+
+const headers_to_object = (h: Headers): Record<string, string>=>{
+    const o: Record<string, string> = {};
+    h.forEach((v, k)=>{ o[k] = v; });
+    return o;
+};
 
 const parse_body = (text: string): Api_error_body | string=>{
     if (!text)
@@ -126,9 +133,16 @@ const get = <T = unknown>(
     base_url: string, token: string, endpoint: string, opts?: Request_opts,
 ): Promise<T>=>request<T>(base_url, token, 'GET', endpoint, undefined, opts);
 
-type Raw_response = {status: number; data: unknown};
+type Raw_response = {
+    status: number;
+    data: unknown;
+    response_headers: Record<string, string>;
+    // The request as sent — Authorization pre-redacted so the raw token never
+    // leaves this function (used by `api --verbose`).
+    request: {method: string; url: string; headers: Record<string, string>; body?: string};
+};
 
-// Like `request`, but returns {status, data} for ANY final HTTP status instead
+// Like `request`, but returns {status, data, …} for ANY final HTTP status instead
 // of throwing on non-2xx — the workload `api` command needs the raw response.
 // Still retries transient statuses and throws RuntimeError only on network failure.
 const request_raw = async(
@@ -146,11 +160,17 @@ const request_raw = async(
         'User-Agent': user_agent(),
         ...(opts.headers ?? {}),
     };
+    const body_str = body !== undefined ? JSON.stringify(body) : undefined;
     const init: RequestInit = {method, headers};
-    if (body !== undefined)
+    if (body_str !== undefined)
     {
-        init.body = JSON.stringify(body);
+        init.body = body_str;
     }
+    const request_view = {
+        method, url,
+        headers: {...headers, Authorization: `Bearer ${REDACTED}`},
+        ...(body_str !== undefined ? {body: body_str} : {}),
+    };
     let attempt = 0;
     while (attempt <= MAX_RETRIES)
     {
@@ -176,7 +196,12 @@ const request_raw = async(
             continue;
         }
         const text = await res.text();
-        return {status: res.status, data: text ? parse_body(text) : null};
+        return {
+            status: res.status,
+            data: text ? parse_body(text) : null,
+            response_headers: headers_to_object(res.headers),
+            request: request_view,
+        };
     }
     throw new RuntimeError('Max retries exceeded.', {code: 'network'});
 };

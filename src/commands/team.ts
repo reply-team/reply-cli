@@ -1,4 +1,5 @@
 import {Command} from 'commander';
+import {PROGRAM_NAME} from '../config';
 import {build_context, type Cli_context} from '../context';
 import {create_client} from '../utils/client';
 import {resolve_my_teams} from '../teams';
@@ -131,6 +132,8 @@ const team_command = new Command('team')
 team_command
     .command('list')
     .description('List the teams you can act in')
+    .addHelpText('after',
+        `\nExamples:\n  ${PROGRAM_NAME} team list\n\nCalls the API (needs a stored login or --api-key).`)
     .action(async function(this: Command) {
         const g = read_globals(this);
         await handle_team_list(build_context({profile: g.profile}), g);
@@ -139,6 +142,9 @@ team_command
 team_command
     .command('current')
     .description('Show the current profile\'s pinned and effective team')
+    .addHelpText('after',
+        `\nExamples:\n  ${PROGRAM_NAME} team current\n\n`
+        + 'Pinned team is read from the profile (offline); the effective team is fetched from the API.')
     .action(async function(this: Command) {
         const g = read_globals(this);
         await handle_team_current(build_context({profile: g.profile}), g);
@@ -148,6 +154,7 @@ team_command
     .command('use')
     .argument('<id>', 'Team id to pin on the current profile')
     .description('Pin a team on the current profile (verified against your teams)')
+    .addHelpText('after', `\nExamples:\n  ${PROGRAM_NAME} team use 1045`)
     .action(async function(this: Command, id: string) {
         const g = read_globals(this);
         await handle_team_use(id, build_context({profile: g.profile}), g);

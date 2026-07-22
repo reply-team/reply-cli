@@ -31,6 +31,7 @@ const build_program = (): Command=>{
         .option('--user-email <email>', 'Act as this user email — organization API keys only (needs a team id)')
         .option('--json', 'Output compact JSON to stdout')
         .option('--pretty', 'Output indented JSON to stdout')
+        .option('--verbose', 'Print the full request/response to stderr, credentials redacted (api)')
         .showHelpAfterError();
 
     program.addCommand(auth_command);
@@ -71,6 +72,7 @@ Raw API (agent/CI escape hatch) — docs: https://docs.reply.io/api-reference/in
     ${PROGRAM_NAME} api /v3/whoami                   # GET your identity + team
     ${PROGRAM_NAME} api /v3/sequences                # GET list of sequences
     ${PROGRAM_NAME} api /v3/contacts --body @c.json  # POST (a body switches method; schema per docs)
+    ${PROGRAM_NAME} api /v3/whoami --verbose         # full req/resp to stderr (creds redacted)
   Prints {code, data}; exits non-zero on HTTP >= 400.
 
 Configuration (env vars):

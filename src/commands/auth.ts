@@ -300,6 +300,8 @@ auth_command
 auth_command
     .command('status')
     .description('Show the active credential source, method, user and OAuth expiry (no secrets)')
+    .addHelpText('after',
+        `\nExamples:\n  ${PROGRAM_NAME} auth status\n  ${PROGRAM_NAME} auth status --json\n\nRuns offline — no API call.`)
     .action(async function(this: Command) {
         const g = read_globals(this);
         await handle_status(build_context({profile: g.profile}), g);
