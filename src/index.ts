@@ -57,6 +57,10 @@ Profiles (which backend to talk to):
     ${PROGRAM_NAME} profile use dev        # used until you change it
     ${PROGRAM_NAME} profile list           # see all, * marks current
     ${PROGRAM_NAME} profile current
+    ${PROGRAM_NAME} profile show [name]    # backend, team, auth (no secrets)
+    ${PROGRAM_NAME} profile rename <old> <new>
+    ${PROGRAM_NAME} profile delete <name>  # also removes its stored credential
+    ${PROGRAM_NAME} profile unset <name> <field>   # clear authority|api_base|team-id
 
 Team & acting user (headers):
   --team-id <id>    Team/workspace to act in. Precedence: --team-id > ${PREFIX}_TEAM_ID > profile team_id.

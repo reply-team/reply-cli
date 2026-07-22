@@ -73,6 +73,21 @@ reply --profile bob@reply.io auth whoami   # override for a single command
 The active profile is resolved as `--profile` → `REPLY_PROFILE` → the profile
 set with `profile use` → the built-in default.
 
+Manage profiles after creating them:
+
+```sh
+reply profile show                         # inspect the current profile (no secrets)
+reply profile show alice@reply.io          # inspect a specific one
+reply profile rename alice@reply.io ally   # also moves the stored credential
+reply profile unset ally team-id           # clear a field (authority|api_base|team-id)
+reply profile delete ally                  # remove it and its stored credential
+```
+
+`profile show` lists the backend URLs, pinned team, and which authorization
+would be used (in priority order: `--api-key` → `REPLY_API_KEY` → stored
+credential) — it never prints tokens or keys. `--authority` and `--api-base`
+must be `http(s)` URLs.
+
 ## Environment variables
 
 | Variable | Description |
