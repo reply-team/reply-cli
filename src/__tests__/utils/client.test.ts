@@ -121,6 +121,24 @@ describe('utils/client', ()=>{
         );
     });
 
+    describe('base+path joining is slash-safe', ()=>{
+        it('collapses a double slash (base trailing / + path leading /)', async()=>{
+            mock_fetch.mockResolvedValue(json_res({ok: true}));
+            await get('https://api.reply.io/', 'tok', '/v3/whoami');
+            expect(mock_fetch.mock.calls[0][0]).toBe('https://api.reply.io/v3/whoami');
+        });
+        it('inserts a missing slash (base no-slash + path no-slash)', async()=>{
+            mock_fetch.mockResolvedValue(json_res({ok: true}));
+            await get('https://api.reply.io', 'tok', 'v3/whoami');
+            expect(mock_fetch.mock.calls[0][0]).toBe('https://api.reply.io/v3/whoami');
+        });
+        it('leaves a well-formed base+path unchanged (incl. query)', async()=>{
+            mock_fetch.mockResolvedValue(json_res({ok: true}));
+            await get('https://api.reply.io', 'tok', '/v3/contacts?limit=10');
+            expect(mock_fetch.mock.calls[0][0]).toBe('https://api.reply.io/v3/contacts?limit=10');
+        });
+    });
+
     describe('request_raw', ()=>{
         it('returns {status,data} for a 2xx without throwing', async()=>{
             mock_fetch.mockResolvedValue(json_res({ok: true}, 200));

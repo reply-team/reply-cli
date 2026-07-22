@@ -107,14 +107,22 @@ If a call needs a team and you're in more than one, the API answers with a
 ## Raw API access
 
 `reply api` is a raw, authenticated passthrough to any v3 endpoint — the
-agent/CI escape hatch. The query string is part of the path; a `--body` makes it
-a POST:
+agent/CI escape hatch. See the
+[Reply API reference](https://docs.reply.io/api-reference/introduction) for the
+full surface.
+
+Use the path exactly as it appears in the docs (starting with `/v3`); the query
+string goes in the path. The request URL is literally `api_base + path`, and the
+profile stores the host **without** `/v3`, so the call's URL matches the docs. A
+`--body` switches the method to POST (it also accepts `@file` or `-` for stdin).
 
 ```sh
-reply api /contacts?limit=10
-reply api /contacts --body '{"email":"a@b.com"}'
-echo '{"email":"a@b.com"}' | reply api /contacts --body -
-reply api /contacts/9 --method DELETE
+reply api /v3/whoami                          # your identity + team
+reply api /v3/sequences                       # list sequences
+reply api /v3/contacts --pretty               # list contacts, indented
+reply api /v3/sequences/12345                 # one sequence by id
+reply api /v3/contacts --body @contact.json   # create a contact (POST; body schema per the docs)
+echo '<json>' | reply api /v3/contacts --body -   # body from stdin
 ```
 
 It prints `{ "code": <status>, "data": <body> }` and exits non-zero on HTTP

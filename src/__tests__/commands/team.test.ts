@@ -25,7 +25,7 @@ const real_set_timeout = globalThis.setTimeout;
 let dir: string;
 const env_dir = ()=>({REPLY_CONFIG_DIR: dir});
 const ctx = (profile: string, team_id?: number): Cli_context=>({
-    profile, authority: 'https://auth', api_base: 'https://api/v3', key: profile, team_id,
+    profile, authority: 'https://auth', api_base: 'https://api', key: profile, team_id,
     store: fake_store(), refresh: async(r)=>r,
 });
 

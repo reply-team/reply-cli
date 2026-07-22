@@ -19,7 +19,7 @@ const fake_store = (): CredentialStore=>({
     get: async()=>api_key_record, set: async()=>{}, remove: async()=>true, keys: async()=>['dev'],
 });
 const ctx = (): Cli_context=>({
-    profile: 'dev', authority: 'https://auth', api_base: 'https://api/v3', key: 'dev',
+    profile: 'dev', authority: 'https://auth', api_base: 'https://api', key: 'dev',
     store: fake_store(), refresh: async(r)=>r,
 });
 
@@ -50,10 +50,11 @@ afterEach(()=>{
 });
 
 describe('handle_api', ()=>{
-    it('GETs by default and prints {code, data}', async()=>{
+    it('GETs by default and builds the URL as base + path literally', async()=>{
         mock_fetch.mockResolvedValue(res({ok: true}, 200));
-        const {out} = await capture(()=>handle_api('/x', {}, ctx(), {}));
+        const {out} = await capture(()=>handle_api('/v3/whoami', {}, ctx(), {}));
         expect(method_of()).toBe('GET');
+        expect(mock_fetch.mock.calls[0][0]).toBe('https://api/v3/whoami');
         expect(JSON.parse(out)).toEqual({code: 200, data: {ok: true}});
     });
 

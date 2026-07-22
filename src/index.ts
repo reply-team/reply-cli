@@ -45,7 +45,7 @@ Credential precedence:
 Profiles (which backend to talk to):
   Precedence: --profile <name>  >  ${PREFIX}_PROFILE  >  current profile  >  default (prod).
   Define your own profiles under "profiles" in the config file, e.g.:
-    { "profiles": { "dev": { "authority": "https://…", "api_base": "https://…/v3" } } }
+    { "profiles": { "dev": { "authority": "https://…", "api_base": "https://…" } } }
   Then set one as current so you don't repeat --profile:
     ${PROGRAM_NAME} profile use dev        # used until you change it
     ${PROGRAM_NAME} profile list           # see all, * marks current
@@ -66,10 +66,12 @@ Team & acting user (headers):
     ${PROGRAM_NAME} team use <id>          # pin a team on the current profile
     ${PROGRAM_NAME} team clear             # remove the pin
 
-Raw API (agent/CI escape hatch):
-  ${PROGRAM_NAME} api <path>               # GET; query goes in the path
-  ${PROGRAM_NAME} api <path> --body <json> # POST (inline JSON, @file, or - for stdin)
-                    Prints {code, data}; exits non-zero on HTTP >= 400.
+Raw API (agent/CI escape hatch) — docs: https://docs.reply.io/api-reference/introduction
+  Use the path as in the docs (starts with /v3); the query string goes in the path.
+    ${PROGRAM_NAME} api /v3/whoami                   # GET your identity + team
+    ${PROGRAM_NAME} api /v3/sequences                # GET list of sequences
+    ${PROGRAM_NAME} api /v3/contacts --body @c.json  # POST (a body switches method; schema per docs)
+  Prints {code, data}; exits non-zero on HTTP >= 400.
 
 Configuration (env vars):
   ${PREFIX}_API_KEY      API key used as the bearer credential
@@ -83,7 +85,7 @@ Examples:
   ${PROGRAM_NAME} --profile dev auth whoami --json
   ${PROGRAM_NAME} auth status
   ${PROGRAM_NAME} team list
-  ${PROGRAM_NAME} api /contacts?limit=10
+  ${PROGRAM_NAME} api /v3/sequences
 `);
 
     return program;

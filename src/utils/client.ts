@@ -31,6 +31,11 @@ const hint_for = (status: number): string | undefined=>{
 
 const sleep = (ms: number): Promise<void>=>new Promise(resolve=>setTimeout(resolve, ms));
 
+// Join base + endpoint with exactly one slash, tolerating a trailing slash on
+// the base or a missing leading slash on the endpoint (a query string rides along).
+const join_url = (base: string, endpoint: string): string=>
+    `${base.replace(/\/+$/, '')}/${endpoint.replace(/^\/+/, '')}`;
+
 const parse_body = (text: string): Api_error_body | string=>{
     if (!text)
     {
@@ -64,7 +69,7 @@ const request = async<T = unknown>(
     body?: unknown,
     opts: Request_opts = {},
 ): Promise<T>=>{
-    const url = `${base_url}${endpoint}`;
+    const url = join_url(base_url, endpoint);
     const headers: Record<string, string> = {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',
@@ -134,7 +139,7 @@ const request_raw = async(
     body?: unknown,
     opts: Request_opts = {},
 ): Promise<Raw_response>=>{
-    const url = `${base_url}${endpoint}`;
+    const url = join_url(base_url, endpoint);
     const headers: Record<string, string> = {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',

@@ -95,8 +95,8 @@ const handle_api = async(
     const body = read_body_arg(opts.body);
     const method = resolve_method(opts.method, body !== undefined);
     const {token, headers} = await authed(ctx, g);
-    const endpoint = path.startsWith('/') ? path : `/${path}`;
-    const {status, data} = await request_raw(ctx.api_base, token, method, endpoint, body, {headers});
+    // Literal: the request URL is exactly api_base + the path the caller typed.
+    const {status, data} = await request_raw(ctx.api_base, token, method, path, body, {headers});
     print({code: status, data}, print_opts(g));
     if (status >= 400)
     {
@@ -110,15 +110,21 @@ const handle_api = async(
 };
 
 const api_command = new Command('api')
-    .argument('<path>', 'v3 path incl. query string, e.g. /contacts?limit=10')
+    .argument('<path>', 'v3 path as in the docs, e.g. /v3/whoami; query goes in the path')
     .option('--method <verb>', 'HTTP method (default GET; POST when --body is given)')
     .option('--body <json>', 'JSON body: inline, @file, or - for stdin')
     .description('Raw authenticated request to a v3 endpoint; prints {code, data}')
     .addHelpText('after',
-        '\nExamples:\n'
-        + '  reply api /contacts?limit=10\n'
-        + '  reply api /contacts --body \'{"email":"a@b.com"}\'\n'
-        + '  echo \'{"email":"a@b.com"}\' | reply api /contacts --body -')
+        '\nDocs: https://docs.reply.io/api-reference/introduction\n'
+        + '\nUse the path exactly as in the docs (starts with /v3); the query string\n'
+        + 'goes in the path.\n'
+        + '\nExamples:\n'
+        + '  reply api /v3/whoami                        # your identity + team\n'
+        + '  reply api /v3/sequences                     # list sequences\n'
+        + '  reply api /v3/contacts --pretty             # list contacts (indented)\n'
+        + '  reply api /v3/sequences/12345               # one sequence by id\n'
+        + '  reply api /v3/contacts --body @contact.json # create a contact (POST; body per docs)\n'
+        + '  echo \'<json>\' | reply api /v3/contacts --body -   # body from stdin')
     .action(async function(this: Command, path: string) {
         const g = read_globals(this);
         const o = this.opts();

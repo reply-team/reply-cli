@@ -17,10 +17,12 @@ type Profile = {
 
 const DEFAULT_NAME = 'default';
 
-// The embedded default profile: prod. Everything inherits from this.
+// The embedded default profile: prod. Everything inherits from this. The
+// api_base is the HOST only — the /v3 version prefix lives in the request path
+// (so a raw `api` call's URL matches the docs), not in the profile.
 const EMBEDDED = {
     authority: 'https://oauth.reply.io',
-    api_base: 'https://api.reply.io/v3',
+    api_base: 'https://api.reply.io',
 };
 // Back-compat alias for callers/tests referencing the prod target.
 const PROD = EMBEDDED;

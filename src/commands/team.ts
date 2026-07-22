@@ -56,7 +56,7 @@ const handle_team_list = async(ctx: Cli_context, g: Global_opts): Promise<void>=
     for (const t of teams)
     {
         const marker = t.team_id === ctx.team_id ? pc.green('*') : ' ';
-        console.log(`  ${marker} ${t.team_id}  ${t.team_name}`);
+        console.log(`  ${marker} ${t.team_id}${t.team_name ? '  ' + t.team_name : ''}`);
     }
 };
 
@@ -68,7 +68,7 @@ const handle_team_current = async(ctx: Cli_context, g: Global_opts): Promise<voi
     let effective: {team_id?: number; error?: string};
     try {
         const {token, headers} = await authed(ctx, g);
-        const raw = await create_client(ctx.api_base, token, headers).get<Record<string, unknown>>('/whoami');
+        const raw = await create_client(ctx.api_base, token, headers).get<Record<string, unknown>>('/v3/whoami');
         effective = {team_id: normalize_principal(raw ?? {}).team_id};
     } catch (e) {
         effective = {error: (e as Error).message};
@@ -106,7 +106,8 @@ const handle_team_use = async(id_arg: string, ctx: Cli_context, g: Global_opts):
         print({profile: ctx.profile, team_id: id, team_name: match.team_name}, print_opts(g));
         return;
     }
-    success(`Profile '${ctx.profile}' team set to ${id} (${match.team_name}).`);
+    const label = match.team_name ? ` (${match.team_name})` : '';
+    success(`Profile '${ctx.profile}' team set to ${id}${label}.`);
 };
 
 const handle_team_clear = (ctx: Cli_context, g: Global_opts): void=>{

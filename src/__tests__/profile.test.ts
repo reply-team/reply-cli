@@ -23,14 +23,14 @@ describe('profile — no environment abstraction, only a default + user profiles
     it('resolves the built-in default to prod when nothing is set and no config exists', ()=>{
         const p = resolve_profile(undefined, env_for());
         expect(p).toEqual({name: 'default', authority: PROD.authority, api_base: PROD.api_base});
-        expect(p.api_base).toBe('https://api.reply.io/v3');
+        expect(p.api_base).toBe('https://api.reply.io');
         expect(p.authority).toBe('https://oauth.reply.io');
     });
 
     it('selects a user-defined profile via --profile', ()=>{
-        write_config({profiles: {dev: {authority: 'https://oauth.dev.replyapp.io', api_base: 'https://api.dev.reply.io/v3'}}});
+        write_config({profiles: {dev: {authority: 'https://oauth.dev.replyapp.io', api_base: 'https://api.dev.reply.io'}}});
         const p = resolve_profile('dev', env_for());
-        expect(p).toMatchObject({name: 'dev', authority: 'https://oauth.dev.replyapp.io', api_base: 'https://api.dev.reply.io/v3'});
+        expect(p).toMatchObject({name: 'dev', authority: 'https://oauth.dev.replyapp.io', api_base: 'https://api.dev.reply.io'});
     });
 
     it('uses REPLY_PROFILE when no flag is given', ()=>{
@@ -56,10 +56,10 @@ describe('profile — no environment abstraction, only a default + user profiles
     });
 
     it('strips trailing slashes from profile URLs', ()=>{
-        write_config({profiles: {dev: {authority: 'https://a/', api_base: 'https://b/v3/'}}});
+        write_config({profiles: {dev: {authority: 'https://a/', api_base: 'https://b/'}}});
         const p = resolve_profile('dev', env_for());
         expect(p.authority).toBe('https://a');
-        expect(p.api_base).toBe('https://b/v3');
+        expect(p.api_base).toBe('https://b');
     });
 
     it('inherits missing URLs from the embedded default (prod)', ()=>{
@@ -69,10 +69,10 @@ describe('profile — no environment abstraction, only a default + user profiles
     });
 
     it('inherits per-field: overrides api_base but keeps the prod authority', ()=>{
-        write_config({profiles: {stg: {api_base: 'https://api.stage.reply.io/v3'}}});
+        write_config({profiles: {stg: {api_base: 'https://api.stage.reply.io'}}});
         const p = resolve_profile('stg', env_for());
         expect(p.authority).toBe(PROD.authority);
-        expect(p.api_base).toBe('https://api.stage.reply.io/v3');
+        expect(p.api_base).toBe('https://api.stage.reply.io');
     });
 
     it('throws a RuntimeError on a corrupt config file', ()=>{
@@ -141,9 +141,9 @@ describe('profile — add (create, URLs optional)', ()=>{
     });
 
     it('creates a profile with explicit URLs', ()=>{
-        add_profile('dev', {authority: 'https://oauth.dev.replyapp.io', api_base: 'https://api.dev.reply.io/v3'}, env_for());
+        add_profile('dev', {authority: 'https://oauth.dev.replyapp.io', api_base: 'https://api.dev.reply.io'}, env_for());
         expect(resolve_profile('dev', env_for())).toMatchObject({
-            authority: 'https://oauth.dev.replyapp.io', api_base: 'https://api.dev.reply.io/v3',
+            authority: 'https://oauth.dev.replyapp.io', api_base: 'https://api.dev.reply.io',
         });
     });
 
@@ -313,11 +313,11 @@ describe('profile — unset_profile_field', ()=>{
 
 describe('profile — describe_profile', ()=>{
     it('marks inherited URLs and reports team_id + current', ()=>{
-        add_profile('dev', {api_base: 'https://api.dev.reply.io/v3', team_id: 7}, env_for());
+        add_profile('dev', {api_base: 'https://api.dev.reply.io', team_id: 7}, env_for());
         set_current_profile('dev', env_for());
         const d = describe_profile('dev', env_for());
         expect(d.name).toBe('dev');
-        expect(d.api_base).toBe('https://api.dev.reply.io/v3');
+        expect(d.api_base).toBe('https://api.dev.reply.io');
         expect(d.authority).toBe(PROD.authority);
         expect(d.inherited).toEqual({authority: true, api_base: false});
         expect(d.team_id).toBe(7);

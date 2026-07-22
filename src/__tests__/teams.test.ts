@@ -30,7 +30,7 @@ describe('parse_teams', ()=>{
 });
 
 describe('resolve_my_teams', ()=>{
-    const deps = {api_base: 'https://api/v3', token: 'tok'};
+    const deps = {api_base: 'https://api', token: 'tok'};
 
     it('maps a 200 team-users array to distinct teams', async()=>{
         mock_fetch.mockResolvedValue(res([{teamId: 1, teamName: 'A'}, {teamId: 2, teamName: 'B'}]));
@@ -45,6 +45,20 @@ describe('resolve_my_teams', ()=>{
     it('throws when the list is genuinely unavailable (USER_NOT_FOUND 401)', async()=>{
         mock_fetch.mockResolvedValue(res({code: 'USER_NOT_FOUND'}, 401));
         await expect(resolve_my_teams(deps)).rejects.toThrow(RuntimeError);
+    });
+
+    it('falls back to the single whoami team when team-users is org-only', async()=>{
+        mock_fetch
+            .mockResolvedValueOnce(res({code: 'workspace.organizationRequired', title: 'Forbidden'}, 403))
+            .mockResolvedValueOnce(res({userId: 1, username: 'a', teamId: 1045}, 200));
+        expect(await resolve_my_teams(deps)).toEqual([{team_id: 1045, team_name: ''}]);
+    });
+
+    it('returns [] when org-only and whoami has no team', async()=>{
+        mock_fetch
+            .mockResolvedValueOnce(res({code: 'workspace.organizationRequired'}, 403))
+            .mockResolvedValueOnce(res({userId: 1}, 200));
+        expect(await resolve_my_teams(deps)).toEqual([]);
     });
 });
 

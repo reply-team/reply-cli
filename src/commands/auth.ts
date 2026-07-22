@@ -81,7 +81,7 @@ const principal_label = (p: Principal): string=>{
 const fetch_whoami = async(
     api_base: string, token: string, headers?: Record<string, string>,
 ): Promise<Record<string, unknown>>=>{
-    const raw = await create_client(api_base, token, headers).get<Record<string, unknown>>('/whoami');
+    const raw = await create_client(api_base, token, headers).get<Record<string, unknown>>('/v3/whoami');
     return raw ?? {};
 };
 

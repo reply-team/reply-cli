@@ -3,8 +3,11 @@ import {RuntimeError} from './utils/errors';
 
 type Team = {team_id: number; team_name: string};
 
-const TEAM_USERS_ENDPOINT = '/whoami/team-users';
+const TEAM_USERS_ENDPOINT = '/v3/whoami/team-users';
+const WHOAMI_ENDPOINT = '/v3/whoami';
 const TEAMS_IN_BODY_CODES = ['TEAM_REQUIRED', 'TEAM_NOT_ACCESSIBLE'];
+// team-users is organization-only; a personal account has just its own team.
+const ORG_ONLY_CODE = 'workspace.organizationRequired';
 
 const read_team = (item: unknown): Team | undefined=>{
     if (typeof item !== 'object' || item === null)
@@ -43,9 +46,26 @@ const parse_teams = (raw: unknown): Team[]=>{
 
 type Teams_deps = {api_base: string; token: string; headers?: Record<string, string>};
 
+// A personal (non-org) account has exactly one team — its own — which team-users
+// won't list but whoami reports. Return that single team ({team_name} unknown).
+const single_team_from_whoami = async(deps: Teams_deps): Promise<Team[]>=>{
+    const {status, data} = await request_raw(
+        deps.api_base, deps.token, 'GET', WHOAMI_ENDPOINT, undefined, {headers: deps.headers});
+    if (status >= 200 && status < 300 && typeof data === 'object' && data !== null)
+    {
+        const id = (data as Record<string, unknown>).teamId;
+        if (typeof id === 'number' && Number.isInteger(id))
+        {
+            return [{team_id: id, team_name: ''}];
+        }
+    }
+    return [];
+};
+
 // The teams the caller can act in. Resilient: the list is the same whether
 // /whoami/team-users returns 200, or a TEAM_REQUIRED/TEAM_NOT_ACCESSIBLE 403
-// (whose body carries the same teams[]). Any other outcome throws — the caller
+// (whose body carries the same teams[]). When team-users is organization-only,
+// fall back to the single whoami team. Any other outcome throws — the caller
 // decides how to degrade.
 const resolve_my_teams = async(deps: Teams_deps): Promise<Team[]>=>{
     const {status, data} = await request_raw(
@@ -59,6 +79,10 @@ const resolve_my_teams = async(deps: Teams_deps): Promise<Team[]>=>{
     if (status === 403 && code && TEAMS_IN_BODY_CODES.includes(code))
     {
         return parse_teams(body.teams);
+    }
+    if (status === 403 && code === ORG_ONLY_CODE)
+    {
+        return single_team_from_whoami(deps);
     }
     throw new RuntimeError('Could not list your teams.', {
         code: 'teams.unavailable',
