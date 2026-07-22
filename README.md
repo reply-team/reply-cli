@@ -2,8 +2,9 @@
 
 `reply` is the command-line interface for [Reply.io](https://reply.io). Sign in
 once and every Reply.io API request runs as you — from your terminal or your
-scripts. Today it handles authentication and identity; resource commands for
-sequences, contacts, and the inbox are on the way.
+scripts. Today it handles authentication and identity, and `reply api` gives you
+authenticated access to the full v3 API; higher-level commands for sequences,
+contacts, and the inbox are on the way.
 
 ## Installation
 
