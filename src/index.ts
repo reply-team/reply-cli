@@ -1,20 +1,11 @@
 #!/usr/bin/env node
-import fs from 'fs';
-import path from 'path';
 import {Command, CommanderError} from 'commander';
-import {PROGRAM_NAME} from './config';
+import {PROGRAM_NAME, cli_version} from './config';
 import {auth_command} from './commands/auth';
 import {profile_command} from './commands/profile';
+import {team_command} from './commands/team';
+import {api_command} from './commands/api';
 import {CliError} from './utils/errors';
-
-const read_version = (): string=>{
-    try {
-        const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf-8'));
-        return pkg.version || '0.0.0';
-    } catch {
-        return '0.0.0';
-    }
-};
 
 // Route every command through commander's throwing mode so usage errors reach
 // our handler and map to exit code 2 (vs 1 for runtime/API failures).
@@ -32,7 +23,7 @@ const build_program = (): Command=>{
     program
         .name(PROGRAM_NAME)
         .description('Command-line interface for Reply.io — authentication and identity (v1).')
-        .version(read_version(), '-v, --version')
+        .version(cli_version(), '-v, --version')
         .option('-k, --api-key <key>', 'API key (overrides env var and stored credential)')
         .option('-p, --profile <name>', 'Named backend profile (default: prod)')
         .option('--team-id <id>', `Team/workspace to act in (X-TEAM-ID); else ${PREFIX}_TEAM_ID or the profile`)
@@ -40,10 +31,13 @@ const build_program = (): Command=>{
         .option('--user-email <email>', 'Act as this user email — organization API keys only (needs a team id)')
         .option('--json', 'Output compact JSON to stdout')
         .option('--pretty', 'Output indented JSON to stdout')
+        .option('--verbose', 'Print the full request/response to stderr, credentials redacted (api)')
         .showHelpAfterError();
 
     program.addCommand(auth_command);
     program.addCommand(profile_command);
+    program.addCommand(team_command);
+    program.addCommand(api_command);
 
     program.addHelpText('after', `
 Credential precedence:
@@ -52,17 +46,34 @@ Credential precedence:
 Profiles (which backend to talk to):
   Precedence: --profile <name>  >  ${PREFIX}_PROFILE  >  current profile  >  default (prod).
   Define your own profiles under "profiles" in the config file, e.g.:
-    { "profiles": { "dev": { "authority": "https://…", "api_base": "https://…/v3" } } }
+    { "profiles": { "dev": { "authority": "https://…", "api_base": "https://…" } } }
   Then set one as current so you don't repeat --profile:
     ${PROGRAM_NAME} profile use dev        # used until you change it
     ${PROGRAM_NAME} profile list           # see all, * marks current
     ${PROGRAM_NAME} profile current
+    ${PROGRAM_NAME} profile show [name]    # backend, team, auth (no secrets)
+    ${PROGRAM_NAME} profile rename <old> <new>
+    ${PROGRAM_NAME} profile delete <name>  # also removes its stored credential
+    ${PROGRAM_NAME} profile unset <name> <field>   # clear authority|api_base|team-id
 
 Team & acting user (headers):
   --team-id <id>    Team/workspace to act in. Precedence: --team-id > ${PREFIX}_TEAM_ID > profile team_id.
                     Pin one on a profile: ${PROGRAM_NAME} profile set <name> --team-id <id>
   --user-id <id> / --user-email <email>   Identify the acting user for an ORGANIZATION API key.
                     Flag-only (never env, never stored); pass exactly one; --user-email also needs a team id.
+  Team commands (see & set the current profile's team):
+    ${PROGRAM_NAME} team list              # teams you can act in (* marks the profile's)
+    ${PROGRAM_NAME} team current           # pinned + effective team
+    ${PROGRAM_NAME} team use <id>          # pin a team on the current profile
+    ${PROGRAM_NAME} team clear             # remove the pin
+
+Raw API (agent/CI escape hatch) — docs: https://docs.reply.io/api-reference/introduction
+  Use the path as in the docs (starts with /v3); the query string goes in the path.
+    ${PROGRAM_NAME} api /v3/whoami                   # GET your identity + team
+    ${PROGRAM_NAME} api /v3/sequences                # GET list of sequences
+    ${PROGRAM_NAME} api /v3/contacts --body @c.json  # POST (a body switches method; schema per docs)
+    ${PROGRAM_NAME} api /v3/whoami --verbose         # full req/resp to stderr (creds redacted)
+  Prints {code, data}; exits non-zero on HTTP >= 400.
 
 Configuration (env vars):
   ${PREFIX}_API_KEY      API key used as the bearer credential
@@ -75,6 +86,8 @@ Examples:
   echo <key> | ${PROGRAM_NAME} auth login --with-token
   ${PROGRAM_NAME} --profile dev auth whoami --json
   ${PROGRAM_NAME} auth status
+  ${PROGRAM_NAME} team list
+  ${PROGRAM_NAME} api /v3/sequences
 `);
 
     return program;

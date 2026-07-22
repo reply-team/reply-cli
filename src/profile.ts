@@ -17,10 +17,12 @@ type Profile = {
 
 const DEFAULT_NAME = 'default';
 
-// The embedded default profile: prod. Everything inherits from this.
+// The embedded default profile: prod. Everything inherits from this. The
+// api_base is the HOST only — the /v3 version prefix lives in the request path
+// (so a raw `api` call's URL matches the docs), not in the profile.
 const EMBEDDED = {
     authority: 'https://oauth.reply.io',
-    api_base: 'https://api.reply.io/v3',
+    api_base: 'https://api.reply.io',
 };
 // Back-compat alias for callers/tests referencing the prod target.
 const PROD = EMBEDDED;
@@ -132,6 +134,33 @@ const resolve_profile = (flag?: string, env: Env = process.env): Profile=>{
 const current_profile_name = (env: Env = process.env): string=>
     persisted_current(read_config(env)) || DEFAULT_NAME;
 
+type Profile_description = {
+    name: string;
+    authority: string;
+    api_base: string;
+    team_id?: number;
+    is_current: boolean;
+    inherited: {authority: boolean; api_base: boolean};
+};
+
+// Resolved view of a profile for `profile show`: resolved values plus flags for
+// which URLs are inherited (not explicitly set) and whether it's current. No
+// credentials/secrets — the command layer adds a redacted credential summary.
+const describe_profile = (name: string, env: Env = process.env): Profile_description=>{
+    const resolved = resolve_profile(name, env);   // throws UsageError if unknown
+    const cfg = read_config(env);
+    const raw = get_profiles(cfg, env)[name] ?? {};
+    const explicit = (v: unknown): boolean=>typeof v === 'string' && v.trim().length > 0;
+    return {
+        name: resolved.name,
+        authority: resolved.authority,
+        api_base: resolved.api_base,
+        ...(resolved.team_id !== undefined ? {team_id: resolved.team_id} : {}),
+        is_current: (persisted_current(cfg) || DEFAULT_NAME) === name,
+        inherited: {authority: !explicit(raw.authority), api_base: !explicit(raw.api_base)},
+    };
+};
+
 const list_profiles = (env: Env = process.env): {current: string; available: string[]}=>{
     const cfg = read_config(env);
     const names = new Set<string>([DEFAULT_NAME, ...Object.keys(get_profiles(cfg, env))]);
@@ -145,6 +174,9 @@ const write_config = (cfg: Record<string, unknown>, env: Env): void=>{
 };
 
 type Profile_fields = {authority?: string; api_base?: string; team_id?: number};
+
+type Clearable_field = 'authority' | 'api_base' | 'team_id';
+const CLEARABLE_FIELDS: readonly Clearable_field[] = ['authority', 'api_base', 'team_id'];
 
 // Apply the given fields onto a profile def, in place (only fields actually
 // provided are written, so merges are non-destructive).
@@ -218,6 +250,116 @@ const set_profile = (
     write_config(cfg, env);
 };
 
+// Rename a profile's config entry. Config-only — the credential move is done by
+// the command layer (see commands/profile.ts handle_rename), which also guards
+// against clobbering a login. `default` is the built-in slot: neither source nor
+// target. Validation order matches the spec.
+const rename_profile_def = (
+    old_name: string,
+    new_name: string,
+    env: Env = process.env,
+): void=>{
+    if (old_name === DEFAULT_NAME)
+    {
+        throw new UsageError('The built-in default profile can\'t be renamed.', {code: 'usage.profile'});
+    }
+    const cfg = read_config(env) as Record<string, unknown>;
+    const profiles = get_profiles(cfg as Config, env);
+    if (!profiles[old_name])
+    {
+        throw new UsageError(`Unknown profile '${old_name}'.`, {
+            code: 'usage.profile', hint: 'List profiles with `profile list`.',
+        });
+    }
+    if (!new_name.trim())
+    {
+        throw new UsageError('A profile name is required.', {code: 'usage.profile'});
+    }
+    if (new_name === DEFAULT_NAME)
+    {
+        throw new UsageError('Can\'t rename to the built-in default.', {code: 'usage.profile'});
+    }
+    if (new_name === old_name)
+    {
+        throw new UsageError('New name is the same as the old name.', {code: 'usage.profile'});
+    }
+    if (profiles[new_name])
+    {
+        throw new UsageError(`Profile '${new_name}' already exists.`, {
+            code: 'usage.profile', hint: 'Delete or rename it first, or pick another name.',
+        });
+    }
+    profiles[new_name] = profiles[old_name];
+    delete profiles[old_name];
+    cfg.profiles = profiles;
+    if (persisted_current(cfg as Config) === old_name)
+    {
+        cfg.current_profile = new_name;
+    }
+    write_config(cfg, env);
+};
+
+// Remove a profile's config entry. Config-only — the credential removal is done
+// by the command layer (handle_delete). Returns whether the deleted profile was
+// current so the caller can report the reset to default.
+const delete_profile_def = (name: string, env: Env = process.env): {was_current: boolean}=>{
+    if (name === DEFAULT_NAME)
+    {
+        throw new UsageError('The built-in default profile can\'t be deleted.', {code: 'usage.profile'});
+    }
+    const cfg = read_config(env) as Record<string, unknown>;
+    const profiles = get_profiles(cfg as Config, env);
+    if (!profiles[name])
+    {
+        throw new UsageError(`Unknown profile '${name}'.`, {
+            code: 'usage.profile', hint: 'List profiles with `profile list`.',
+        });
+    }
+    delete profiles[name];
+    cfg.profiles = profiles;
+    const was_current = persisted_current(cfg as Config) === name;
+    if (was_current)
+    {
+        delete cfg.current_profile;   // revert to the built-in default
+    }
+    write_config(cfg, env);
+    return {was_current};
+};
+
+// Clear one config field on a profile, reverting it to inherited (URLs) or unset
+// (team_id). `default` is allowed (to clear an override / team pin). Never touches
+// the profile name or credentials. Idempotent — a no-op returns {changed:false}.
+const unset_profile_field = (
+    name: string,
+    field: Clearable_field,
+    env: Env = process.env,
+): {changed: boolean}=>{
+    if (!CLEARABLE_FIELDS.includes(field))
+    {
+        throw new UsageError(`Can't clear '${field}'.`, {
+            code: 'usage.profile', hint: `Clearable fields: ${CLEARABLE_FIELDS.join(', ')}.`,
+        });
+    }
+    const cfg = read_config(env) as Record<string, unknown>;
+    const profiles = get_profiles(cfg as Config, env);
+    if (name !== DEFAULT_NAME && !profiles[name])
+    {
+        throw new UsageError(`Unknown profile '${name}'.`, {
+            code: 'usage.profile', hint: 'List profiles with `profile list`.',
+        });
+    }
+    const def: Profile_def = {...(profiles[name] ?? {})};
+    if (!(field in def))
+    {
+        return {changed: false};
+    }
+    delete (def as Record<string, unknown>)[field];
+    profiles[name] = def;
+    cfg.profiles = profiles;
+    write_config(cfg, env);
+    return {changed: true};
+};
+
 // Persist the current profile. Validates the name resolves first (so you can't
 // set current to an unknown profile), then writes current_profile.
 const set_current_profile = (name: string, env: Env = process.env): void=>{
@@ -227,5 +369,5 @@ const set_current_profile = (name: string, env: Env = process.env): void=>{
     write_config(cfg, env);
 };
 
-export {resolve_profile, current_profile_name, list_profiles, set_current_profile, add_profile, set_profile, EMBEDDED, PROD};
-export type {Profile, Profile_fields};
+export {resolve_profile, current_profile_name, list_profiles, set_current_profile, add_profile, set_profile, rename_profile_def, delete_profile_def, unset_profile_field, describe_profile, EMBEDDED, PROD};
+export type {Profile, Profile_fields, Clearable_field, Profile_description};

@@ -120,4 +120,67 @@ describe('utils/client', ()=>{
             expect.objectContaining({headers: expect.objectContaining({'X-TEAM-ID': '9'})}),
         );
     });
+
+    describe('base+path joining is slash-safe', ()=>{
+        it('collapses a double slash (base trailing / + path leading /)', async()=>{
+            mock_fetch.mockResolvedValue(json_res({ok: true}));
+            await get('https://api.reply.io/', 'tok', '/v3/whoami');
+            expect(mock_fetch.mock.calls[0][0]).toBe('https://api.reply.io/v3/whoami');
+        });
+        it('inserts a missing slash (base no-slash + path no-slash)', async()=>{
+            mock_fetch.mockResolvedValue(json_res({ok: true}));
+            await get('https://api.reply.io', 'tok', 'v3/whoami');
+            expect(mock_fetch.mock.calls[0][0]).toBe('https://api.reply.io/v3/whoami');
+        });
+        it('leaves a well-formed base+path unchanged (incl. query)', async()=>{
+            mock_fetch.mockResolvedValue(json_res({ok: true}));
+            await get('https://api.reply.io', 'tok', '/v3/contacts?limit=10');
+            expect(mock_fetch.mock.calls[0][0]).toBe('https://api.reply.io/v3/contacts?limit=10');
+        });
+    });
+
+    describe('request_raw', ()=>{
+        it('returns {status,data,…} for a 2xx without throwing, Authorization redacted', async()=>{
+            mock_fetch.mockResolvedValue(json_res({ok: true}, 200));
+            const {request_raw} = await import('../../utils/client');
+            const r = await request_raw(BASE, 'tok', 'GET', '/x');
+            expect(r).toMatchObject({status: 200, data: {ok: true}});
+            expect(r.request.headers.Authorization).toMatch(/^Bearer •+$/);
+            expect(JSON.stringify(r)).not.toContain('tok');
+        });
+        it('returns {status,data} for a 4xx without throwing', async()=>{
+            mock_fetch.mockResolvedValue(err_res(403, {code: 'TEAM_REQUIRED', teams: []}));
+            const {request_raw} = await import('../../utils/client');
+            const r = await request_raw(BASE, 'tok', 'GET', '/x');
+            expect(r.status).toBe(403);
+            expect((r.data as {code: string}).code).toBe('TEAM_REQUIRED');
+        });
+        it('serializes a body and sets the method', async()=>{
+            mock_fetch.mockResolvedValue(json_res({id: 1}, 201));
+            const {request_raw} = await import('../../utils/client');
+            await request_raw(BASE, 'tok', 'POST', '/x', {a: 1});
+            const [, init] = mock_fetch.mock.calls[0];
+            expect(init.method).toBe('POST');
+            expect(init.body).toBe('{"a":1}');
+        });
+        it('retries a transient 503 then returns', async()=>{
+            instant_timers();
+            mock_fetch.mockResolvedValueOnce(err_res(503)).mockResolvedValueOnce(json_res({ok: true}));
+            const {request_raw} = await import('../../utils/client');
+            expect((await request_raw(BASE, 'tok', 'GET', '/x')).status).toBe(200);
+        });
+        it('throws RuntimeError on network failure after retries', async()=>{
+            instant_timers();
+            mock_fetch.mockRejectedValue(new TypeError('fetch failed'));
+            const {request_raw} = await import('../../utils/client');
+            await expect(request_raw(BASE, 'tok', 'GET', '/x')).rejects.toThrow(RuntimeError);
+        });
+    });
+
+    it('sends a User-Agent identifying the CLI on every request', async()=>{
+        mock_fetch.mockResolvedValue(json_res({ok: true}));
+        await get(BASE, 'tok', '/x');
+        const [, init] = mock_fetch.mock.calls[0];
+        expect(init.headers['User-Agent']).toMatch(/^reply-cli\/\d+\.\d+\.\d+/);
+    });
 });

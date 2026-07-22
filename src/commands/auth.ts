@@ -81,7 +81,7 @@ const principal_label = (p: Principal): string=>{
 const fetch_whoami = async(
     api_base: string, token: string, headers?: Record<string, string>,
 ): Promise<Record<string, unknown>>=>{
-    const raw = await create_client(api_base, token, headers).get<Record<string, unknown>>('/whoami');
+    const raw = await create_client(api_base, token, headers).get<Record<string, unknown>>('/v3/whoami');
     return raw ?? {};
 };
 
@@ -300,6 +300,8 @@ auth_command
 auth_command
     .command('status')
     .description('Show the active credential source, method, user and OAuth expiry (no secrets)')
+    .addHelpText('after',
+        `\nExamples:\n  ${PROGRAM_NAME} auth status\n  ${PROGRAM_NAME} auth status --json\n\nRuns offline — no API call.`)
     .action(async function(this: Command) {
         const g = read_globals(this);
         await handle_status(build_context({profile: g.profile}), g);

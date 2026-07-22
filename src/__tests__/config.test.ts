@@ -1,6 +1,6 @@
 import {describe, it, expect} from 'vitest';
 import path from 'path';
-import {APP_NAME, env_var, default_config_dir, config_dir} from '../config';
+import {APP_NAME, env_var, default_config_dir, config_dir, cli_version, user_agent} from '../config';
 
 describe('config', ()=>{
     describe('env_var', ()=>{
@@ -49,6 +49,18 @@ describe('config', ()=>{
         it('ignores a blank override and falls through to the default', ()=>{
             const override = {[`${APP_NAME.toUpperCase()}_CONFIG_DIR`]: '  '};
             expect(config_dir(override)).toBe(default_config_dir(process.platform, override, require('os').homedir()));
+        });
+    });
+
+    describe('cli_version / user_agent', ()=>{
+        it('cli_version returns the package.json version', ()=>{
+            const pkg = require('../../package.json');
+            expect(cli_version()).toBe(pkg.version);
+        });
+
+        it('user_agent is <app>-cli/<version> and identifies the CLI', ()=>{
+            expect(user_agent()).toBe(`${APP_NAME}-cli/${cli_version()}`);
+            expect(user_agent().startsWith('reply-cli/')).toBe(true);
         });
     });
 });
