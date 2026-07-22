@@ -123,11 +123,13 @@ reply api /v3/contacts --pretty               # list contacts, indented
 reply api /v3/sequences/12345                 # one sequence by id
 reply api /v3/contacts --body @contact.json   # create a contact (POST; body schema per the docs)
 echo '<json>' | reply api /v3/contacts --body -   # body from stdin
+reply api /v3/whoami --verbose                # full request/response on stderr
 ```
 
 It prints `{ "code": <status>, "data": <body> }` and exits non-zero on HTTP
 `>= 400`. On a team/user-resolution conflict it adds a short fix-it hint on
-stderr.
+stderr. Add `--verbose` for a full request/response trace on stderr with
+credentials redacted; stdout stays the plain JSON, so pipes keep working.
 
 ## Environment variables
 
@@ -135,6 +137,7 @@ stderr.
 |----------|-------------|
 | `REPLY_API_KEY` | API key used as the credential for the current invocation |
 | `REPLY_PROFILE` | Profile to use (same as `--profile`) |
+| `REPLY_TEAM_ID` | Team/workspace id sent as `X-TEAM-ID` (same as `--team-id`) |
 | `REPLY_CONFIG_DIR` | Config directory (default `~/.config/reply`; `%APPDATA%\reply` on Windows) |
 
 ## Contributing
