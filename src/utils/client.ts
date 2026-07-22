@@ -1,4 +1,4 @@
-import {PROGRAM_NAME} from '../config';
+import {PROGRAM_NAME, user_agent} from '../config';
 import {Api_error, RuntimeError, type Api_error_body} from './errors';
 
 // The v3 API auto-detects JWT (OAuth) vs API key from the same
@@ -68,6 +68,7 @@ const request = async<T = unknown>(
     const headers: Record<string, string> = {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',
+        'User-Agent': user_agent(),   // identifies CLI traffic for telemetry (REPLY-51325)
         ...(opts.headers ?? {}),
     };
     const init: RequestInit = {method, headers};

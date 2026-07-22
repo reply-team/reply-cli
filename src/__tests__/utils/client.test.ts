@@ -120,4 +120,11 @@ describe('utils/client', ()=>{
             expect.objectContaining({headers: expect.objectContaining({'X-TEAM-ID': '9'})}),
         );
     });
+
+    it('sends a User-Agent identifying the CLI on every request', async()=>{
+        mock_fetch.mockResolvedValue(json_res({ok: true}));
+        await get(BASE, 'tok', '/x');
+        const [, init] = mock_fetch.mock.calls[0];
+        expect(init.headers['User-Agent']).toMatch(/^reply-cli\/\d+\.\d+\.\d+/);
+    });
 });

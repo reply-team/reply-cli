@@ -1,20 +1,9 @@
 #!/usr/bin/env node
-import fs from 'fs';
-import path from 'path';
 import {Command, CommanderError} from 'commander';
-import {PROGRAM_NAME} from './config';
+import {PROGRAM_NAME, cli_version} from './config';
 import {auth_command} from './commands/auth';
 import {profile_command} from './commands/profile';
 import {CliError} from './utils/errors';
-
-const read_version = (): string=>{
-    try {
-        const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf-8'));
-        return pkg.version || '0.0.0';
-    } catch {
-        return '0.0.0';
-    }
-};
 
 // Route every command through commander's throwing mode so usage errors reach
 // our handler and map to exit code 2 (vs 1 for runtime/API failures).
@@ -32,7 +21,7 @@ const build_program = (): Command=>{
     program
         .name(PROGRAM_NAME)
         .description('Command-line interface for Reply.io — authentication and identity (v1).')
-        .version(read_version(), '-v, --version')
+        .version(cli_version(), '-v, --version')
         .option('-k, --api-key <key>', 'API key (overrides env var and stored credential)')
         .option('-p, --profile <name>', 'Named backend profile (default: prod)')
         .option('--team-id <id>', `Team/workspace to act in (X-TEAM-ID); else ${PREFIX}_TEAM_ID or the profile`)
