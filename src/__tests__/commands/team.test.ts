@@ -36,7 +36,8 @@ const capture = async(fn: () => unknown | Promise<unknown>): Promise<string>=>{
     console.log = (...a: unknown[])=>{ out.push(a.join(' ')); };
     process.stdout.write = ((c: unknown): boolean=>{ out.push(String(c)); return true; }) as typeof process.stdout.write;
     try { await fn(); } finally { console.log = log; process.stdout.write = write; }
-    return out.join('\n').trim();
+    // Strip ANSI colour codes so assertions are stable under FORCE_COLOR (CI).
+    return out.join('\n').replace(/\x1b\[[0-9;]*m/g, '').trim();
 };
 
 beforeEach(()=>{
