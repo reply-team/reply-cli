@@ -121,6 +121,61 @@ const get = <T = unknown>(
     base_url: string, token: string, endpoint: string, opts?: Request_opts,
 ): Promise<T>=>request<T>(base_url, token, 'GET', endpoint, undefined, opts);
 
+type Raw_response = {status: number; data: unknown};
+
+// Like `request`, but returns {status, data} for ANY final HTTP status instead
+// of throwing on non-2xx — the workload `api` command needs the raw response.
+// Still retries transient statuses and throws RuntimeError only on network failure.
+const request_raw = async(
+    base_url: string,
+    token: string,
+    method: string,
+    endpoint: string,
+    body?: unknown,
+    opts: Request_opts = {},
+): Promise<Raw_response>=>{
+    const url = `${base_url}${endpoint}`;
+    const headers: Record<string, string> = {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'User-Agent': user_agent(),
+        ...(opts.headers ?? {}),
+    };
+    const init: RequestInit = {method, headers};
+    if (body !== undefined)
+    {
+        init.body = JSON.stringify(body);
+    }
+    let attempt = 0;
+    while (attempt <= MAX_RETRIES)
+    {
+        let res: Response;
+        try {
+            res = await fetch(url, init);
+        } catch (e) {
+            if (attempt < MAX_RETRIES)
+            {
+                await sleep(RETRY_BASE_MS * 2 ** attempt);
+                attempt++;
+                continue;
+            }
+            throw new RuntimeError('Network request failed.', {
+                code: 'network', detail: (e as Error).message,
+                hint: 'Check your connection and try again.',
+            });
+        }
+        if (TRANSIENT_STATUSES.includes(res.status) && attempt < MAX_RETRIES)
+        {
+            await sleep(retry_delay_ms(res, attempt));
+            attempt++;
+            continue;
+        }
+        const text = await res.text();
+        return {status: res.status, data: text ? parse_body(text) : null};
+    }
+    throw new RuntimeError('Max retries exceeded.', {code: 'network'});
+};
+
 type Client = {
     get<T = unknown>(endpoint: string, opts?: Request_opts): Promise<T>;
 };
@@ -132,5 +187,5 @@ const create_client = (
         get<T>(base_url, token, endpoint, {...opts, headers: {...headers, ...opts?.headers}}),
 });
 
-export {request, get, create_client};
-export type {Request_opts, Client};
+export {request, get, request_raw, create_client};
+export type {Request_opts, Client, Raw_response};

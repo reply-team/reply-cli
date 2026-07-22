@@ -3,6 +3,8 @@ import {Command, CommanderError} from 'commander';
 import {PROGRAM_NAME, cli_version} from './config';
 import {auth_command} from './commands/auth';
 import {profile_command} from './commands/profile';
+import {team_command} from './commands/team';
+import {api_command} from './commands/api';
 import {CliError} from './utils/errors';
 
 // Route every command through commander's throwing mode so usage errors reach
@@ -33,6 +35,8 @@ const build_program = (): Command=>{
 
     program.addCommand(auth_command);
     program.addCommand(profile_command);
+    program.addCommand(team_command);
+    program.addCommand(api_command);
 
     program.addHelpText('after', `
 Credential precedence:
@@ -56,6 +60,16 @@ Team & acting user (headers):
                     Pin one on a profile: ${PROGRAM_NAME} profile set <name> --team-id <id>
   --user-id <id> / --user-email <email>   Identify the acting user for an ORGANIZATION API key.
                     Flag-only (never env, never stored); pass exactly one; --user-email also needs a team id.
+  Team commands (see & set the current profile's team):
+    ${PROGRAM_NAME} team list              # teams you can act in (* marks the profile's)
+    ${PROGRAM_NAME} team current           # pinned + effective team
+    ${PROGRAM_NAME} team use <id>          # pin a team on the current profile
+    ${PROGRAM_NAME} team clear             # remove the pin
+
+Raw API (agent/CI escape hatch):
+  ${PROGRAM_NAME} api <path>               # GET; query goes in the path
+  ${PROGRAM_NAME} api <path> --body <json> # POST (inline JSON, @file, or - for stdin)
+                    Prints {code, data}; exits non-zero on HTTP >= 400.
 
 Configuration (env vars):
   ${PREFIX}_API_KEY      API key used as the bearer credential
@@ -68,6 +82,8 @@ Examples:
   echo <key> | ${PROGRAM_NAME} auth login --with-token
   ${PROGRAM_NAME} --profile dev auth whoami --json
   ${PROGRAM_NAME} auth status
+  ${PROGRAM_NAME} team list
+  ${PROGRAM_NAME} api /contacts?limit=10
 `);
 
     return program;

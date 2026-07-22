@@ -88,6 +88,39 @@ would be used (in priority order: `--api-key` → `REPLY_API_KEY` → stored
 credential) — it never prints tokens or keys. `--authority` and `--api-base`
 must be `http(s)` URLs.
 
+## Teams
+
+A profile can pin a team (workspace); it's sent as `X-TEAM-ID`, with precedence
+`--team-id` → `REPLY_TEAM_ID` → the profile's team. The `team` command sees and
+sets the **current profile's** team:
+
+```sh
+reply team list            # teams you can act in (* marks the profile's team)
+reply team current         # the profile's pinned team + the effective team (from whoami)
+reply team use 1045        # verify 1045 is one of your teams, then pin it on the current profile
+reply team clear           # remove the pin
+```
+
+If a call needs a team and you're in more than one, the API answers with a
+`TEAM_REQUIRED` error listing your teams — run `reply team use <id>` to pin one.
+
+## Raw API access
+
+`reply api` is a raw, authenticated passthrough to any v3 endpoint — the
+agent/CI escape hatch. The query string is part of the path; a `--body` makes it
+a POST:
+
+```sh
+reply api /contacts?limit=10
+reply api /contacts --body '{"email":"a@b.com"}'
+echo '{"email":"a@b.com"}' | reply api /contacts --body -
+reply api /contacts/9 --method DELETE
+```
+
+It prints `{ "code": <status>, "data": <body> }` and exits non-zero on HTTP
+`>= 400`. On a team/user-resolution conflict it adds a short fix-it hint on
+stderr.
+
 ## Environment variables
 
 | Variable | Description |
