@@ -79,6 +79,30 @@ Any field left off is inherited from the default (prod). Profiles live in
 { "profiles": { "dev": { "authority": "https://…", "api_base": "https://…/v3" } } }
 ```
 
+## Packages: public vs internal
+
+The same source ships as **two npm packages** (both expose the `reply` bin —
+identical commands and flags; only the package name and registry differ):
+
+| Package | Registry | For | Install |
+|---|---|---|---|
+| `reply-cli` | public npm | end users | `npm install -g reply-cli` |
+| `@reply-team/reply-cli` | GitHub Packages | the team, to test pre-release builds | see below |
+
+A public `X.Y.Z` is byte-for-byte the internal tag `vX.Y.Z` — promoted, not rebuilt
+differently.
+
+To install an **internal build** (the newest green `main`, published on every
+qualifying merge), point the `@reply-team` scope at GitHub Packages and authenticate
+with a GitHub token that has `read:packages`:
+
+```sh
+npm config set @reply-team:registry https://npm.pkg.github.com
+npm config set //npm.pkg.github.com/:_authToken <GITHUB_TOKEN>   # read:packages
+npm install -g @reply-team/reply-cli          # newest internal build (@latest)
+npm install -g @reply-team/reply-cli@0.3.0    # a specific build
+```
+
 ## Releases
 
 Releases are automated with [semantic-release](https://semantic-release.gitbook.io/).

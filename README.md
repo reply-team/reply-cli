@@ -8,13 +8,10 @@ contacts, and the inbox are on the way.
 
 ## Installation
 
-Requires [Node.js](https://nodejs.org) 20 or newer. The CLI is published to
-GitHub Packages under the `@reply-team` scope, so point that scope at the
-registry once, then install globally:
+Requires [Node.js](https://nodejs.org) 20 or newer. Install globally from npm:
 
 ```sh
-echo "@reply-team:registry=https://npm.pkg.github.com" >> ~/.npmrc
-npm install -g @reply-team/reply-cli
+npm install -g reply-cli
 ```
 
 ```sh
