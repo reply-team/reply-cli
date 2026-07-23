@@ -105,10 +105,47 @@ of record is the git tag / GitHub Release / published package. Do not hand-edit 
 Commit messages are enforced by commitlint (a local `commit-msg` hook and a PR
 check), because the version bump is derived from them.
 
-### Public npm release (deferred — not yet enabled)
+### Public npm release (manual)
 
-Promoting a tested internal build to the public npm registry will be a **manual,
-tag-selected** workflow: pick a `vX.Y.Z` tag, rebuild from that commit, publish the
-unscoped `reply-cli` to public npm, and flip that tag's GitHub Release from
-pre-release to a full release. This is gated on npm-name ownership consolidation and
-is tracked in Jira. **It is not implemented yet — there is no public-release workflow.**
+To ship a tested build to the public `reply-cli` package on npmjs, run the
+**publish-public** workflow (Actions → Run workflow) with a `vX.Y.Z` tag. It rebuilds
+from that tag, publishes to public npm via **OIDC trusted publishing** (no token) with
+provenance, and flips that tag's GitHub Release from pre-release to full/latest. The
+publish is gated by the `npm-public` environment — a `release-mergers` reviewer must
+approve it. A public `X.Y.Z` is byte-for-byte the internal tag `vX.Y.Z`.
+
+## Versioning & compatibility
+
+reply-cli follows [Semantic Versioning](https://semver.org). The version is derived
+automatically from Conventional Commit messages: `fix:` → patch, `feat:` → minor; a
+major bump happens only when we explicitly declare one.
+
+### Pre-1.0 (current)
+
+While the version is `0.x` the CLI is still stabilizing, so — per semver's 0.x rule —
+a **minor** release (`0.x.0`) may contain breaking changes. Pin an exact version if you
+need stability before 1.0.0. We will cut **1.0.0** once the command surface and the
+`--json` output are declared stable.
+
+Contributor rule: **do not use `!` / `BREAKING CHANGE:` in commits while on 0.x** — a
+breaking change rides in a normal `feat:` minor. (Otherwise semantic-release would jump
+straight to 1.0.0.)
+
+### What counts as breaking (the compatibility surface)
+
+From 1.0.0 onward, a **major** bump is required to:
+
+- remove or rename a command, flag, or argument;
+- change the meaning of an **exit code**;
+- change the **`--json` / `--pretty` output shape** (field names, types, structure);
+- change the **config-file format** or a `REPLY_*` **environment variable**;
+- raise the minimum **Node.js** version.
+
+Additive changes (a new command, a new optional flag, a new field in `--json`) are
+**minor**. Fixes that don't touch the above are **patch**.
+
+### Deprecation
+
+Before removing anything in the compatibility surface, we **deprecate it first**: it
+keeps working and prints a warning on **stderr** (never stdout, so `--json` stays clean)
+for at least **one minor release**. Removal happens only in a later **major**.
