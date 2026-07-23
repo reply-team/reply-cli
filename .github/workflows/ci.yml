@@ -1,0 +1,117 @@
+name: ci
+
+# PRs: a `changes` job decides if non-docs files changed; the test matrix
+# (ubuntu + windows) runs only if so; an always-running `ci-ok` gate job is the
+# single required status check (green when tests pass OR were skipped for a
+# docs-only PR, red when any test leg fails).
+# Push to main (non-docs, via paths-ignore): after tests pass, `release` runs
+# semantic-release -> publish to GitHub Packages @latest, tag, pre-release
+# GitHub Release.
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+  pull_request:
+    branches: [main]
+    # No paths-ignore here on purpose: the required checks (ci-ok, commitlint)
+    # must ALWAYS post, or a docs-only PR would hang "waiting for status".
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.f.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: f
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+          else
+            base="${{ github.event.before }}"
+            head="${{ github.sha }}"
+          fi
+          # If base is missing/zero (first push, force-push), run tests to be safe.
+          if ! git rev-parse --verify --quiet "${base}^{commit}" >/dev/null; then
+            echo "code=true" >> "$GITHUB_OUTPUT"; echo "base unknown -> code=true"; exit 0
+          fi
+          changed=$(git diff --name-only "$base" "$head")
+          echo "changed files:"; echo "$changed"
+          # code=true if ANY changed file is NOT a markdown/docs file.
+          if echo "$changed" | grep -qvE '(\.md$|^docs/)'; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  test:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+
+  # The single REQUIRED status check. Always runs; green when tests passed or
+  # were skipped (docs-only), red when any matrix leg failed/was cancelled.
+  ci-ok:
+    needs: [test]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Gate on test result
+        run: |
+          result="${{ needs.test.result }}"
+          echo "test job result: $result"
+          if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
+            exit 1
+          fi
+          echo "ok"
+
+  release:
+    needs: [changes, test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write      # push tags, create GitHub Releases
+      packages: write      # publish to GitHub Packages
+      issues: write        # semantic-release/github (kept for verifyConditions)
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run build
+      - name: Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx semantic-release
