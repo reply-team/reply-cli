@@ -1,6 +1,6 @@
 {
     "name": "@reply-team/reply-cli",
-    "version": "0.1.0",
+    "version": "0.0.0-development",
     "description": "Command-line interface for Reply.io. v1: authentication (OAuth + API key) and identity.",
     "main": "dist/index.js",
     "bin": {
@@ -12,7 +12,8 @@
         "start": "node dist/index.js",
         "clean": "rm -rf dist",
         "test": "vitest run",
-        "test:watch": "vitest"
+        "test:watch": "vitest",
+        "prepare": "husky"
     },
     "author": "Reply.io",
     "license": "MIT",
@@ -31,7 +32,12 @@
         "README.md"
     ],
     "devDependencies": {
+        "@commitlint/cli": "^19.8.1",
+        "@commitlint/config-conventional": "^19.8.1",
+        "@semantic-release/exec": "^7.1.0",
         "@types/node": "^20.0.0",
+        "husky": "^9.1.7",
+        "semantic-release": "^24.2.9",
         "typescript": "^5.6.0",
         "vitest": "^4.0.0"
     },
