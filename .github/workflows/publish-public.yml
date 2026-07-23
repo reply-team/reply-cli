@@ -51,6 +51,17 @@ jobs:
           npm install -g npm@latest
           npm --version
 
+      - name: Diagnose OIDC prerequisites
+        run: |
+          echo "node: $(node --version)   (need >= 22.14.0)"
+          echo "npm:  $(npm --version)    (need >= 11.5.1)"
+          echo "ACTIONS_ID_TOKEN_REQUEST_URL:   ${ACTIONS_ID_TOKEN_REQUEST_URL:+SET}${ACTIONS_ID_TOKEN_REQUEST_URL:-UNSET}"
+          echo "ACTIONS_ID_TOKEN_REQUEST_TOKEN: ${ACTIONS_ID_TOKEN_REQUEST_TOKEN:+SET}${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-UNSET}"
+          echo "npm registry: $(npm config get registry)"
+          echo "--- .npmrc (${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}) ---"
+          sed 's/\(_authToken=\).*/\1<redacted>/' "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}" 2>/dev/null || echo "(no .npmrc)"
+          echo "--- end ---"
+
       - run: npm ci
       - run: npm run build
 
@@ -70,7 +81,13 @@ jobs:
           npm version "${VERSION}" --no-git-tag-version --allow-same-version
 
       - name: Publish to public npm with provenance
-        run: npm publish --provenance --access public
+        run: npm publish --provenance --access public --loglevel verbose
+
+      - name: Dump npm debug log on failure
+        if: failure()
+        run: |
+          echo "=== npm debug log (tail) ==="
+          tail -n 80 /home/runner/.npm/_logs/*-debug-0.log 2>/dev/null || echo "(no debug log)"
 
       - name: Promote the GitHub Release to full/latest
         env:
