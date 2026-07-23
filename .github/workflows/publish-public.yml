@@ -1,12 +1,13 @@
 name: publish-public
 
-# Manually promote a tested tag to PUBLIC npm (unscoped `reply-cli`) using npm
-# OIDC trusted publishing — no NPM_TOKEN. Rebuilds from the selected tag,
-# publishes with provenance, then flips that tag's GitHub Release to full/latest.
+# Manually promote a tested tag to PUBLIC npm (unscoped `reply-cli`) using a
+# scoped npm automation token (NODE_AUTH_TOKEN from the NPM_TOKEN secret) —
+# same pattern as the n8n-public repo. Rebuilds from the selected tag, publishes
+# with provenance, then flips that tag's GitHub Release to full/latest.
 #
 # Two gates: the manual dispatch itself + the `npm-public` environment's required
-# reviewers (@reply-team/release-mergers). The workflow filename and environment
-# name are fixed by the npm trusted-publisher configuration and must not change.
+# reviewers (@reply-team/release-mergers). NPM_TOKEN is an environment secret on
+# `npm-public`, so the token is only available once a reviewer approves.
 on:
   workflow_dispatch:
     inputs:
@@ -22,45 +23,17 @@ jobs:
     runs-on: ubuntu-latest
     environment: npm-public
     permissions:
-      id-token: write      # OIDC trusted publishing — no NPM_TOKEN needed
+      id-token: write      # provenance attestation
       contents: write      # flip the GitHub Release to full/latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag }}   # rebuild from the exact tagged commit
 
-      # registry-url IS required for OIDC trusted publishing (npm needs to know
-      # which registry to run the OIDC exchange against).
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
-
-      # ...but setup-node also writes an empty `_authToken=` line when
-      # NODE_AUTH_TOKEN is unset. npm then thinks auth is configured and SKIPS
-      # the OIDC exchange -> ENEEDAUTH/404. Strip that line so OIDC runs.
-      # See actions/setup-node#1551.
-      - name: Enable OIDC (drop empty _authToken from .npmrc)
-        run: |
-          npmrc="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
-          sed -i '/_authToken/d' "$npmrc" || true
-          echo "cleaned: $npmrc"
-
-      - name: Upgrade npm and show version (trusted publishing needs >= 11.5.1)
-        run: |
-          npm install -g npm@latest
-          npm --version
-
-      - name: Diagnose OIDC prerequisites
-        run: |
-          echo "node: $(node --version)   (need >= 22.14.0)"
-          echo "npm:  $(npm --version)    (need >= 11.5.1)"
-          echo "ACTIONS_ID_TOKEN_REQUEST_URL:   ${ACTIONS_ID_TOKEN_REQUEST_URL:+SET}${ACTIONS_ID_TOKEN_REQUEST_URL:-UNSET}"
-          echo "ACTIONS_ID_TOKEN_REQUEST_TOKEN: ${ACTIONS_ID_TOKEN_REQUEST_TOKEN:+SET}${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-UNSET}"
-          echo "npm registry: $(npm config get registry)"
-          echo "--- .npmrc (${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}) ---"
-          sed 's/\(_authToken=\).*/\1<redacted>/' "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}" 2>/dev/null || echo "(no .npmrc)"
-          echo "--- end ---"
 
       - run: npm ci
       - run: npm run build
@@ -81,13 +54,9 @@ jobs:
           npm version "${VERSION}" --no-git-tag-version --allow-same-version
 
       - name: Publish to public npm with provenance
-        run: npm publish --provenance --access public --loglevel verbose
-
-      - name: Dump npm debug log on failure
-        if: failure()
-        run: |
-          echo "=== npm debug log (tail) ==="
-          tail -n 80 /home/runner/.npm/_logs/*-debug-0.log 2>/dev/null || echo "(no debug log)"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --provenance --access public
 
       - name: Promote the GitHub Release to full/latest
         env:
