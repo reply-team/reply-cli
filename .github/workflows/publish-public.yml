@@ -1,0 +1,64 @@
+name: publish-public
+
+# Manually promote a tested tag to PUBLIC npm (unscoped `reply-cli`) using npm
+# OIDC trusted publishing — no NPM_TOKEN. Rebuilds from the selected tag,
+# publishes with provenance, then flips that tag's GitHub Release to full/latest.
+#
+# Two gates: the manual dispatch itself + the `npm-public` environment's required
+# reviewers (@reply-team/release-mergers). The workflow filename and environment
+# name are fixed by the npm trusted-publisher configuration and must not change.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to promote to public npm (e.g. v0.3.0)'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm-public
+    permissions:
+      id-token: write      # OIDC trusted publishing — no NPM_TOKEN needed
+      contents: write      # flip the GitHub Release to full/latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}   # rebuild from the exact tagged commit
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Upgrade npm (trusted publishing needs >= 11.5.1)
+        run: npm install -g npm@latest
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: Retarget package for public npm
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          VERSION="${TAG#v}"
+          echo "Promoting ${TAG} -> reply-cli@${VERSION}"
+          # Fail early if this version is already public (npm would 409 mid-publish).
+          if npm view "reply-cli@${VERSION}" version >/dev/null 2>&1; then
+            echo "::error::reply-cli@${VERSION} is already published to public npm"
+            exit 1
+          fi
+          npm pkg set name=reply-cli      # unscoped public name
+          npm pkg delete publishConfig    # drop the GitHub Packages registry
+          npm version "${VERSION}" --no-git-tag-version --allow-same-version
+
+      - name: Publish to public npm with provenance
+        run: npm publish --provenance --access public
+
+      - name: Promote the GitHub Release to full/latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "${{ inputs.tag }}" --prerelease=false --latest
