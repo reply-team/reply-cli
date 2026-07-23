@@ -81,8 +81,34 @@ Any field left off is inherited from the default (prod). Profiles live in
 
 ## Releases
 
-- Every push to `main` publishes a build to the `@next` dist-tag:
-  `npm install -g @reply-team/reply-cli@next`.
-- A release promotes a tested `@next` version to `@latest` with
-  `npm dist-tag add` — the exact published bytes, no rebuild — and tags the
-  source commit.
+Releases are automated with [semantic-release](https://semantic-release.gitbook.io/).
+
+### Internal builds (automatic)
+
+Every merge to `main` runs CI. If the merged commits include a `feat:` or `fix:`
+(per Conventional Commits), semantic-release:
+
+- computes the next semver version,
+- publishes it to GitHub Packages under `@latest`
+  (`npm install -g @reply-team/reply-cli`),
+- pushes a `vX.Y.Z` git tag, and
+- creates a **pre-release** GitHub Release whose notes are the changelog.
+
+Commits that only touch docs/CI/chores (`docs:`, `ci:`, `chore:`, `test:`) do not
+produce a release. A PR touching only `README.md` / `docs/**` skips the build (the
+test matrix doesn't run) and never publishes; such a merge to `main` doesn't start
+the workflow at all.
+
+`package.json`'s `version` is intentionally `0.0.0-development` — the real version
+of record is the git tag / GitHub Release / published package. Do not hand-edit it.
+
+Commit messages are enforced by commitlint (a local `commit-msg` hook and a PR
+check), because the version bump is derived from them.
+
+### Public npm release (deferred — not yet enabled)
+
+Promoting a tested internal build to the public npm registry will be a **manual,
+tag-selected** workflow: pick a `vX.Y.Z` tag, rebuild from that commit, publish the
+unscoped `reply-cli` to public npm, and flip that tag's GitHub Release from
+pre-release to a full release. This is gated on npm-name ownership consolidation and
+is tracked in Jira. **It is not implemented yet — there is no public-release workflow.**
