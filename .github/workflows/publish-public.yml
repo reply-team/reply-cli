@@ -29,13 +29,18 @@ jobs:
         with:
           ref: ${{ inputs.tag }}   # rebuild from the exact tagged commit
 
+      # No `registry-url`: it writes an .npmrc `_authToken` line that, with no
+      # token set, shadows OIDC trusted publishing (npm uses the empty token and
+      # the registry 404s). Default registry is npmjs.org (publishConfig is
+      # removed below), and auth comes from OIDC.
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org
 
-      - name: Upgrade npm (trusted publishing needs >= 11.5.1)
-        run: npm install -g npm@latest
+      - name: Upgrade npm and show version (trusted publishing needs >= 11.5.1)
+        run: |
+          npm install -g npm@latest
+          npm --version
 
       - run: npm ci
       - run: npm run build
