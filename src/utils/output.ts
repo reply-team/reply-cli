@@ -26,9 +26,14 @@ const safe_record = (record: Credential_record): Record<string, unknown>=>{
 
 const is_tty = process.stdout.isTTY === true;
 
-const success = (msg: string): void=>console.error(pc.green(`✓ ${msg}`));
+// --quiet silences routine progress on stderr (info/success). Warnings and
+// errors are never suppressed — they carry information the user still needs.
+let quiet_mode = false;
+const set_quiet = (on: boolean): void=>{quiet_mode = on;};
+
+const success = (msg: string): void=>{if (!quiet_mode) console.error(pc.green(`✓ ${msg}`));};
 const warn = (msg: string): void=>console.error(pc.yellow(`⚠ ${msg}`));
-const info = (msg: string): void=>console.error(pc.dim(msg));
+const info = (msg: string): void=>{if (!quiet_mode) console.error(pc.dim(msg));};
 
 type Print_opts = {
     json?: boolean;
@@ -55,5 +60,5 @@ const print = (data: unknown, opts: Print_opts = {}): void=>{
     process.stdout.write(serialize(data, opts) + '\n');
 };
 
-export {is_tty, pc, REDACTED, redact, safe_record, success, warn, info, print};
+export {is_tty, pc, REDACTED, redact, safe_record, set_quiet, success, warn, info, print};
 export type {Print_opts};
