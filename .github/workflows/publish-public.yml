@@ -29,13 +29,22 @@ jobs:
         with:
           ref: ${{ inputs.tag }}   # rebuild from the exact tagged commit
 
-      # No `registry-url`: it writes an .npmrc `_authToken` line that, with no
-      # token set, shadows OIDC trusted publishing (npm uses the empty token and
-      # the registry 404s). Default registry is npmjs.org (publishConfig is
-      # removed below), and auth comes from OIDC.
+      # registry-url IS required for OIDC trusted publishing (npm needs to know
+      # which registry to run the OIDC exchange against).
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      # ...but setup-node also writes an empty `_authToken=` line when
+      # NODE_AUTH_TOKEN is unset. npm then thinks auth is configured and SKIPS
+      # the OIDC exchange -> ENEEDAUTH/404. Strip that line so OIDC runs.
+      # See actions/setup-node#1551.
+      - name: Enable OIDC (drop empty _authToken from .npmrc)
+        run: |
+          npmrc="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+          sed -i '/_authToken/d' "$npmrc" || true
+          echo "cleaned: $npmrc"
 
       - name: Upgrade npm and show version (trusted publishing needs >= 11.5.1)
         run: |
