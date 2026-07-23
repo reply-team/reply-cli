@@ -6,6 +6,7 @@ import {profile_command} from './commands/profile';
 import {team_command} from './commands/team';
 import {api_command} from './commands/api';
 import {CliError} from './utils/errors';
+import {set_quiet} from './utils/output';
 
 // Route every command through commander's throwing mode so usage errors reach
 // our handler and map to exit code 2 (vs 1 for runtime/API failures).
@@ -32,7 +33,12 @@ const build_program = (): Command=>{
         .option('--json', 'Output compact JSON to stdout')
         .option('--pretty', 'Output indented JSON to stdout')
         .option('--verbose', 'Print the full request/response to stderr, credentials redacted (api)')
+        .option('-q, --quiet', 'Suppress progress messages on stderr (warnings and errors still shown)')
         .showHelpAfterError();
+
+    // Apply --quiet before any command action runs, so progress output is
+    // silenced for the whole invocation.
+    program.hook('preAction', ()=>{set_quiet(program.opts().quiet === true);});
 
     program.addCommand(auth_command);
     program.addCommand(profile_command);
