@@ -289,8 +289,45 @@ describe('run_flat name collisions', ()=>{
         expect(outcome.packs).toEqual([{
             name: 'ai-sdr-core', action: 'failed', detail: 'conflicts with an existing skill: ai-sdr-core-skill',
         }]);
+        expect(outcome.status).toBe('failed');
         expect(fs.readFileSync(mine)).toEqual(before);
         expect(journal_entry('cursor', 'user', 'ai-sdr-core', env())).toBeUndefined();
+        // Nothing else depends on ai-sdr-core in this run, so nothing was
+        // blocked — the hint is specifically for blocked dependents, not for
+        // the failure itself.
+        expect(outcome.hint).toBeUndefined();
+    });
+});
+
+// Required fix, raised by the controller from a concern in the original
+// self-review: adapter-native.ts never lets a dependent install while its
+// dependency failed (failed_names/blocked_names). run_flat must enforce the
+// same invariant — a pack that fails on a collision (I3) or a copy error (I1)
+// must block anything depending on it, exactly like the native adapter.
+describe('run_flat dependency blocking', ()=>{
+    it('blocks every pack that depends on one that failed on a collision, and never copies them', async()=>{
+        const target = path.join(home, '.cursor', 'skills');
+        fs.mkdirSync(path.join(target, 'ai-sdr-core-skill'), {recursive: true});
+        fs.writeFileSync(
+            path.join(target, 'ai-sdr-core-skill', 'SKILL.md'),
+            '---\nname: mine\ndescription: not the pack\n---\nkeep me\n',
+        );
+
+        const outcome = await run_flat(flat_opts('install', all));
+
+        // reply-adapter and agentic-runtime both depend on ai-sdr-core, so
+        // neither is attempted — blocked packs get no outcome entry at all,
+        // matching adapter-native.ts's blocked_names behavior.
+        expect(outcome.packs).toEqual([{
+            name: 'ai-sdr-core', action: 'failed', detail: 'conflicts with an existing skill: ai-sdr-core-skill',
+        }]);
+        expect(outcome.status).toBe('failed');
+        expect(outcome.hint).toContain('reply-adapter');
+        expect(outcome.hint).toContain('agentic-runtime');
+        expect(fs.existsSync(path.join(target, 'reply-adapter-skill'))).toBe(false);
+        expect(fs.existsSync(path.join(target, 'agentic-runtime-skill'))).toBe(false);
+        expect(journal_entry('cursor', 'user', 'reply-adapter', env())).toBeUndefined();
+        expect(journal_entry('cursor', 'user', 'agentic-runtime', env())).toBeUndefined();
     });
 });
 

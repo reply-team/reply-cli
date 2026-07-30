@@ -154,6 +154,19 @@ const owns_dir = (dir: string, known_files: Iterable<string>): boolean=>{
     return false;
 };
 
+// Mirrors adapter-native.ts's status_of: 'ok' with no failures, 'failed' when
+// every pack in this operation failed, 'partial' otherwise. Kept local rather
+// than shared, since the two adapters are twin, independent implementations
+// of the same rule.
+const status_of = (packs: Pack_outcome[]): Host_outcome['status']=>{
+    const failed = packs.filter(p=>p.action === 'failed');
+    if (!failed.length)
+    {
+        return 'ok';
+    }
+    return failed.length === packs.length ? 'failed' : 'partial';
+};
+
 type Flat_opts = {
     operation: Operation;
     host: Detected_host;
@@ -291,9 +304,22 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
     // clone layout, a journal write error) must become a Host_outcome, never
     // a rejected promise — one host failing must never abort the others, and
     // any pack already installed and journaled before the failure still counts.
+    //
+    // A pack whose dependency failed (or was itself blocked) must never be
+    // attempted — mirrors adapter-native.ts's failed_names/blocked_names, so
+    // the invariant "never reply-adapter without ai-sdr-core" holds the same
+    // way regardless of which adapter is doing the installing.
+    const failed_names = new Set<string>();
+    const blocked_names = new Set<string>();
     try {
         for (const pack of pending)
         {
+            const blocker = pack.dependencies.find(d=>failed_names.has(d) || blocked_names.has(d));
+            if (blocker)
+            {
+                blocked_names.add(pack.name);
+                continue;
+            }
             const from = path.join(cloned.dir, 'plugins', pack.name, 'skills');
             const previous = entry_for(pack.name);
             const elsewhere = claimed_by_others(opts.env, scope, pack.name, id);
@@ -307,6 +333,7 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
             });
             if (collision)
             {
+                failed_names.add(pack.name);
                 outcomes.push({
                     name: pack.name,
                     action: 'failed',
@@ -366,7 +393,10 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
             // the result computed above.
         }
     }
-    return {...base, packs: outcomes};
+    const hint = blocked_names.size
+        ? `packs ${[...blocked_names].join(', ')} were not attempted because their dependencies failed; fix those installs and re-run`
+        : undefined;
+    return {...base, packs: outcomes, status: status_of(outcomes), hint};
 };
 
 export {clone_repo, copy_dir, skills_target, run_flat};
