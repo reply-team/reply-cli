@@ -10,7 +10,7 @@ let dir: string;
 const env = ()=>({REPLY_CONFIG_DIR: dir});
 
 const entry = (version = '0.1.0', files: string[] = ['a/SKILL.md']): Journal_entry=>({
-    version, ref: 'main', commit: 'abc1234', scope: 'user', files, installed_at: '2026-07-30T00:00:00.000Z',
+    version, ref: 'main', commit: 'abc1234', scope: 'user', files, complete: true, installed_at: '2026-07-30T00:00:00.000Z',
 });
 
 beforeEach(()=>{

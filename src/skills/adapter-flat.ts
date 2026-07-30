@@ -68,10 +68,17 @@ const copy_dir = (from: string, to: string, written: string[]): void=>{
 // it via `..`. Every path handed to delete_files must pass this: the journal
 // is JSON in the user's config directory, and a hand-edited or stale entry
 // must not be able to name a file outside the host's own skills directory.
+// `path.relative` — not string equality — so this agrees with the OS on
+// whether two differently-cased paths are the same file, which matters on
+// Windows: is_within, owns_dir and the protected-files check must all reach
+// the same answer for the same pair of paths.
 const is_within = (root: string, target: string): boolean=>{
     const rel = path.relative(root, target);
     return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
 };
+
+const paths_equal = (a: string, b: string): boolean=>
+    path.relative(a, b) === '';
 
 // Removes the files we're told to, minus two carve-outs: anything outside
 // `target_root` (a tampered or stale journal entry) and anything another
@@ -84,7 +91,7 @@ const delete_files = (files: string[], target_root: string, protected_files: Set
     for (const file of files)
     {
         const resolved = path.resolve(file);
-        if (!is_within(resolved_root, resolved) || protected_files.has(resolved))
+        if (!is_within(resolved_root, resolved) || [...protected_files].some(p=>paths_equal(p, resolved)))
         {
             continue;
         }
@@ -141,12 +148,13 @@ const claimed_by_others = (env: Env | undefined, scope: Scope, pack_name: string
 // True when every file under `dir` is accounted for by files we already know
 // about — our own previous install of this pack, or a sibling host's install
 // of the same pack at a shared directory. Anything else sitting at `dir` is
-// foreign (typically user-authored) and must not be clobbered.
+// foreign (typically user-authored) and must not be clobbered. Reuses
+// is_within rather than a raw prefix check, so this agrees with delete_files'
+// containment check on a differently-cased path (routine on Windows).
 const owns_dir = (dir: string, known_files: Iterable<string>): boolean=>{
-    const prefix = path.resolve(dir) + path.sep;
     for (const file of known_files)
     {
-        if (file.startsWith(prefix))
+        if (is_within(dir, file))
         {
             return true;
         }
@@ -214,11 +222,23 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
             {
                 continue;
             }
+            // An incomplete entry never reads as current, regardless of
+            // version — it is a copy that did not finish, and needs a repair
+            // install, not a clean bill of health.
+            if (!entry.complete)
+            {
+                outcomes.push({
+                    name: pack.name,
+                    action: 'failed',
+                    detail: 'installation incomplete; run `reply skills install` to repair',
+                });
+                continue;
+            }
             outcomes.push(entry.version === pack.version
                 ? {name: pack.name, action: 'current', version: entry.version}
                 : {name: pack.name, action: 'upgraded', version: pack.version, from: entry.version});
         }
-        return {...base, packs: outcomes};
+        return {...base, packs: outcomes, status: status_of(outcomes)};
     }
 
     // Every other operation touches the filesystem, so a host with no
@@ -262,7 +282,7 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
         : packs;
     const pending = targets.filter(p=>{
         const entry = entry_for(p.name);
-        return operation === 'update' || !entry || entry.version !== p.version;
+        return operation === 'update' || !entry || !entry.complete || entry.version !== p.version;
     });
     for (const pack of targets)
     {
@@ -311,6 +331,10 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
     // way regardless of which adapter is doing the installing.
     const failed_names = new Set<string>();
     const blocked_names = new Set<string>();
+    const blocked_hint = (): string | undefined=>
+        blocked_names.size
+            ? `packs ${[...blocked_names].join(', ')} were not attempted because their dependencies failed; fix those installs and re-run`
+            : undefined;
     try {
         for (const pack of pending)
         {
@@ -352,16 +376,14 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
                     copy_dir(path.join(from, skill.name), path.join(target_root, skill.name), written);
                 }
             } catch (copy_error) {
-                // Whatever landed before the failure is still on disk: journal
-                // it so a later `remove` can clean it up instead of leaving
-                // it as an orphan the journal never knew about.
-                if (written.length)
-                {
-                    record_for(pack.name, {
-                        version: pack.version, ref, commit: cloned.commit, scope,
-                        files: written, installed_at: new Date().toISOString(),
-                    });
-                }
+                // Whatever landed before the failure — possibly nothing — is
+                // journaled as incomplete, never as done: a version match
+                // alone must never read as installed when the copy did not
+                // finish, or `install`'s own hint to re-run would do nothing.
+                record_for(pack.name, {
+                    version: pack.version, ref, commit: cloned.commit, scope,
+                    files: written, complete: false, installed_at: new Date().toISOString(),
+                });
                 throw copy_error;
             }
             record_for(pack.name, {
@@ -370,6 +392,7 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
                 commit: cloned.commit,
                 scope,
                 files: written,
+                complete: true,
                 installed_at: new Date().toISOString(),
             });
             outcomes.push(previous
@@ -377,13 +400,16 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
                 : {name: pack.name, action: 'installed', version: pack.version});
         }
     } catch (error) {
+        // outcomes.length is not "something landed" — every entry pushed so
+        // far could itself be a collision failure, so check the actions.
+        const landed = outcomes.some(p=>p.action !== 'failed');
         return {
             ...base,
-            status: outcomes.length ? 'partial' : 'failed',
+            status: landed ? 'partial' : 'failed',
             packs: outcomes,
             reason: 'copy-failed',
             detail: (error as Error).message,
-            hint: 'check filesystem permissions for the skills directory, then re-run',
+            hint: blocked_hint() ?? 'check filesystem permissions for the skills directory, then re-run',
         };
     } finally {
         try {
@@ -393,10 +419,7 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
             // the result computed above.
         }
     }
-    const hint = blocked_names.size
-        ? `packs ${[...blocked_names].join(', ')} were not attempted because their dependencies failed; fix those installs and re-run`
-        : undefined;
-    return {...base, packs: outcomes, status: status_of(outcomes), hint};
+    return {...base, packs: outcomes, status: status_of(outcomes), hint: blocked_hint()};
 };
 
 export {clone_repo, copy_dir, skills_target, run_flat};

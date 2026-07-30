@@ -1,4 +1,4 @@
-import {describe, it, expect, beforeEach, afterEach} from 'vitest';
+import {describe, it, expect, beforeEach, afterEach, vi} from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -11,6 +11,11 @@ import type {Runner} from '../../skills/types';
 
 const all = resolve_packs([], PACKS_FALLBACK);
 const core_only = resolve_packs(['core'], PACKS_FALLBACK);
+// reply-adapter and agentic-runtime, requested directly with no dependency
+// expansion, so ai-sdr-core is absent from the set — used to put two packs
+// that do not depend on each other in the same run without either blocking
+// the other via ai-sdr-core (see 'run_flat abort status' below).
+const adapter_and_runtime_only = resolve_packs(['adapter', 'runtime'], PACKS_FALLBACK, {dependencies: false});
 
 let root: string;
 let home: string;
@@ -252,7 +257,7 @@ describe('run_flat deletion containment', ()=>{
         fs.writeFileSync(outside, 'do not touch');
         record_pack('cursor', 'user', 'ai-sdr-core', {
             version: '0.1.0', ref: 'main', commit: 'deadbee', scope: 'user',
-            files: [outside], installed_at: '2026-07-30T00:00:00.000Z',
+            files: [outside], complete: true, installed_at: '2026-07-30T00:00:00.000Z',
         }, env());
         const outcome = await run_flat(flat_opts('remove', core_only));
         expect(fs.existsSync(outside)).toBe(true);
@@ -266,7 +271,7 @@ describe('run_flat deletion containment', ()=>{
         fs.writeFileSync(direct, 'x');
         record_pack('cursor', 'user', 'ai-sdr-core', {
             version: '0.1.0', ref: 'main', commit: 'deadbee', scope: 'user',
-            files: [direct], installed_at: '2026-07-30T00:00:00.000Z',
+            files: [direct], complete: true, installed_at: '2026-07-30T00:00:00.000Z',
         }, env());
         await run_flat(flat_opts('remove', core_only));
         expect(fs.existsSync(direct)).toBe(false);
@@ -402,5 +407,137 @@ describe('clone_repo', ()=>{
         await expect(clone_repo({ref: 'main', run, tmp_root: root})).rejects.toThrow('not a git repository');
         expect(captured_dir).not.toBe('');
         expect(fs.existsSync(captured_dir)).toBe(false);
+    });
+});
+
+// New Important from the re-review: a failed copy journaled under the target
+// version reads as installed, so the hint's own suggested fix ("re-run
+// install") silently does nothing. Journal_entry.complete distinguishes a
+// finished copy from a partial one; `pending` and `list` must both treat an
+// incomplete entry as work still to do, never as current.
+describe('run_flat incomplete installs', ()=>{
+    it('re-attempts a pack whose entry is marked incomplete, even at the target version, instead of reporting current', async()=>{
+        record_pack('cursor', 'user', 'ai-sdr-core', {
+            version: '0.1.0', ref: 'main', commit: 'deadbee', scope: 'user',
+            files: [], complete: false, installed_at: '2026-07-30T00:00:00.000Z',
+        }, env());
+
+        const outcome = await run_flat(flat_opts('install', core_only));
+
+        expect(outcome.packs?.map(p=>({name: p.name, action: p.action}))).toEqual([
+            {name: 'ai-sdr-core', action: 'upgraded'},
+        ]);
+        const target = path.join(home, '.cursor', 'skills');
+        expect(fs.existsSync(path.join(target, 'ai-sdr-core-skill', 'SKILL.md'))).toBe(true);
+        const entry = journal_entry('cursor', 'user', 'ai-sdr-core', env());
+        expect(entry?.complete).toBe(true);
+        expect(entry?.files.length).toBeGreaterThan(0);
+    });
+
+    it('journals a copy failure as incomplete with only the files that actually landed, never the stale complete entry', async()=>{
+        // A normal, fully successful install first.
+        await run_flat(flat_opts('install', core_only));
+        const target = path.join(home, '.cursor', 'skills');
+        expect(journal_entry('cursor', 'user', 'ai-sdr-core', env())?.complete).toBe(true);
+
+        // Force the very next file copy to throw before anything for this
+        // re-attempt lands (written.length === 0 at the point of failure) —
+        // portable and deterministic, unlike relying on a real permissions
+        // failure, and precedented in this codebase (see output.test.ts).
+        const copy_spy = vi.spyOn(fs, 'copyFileSync').mockImplementationOnce(()=>{
+            throw new Error('simulated disk failure');
+        });
+        try {
+            const outcome = await run_flat(flat_opts('update', core_only));
+            expect(outcome.status).toBe('failed');
+            expect(outcome.reason).toBe('copy-failed');
+        } finally {
+            copy_spy.mockRestore();
+        }
+
+        // The old entry (a different version's worth of files, all of which
+        // delete_files already removed) must not survive as if nothing
+        // happened: the pack must read as incomplete, not as the old,
+        // now-nonexistent install.
+        const entry = journal_entry('cursor', 'user', 'ai-sdr-core', env());
+        expect(entry?.complete).toBe(false);
+        expect(entry?.files).toEqual([]);
+        // The old file is gone (delete_files already ran); the empty shell
+        // directory copy_dir recreated before the throw is not "the pack" —
+        // what matters is that no old content survives under the old entry.
+        expect(fs.existsSync(path.join(target, 'ai-sdr-core-skill', 'SKILL.md'))).toBe(false);
+    });
+
+    it('does not report an incomplete pack as current in `list`', async()=>{
+        record_pack('cursor', 'user', 'ai-sdr-core', {
+            version: '0.1.0', ref: 'main', commit: 'deadbee', scope: 'user',
+            files: [], complete: false, installed_at: '2026-07-30T00:00:00.000Z',
+        }, env());
+
+        const outcome = await run_flat({
+            ...flat_opts('list', core_only),
+            clone: async()=>{ throw new Error('list must not clone'); },
+        });
+
+        expect(outcome.packs?.map(p=>p.action)).not.toContain('current');
+        expect(outcome.status).not.toBe('ok');
+    });
+});
+
+// Minor, folded in because it sits in the code already being edited: the
+// copy-error abort path used `outcomes.length` as a proxy for "something
+// landed", which is wrong whenever every outcome recorded before the abort
+// was itself a failure — it must check the outcomes' actions, not their count.
+describe('run_flat abort status', ()=>{
+    it('reports failed, not partial, when every outcome recorded before an abort had already failed', async()=>{
+        const target = path.join(home, '.cursor', 'skills');
+        // reply-adapter collides with a user-authored directory...
+        fs.mkdirSync(path.join(target, 'reply-adapter-skill'), {recursive: true});
+        fs.writeFileSync(
+            path.join(target, 'reply-adapter-skill', 'SKILL.md'),
+            '---\nname: mine\ndescription: not the pack\n---\nkeep me\n',
+        );
+        // ...and agentic-runtime (independent of reply-adapter, so not
+        // blocked by its failure) throws on its own copy.
+        const copy_spy = vi.spyOn(fs, 'copyFileSync').mockImplementationOnce(()=>{
+            throw new Error('simulated disk failure');
+        });
+        try {
+            const outcome = await run_flat(flat_opts('install', adapter_and_runtime_only));
+            expect(outcome.status).toBe('failed');
+            expect(outcome.packs).toEqual([{
+                name: 'reply-adapter', action: 'failed', detail: 'conflicts with an existing skill: reply-adapter-skill',
+            }]);
+        } finally {
+            copy_spy.mockRestore();
+        }
+    });
+});
+
+// Minor, folded in for the same reason: owns_dir/protected_files compared
+// paths case-sensitively while is_within does not, so a differently-cased
+// path — routine on Windows, which CI runs — was recognised by one and not
+// the other. Both must agree.
+describe('run_flat case-insensitive path comparisons', ()=>{
+    it('recognises a differently-cased journaled path as already ours, not a foreign collision', async()=>{
+        const target = path.join(home, '.cursor', 'skills');
+        // Same physical file as fake_clone will produce, but recorded with
+        // different case — as a differently-cased-but-equivalent path from a
+        // prior run might be, on a case-insensitive filesystem.
+        const differently_cased = path.join(target, 'AI-SDR-CORE-SKILL', 'SKILL.MD');
+        record_pack('cursor', 'user', 'ai-sdr-core', {
+            version: '0.1.0', ref: 'main', commit: 'deadbee', scope: 'user',
+            files: [differently_cased], complete: true, installed_at: '2026-07-30T00:00:00.000Z',
+        }, env());
+        fs.mkdirSync(path.join(target, 'ai-sdr-core-skill'), {recursive: true});
+        fs.writeFileSync(path.join(target, 'ai-sdr-core-skill', 'SKILL.md'), 'old content');
+
+        // `update`, not `install`: the entry is already complete at the
+        // target version, so `install` would report `current` without ever
+        // reaching the collision/ownership check this test exercises.
+        const outcome = await run_flat(flat_opts('update', core_only));
+
+        expect(outcome.packs).toEqual([{name: 'ai-sdr-core', action: 'upgraded', version: '0.1.0', from: '0.1.0'}]);
+        expect(fs.existsSync(path.join(target, 'ai-sdr-core-skill', 'SKILL.md'))).toBe(true);
     });
 });

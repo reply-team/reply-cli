@@ -17,6 +17,12 @@ type Journal_entry = {
     scope: Scope;
     // Absolute paths written by the flat adapter.
     files: string[];
+    // False when the copy this entry describes did not finish — a version
+    // match alone is not enough to call a pack installed, since a failed
+    // copy can land partway through, at the target version, with some files
+    // on disk and some not. An incomplete entry must never be reported
+    // `current` and must always be treated as work still to do.
+    complete: boolean;
     installed_at: string;
 };
 
