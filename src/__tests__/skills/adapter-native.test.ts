@@ -165,6 +165,7 @@ describe('run_native list and update', ()=>{
     it('update runs the host update verb only for installed packs', async()=>{
         const {run, calls} = runner_of([ok(), ok(claude_list([{name: 'ai-sdr-core', version: '0.0.9'}])), ok()]);
         const outcome = await run_native({operation: 'update', host: claude(), packs: all, scope: 'user', run});
+        expect(calls[0]).toEqual(['/usr/bin/claude', 'plugin', 'marketplace', 'add', 'reply-team/reply-skills']);
         expect(calls[2]).toEqual(['/usr/bin/claude', 'plugin', 'update', 'ai-sdr-core@reply-skills']);
         expect(outcome.packs?.map(p=>p.name)).toEqual(['ai-sdr-core']);
     });
