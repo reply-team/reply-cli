@@ -20,9 +20,14 @@ type Journal_entry = {
     installed_at: string;
 };
 
+// Keyed host -> scope -> pack, so a user-scope install and a project-scope
+// install of the same pack on the same host never share an entry: consulting
+// or forgetting one must never look, or delete, in the other's target
+// directory (see adapter-flat.ts, which resolves a different directory per
+// scope).
 type Journal = {
     version: 1;
-    hosts: Record<string, Record<string, Journal_entry>>;
+    hosts: Record<string, Record<string, Record<string, Journal_entry>>>;
 };
 
 const CORRUPT_HINT = 'Delete the file and re-run `reply skills install`.';
@@ -78,18 +83,21 @@ const write_journal = (journal: Journal, env?: Env): void=>{
     fs.renameSync(tmp, file);
 };
 
-const journal_entry = (host: string, pack: string, env?: Env): Journal_entry | undefined=>
-    read_journal(env).hosts[host]?.[pack];
+const journal_entry = (host: string, scope: Scope, pack: string, env?: Env): Journal_entry | undefined=>
+    read_journal(env).hosts[host]?.[scope]?.[pack];
 
-const record_pack = (host: string, pack: string, entry: Journal_entry, env?: Env): void=>{
+const record_pack = (host: string, scope: Scope, pack: string, entry: Journal_entry, env?: Env): void=>{
     const journal = read_journal(env);
-    journal.hosts[host] = {...(journal.hosts[host] ?? {}), [pack]: entry};
+    const scopes = journal.hosts[host] ?? {};
+    scopes[scope] = {...(scopes[scope] ?? {}), [pack]: entry};
+    journal.hosts[host] = scopes;
     write_journal(journal, env);
 };
 
-const forget_pack = (host: string, pack: string, env?: Env): Journal_entry | undefined=>{
+const forget_pack = (host: string, scope: Scope, pack: string, env?: Env): Journal_entry | undefined=>{
     const journal = read_journal(env);
-    const packs = journal.hosts[host];
+    const scopes = journal.hosts[host];
+    const packs = scopes?.[scope];
     const existing = packs?.[pack];
     if (!existing)
     {
@@ -97,6 +105,10 @@ const forget_pack = (host: string, pack: string, env?: Env): Journal_entry | und
     }
     delete packs[pack];
     if (!Object.keys(packs).length)
+    {
+        delete scopes![scope];
+    }
+    if (scopes && !Object.keys(scopes).length)
     {
         delete journal.hosts[host];
     }

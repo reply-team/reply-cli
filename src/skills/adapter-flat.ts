@@ -2,10 +2,11 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import {default_runner} from './adapter-native';
-import {forget_pack, journal_entry, record_pack} from './journal';
+import {forget_pack, journal_entry, read_journal, record_pack} from './journal';
 import {DEFAULT_REF, REPO} from './packs';
 import type {Env} from '../config';
 import type {Detected_host} from './detect';
+import type {Journal_entry} from './journal';
 import type {Host_def, Host_outcome, Operation, Pack, Pack_outcome, Runner, Scope} from './types';
 
 // For hosts with no plugin mechanism: a pack is just a directory of skills, so
@@ -21,21 +22,33 @@ const clone_repo: Clone_fn = async({ref, run, tmp_root})=>{
     const cloned = await run('git', ['clone', '--depth', '1', '--branch', ref, url, dir]);
     if (cloned.code !== 0)
     {
+        fs.rmSync(dir, {recursive: true, force: true});
         throw new Error((cloned.stderr || cloned.stdout).trim() || `git clone failed for ${url}`);
     }
     const head = await run('git', ['-C', dir, 'rev-parse', 'HEAD']);
+    if (head.code !== 0)
+    {
+        fs.rmSync(dir, {recursive: true, force: true});
+        throw new Error((head.stderr || head.stdout).trim() || `git rev-parse HEAD failed for ${url}`);
+    }
     return {dir, commit: head.stdout.trim().slice(0, 7)};
 };
 
 // Where this host reads skills from, for the requested scope. A native host
 // only lands here under --project, because its plugin mechanism is user-scoped.
-const skills_target = (def: Host_def, scope: Scope, home: string, cwd: string): string=>
-    scope === 'project'
-        ? path.join(cwd, def.project_skills_dir as string)
-        : path.join(home, def.user_skills_dir as string);
+// Returns undefined when the host has no directory configured for this scope
+// (e.g. a native host under `user` scope) so the caller can report a status
+// instead of joining `undefined` into a path.
+const skills_target = (def: Host_def, scope: Scope, home: string, cwd: string): string | undefined=>{
+    const rel = scope === 'project' ? def.project_skills_dir : def.user_skills_dir;
+    return rel === undefined ? undefined : path.join(scope === 'project' ? cwd : home, rel);
+};
 
-const copy_dir = (from: string, to: string): string[]=>{
-    const written: string[] = [];
+// Mutates `written` as it goes, rather than returning a fresh array, so that
+// a throw partway through (a read-only destination, a full disk) still leaves
+// the caller with exactly the files that landed before the failure — see the
+// install loop, which journals that partial list instead of orphaning it.
+const copy_dir = (from: string, to: string, written: string[]): void=>{
     fs.mkdirSync(to, {recursive: true});
     for (const entry of fs.readdirSync(from, {withFileTypes: true}))
     {
@@ -43,30 +56,51 @@ const copy_dir = (from: string, to: string): string[]=>{
         const dst = path.join(to, entry.name);
         if (entry.isDirectory())
         {
-            written.push(...copy_dir(src, dst));
+            copy_dir(src, dst, written);
             continue;
         }
         fs.copyFileSync(src, dst);
         written.push(dst);
     }
-    return written;
 };
 
-// Removes the directories we created, and nothing else: a user-authored skill
-// sitting next to ours is never touched because it is not in the journal.
-const delete_files = (files: string[]): void=>{
+// True when `target` resolves inside `root` — never equal to it, never above
+// it via `..`. Every path handed to delete_files must pass this: the journal
+// is JSON in the user's config directory, and a hand-edited or stale entry
+// must not be able to name a file outside the host's own skills directory.
+const is_within = (root: string, target: string): boolean=>{
+    const rel = path.relative(root, target);
+    return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+};
+
+// Removes the files we're told to, minus two carve-outs: anything outside
+// `target_root` (a tampered or stale journal entry) and anything another
+// host's own journal entry still claims (several flat hosts share the same
+// project-scope directory, see claimed_by_others). What's left is pruned back
+// to empty directories, but `target_root` itself is never removed.
+const delete_files = (files: string[], target_root: string, protected_files: Set<string> = new Set()): void=>{
+    const resolved_root = path.resolve(target_root);
     const dirs = new Set<string>();
     for (const file of files)
     {
+        const resolved = path.resolve(file);
+        if (!is_within(resolved_root, resolved) || protected_files.has(resolved))
+        {
+            continue;
+        }
         try {
-            fs.rmSync(file, {force: true});
+            fs.rmSync(resolved, {force: true});
         } catch {
             // Already gone — removal stays idempotent.
         }
-        dirs.add(path.dirname(file));
+        dirs.add(path.dirname(resolved));
     }
     for (const dir of [...dirs].sort((a, b)=>b.length - a.length))
     {
+        if (dir === resolved_root)
+        {
+            continue;
+        }
         try {
             if (!fs.readdirSync(dir).length)
             {
@@ -76,6 +110,48 @@ const delete_files = (files: string[]): void=>{
             // Non-empty or missing — leave it alone.
         }
     }
+};
+
+// Absolute file paths that some *other* host's journal entry for this exact
+// (scope, pack) still claims. Several flat hosts resolve the same physical
+// project-scope directory (`.agents/skills`), so deleting or overwriting one
+// host's copy must not break a sibling host's install of the same pack.
+const claimed_by_others = (env: Env | undefined, scope: Scope, pack_name: string, exclude_host: string): Set<string>=>{
+    const journal = read_journal(env);
+    const claimed = new Set<string>();
+    for (const [host, scopes] of Object.entries(journal.hosts))
+    {
+        if (host === exclude_host)
+        {
+            continue;
+        }
+        const entry = scopes[scope]?.[pack_name];
+        if (!entry)
+        {
+            continue;
+        }
+        for (const file of entry.files)
+        {
+            claimed.add(path.resolve(file));
+        }
+    }
+    return claimed;
+};
+
+// True when every file under `dir` is accounted for by files we already know
+// about — our own previous install of this pack, or a sibling host's install
+// of the same pack at a shared directory. Anything else sitting at `dir` is
+// foreign (typically user-authored) and must not be clobbered.
+const owns_dir = (dir: string, known_files: Iterable<string>): boolean=>{
+    const prefix = path.resolve(dir) + path.sep;
+    for (const file of known_files)
+    {
+        if (file.startsWith(prefix))
+        {
+            return true;
+        }
+    }
+    return false;
 };
 
 type Flat_opts = {
@@ -106,13 +182,21 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
     const base: Host_outcome = {
         host: id, label: host.def.label, kind: 'flat-skills-dir', scope, status: 'ok',
     };
+    // Scope-bound wrappers: every journal lookup for this run goes through
+    // these, so `scope` can never be forgotten at a call site.
+    const entry_for = (pack_name: string): Journal_entry | undefined=>
+        journal_entry(id, scope, pack_name, opts.env);
+    const record_for = (pack_name: string, data: Journal_entry): void=>
+        record_pack(id, scope, pack_name, data, opts.env);
+    const forget_for = (pack_name: string): Journal_entry | undefined=>
+        forget_pack(id, scope, pack_name, opts.env);
     const outcomes: Pack_outcome[] = [];
 
     if (operation === 'list')
     {
         for (const pack of packs)
         {
-            const entry = journal_entry(id, pack.name, opts.env);
+            const entry = entry_for(pack.name);
             if (!entry)
             {
                 continue;
@@ -124,19 +208,34 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
         return {...base, packs: outcomes};
     }
 
+    // Every other operation touches the filesystem, so a host with no
+    // directory configured for this scope (a native host under `user` scope)
+    // is reported, not crashed on.
+    const target_root = skills_target(host.def, scope, home, cwd);
+    if (!target_root)
+    {
+        return {
+            ...base,
+            status: 'skipped',
+            reason: 'no-skills-dir',
+            detail: `${host.def.label} has no ${scope} skills directory`,
+        };
+    }
+
     if (operation === 'remove')
     {
         for (const pack of [...packs].reverse())
         {
-            const entry = journal_entry(id, pack.name, opts.env);
+            const entry = entry_for(pack.name);
             if (!entry)
             {
                 continue;
             }
             if (!dry_run)
             {
-                delete_files(entry.files);
-                forget_pack(id, pack.name, opts.env);
+                const protected_files = claimed_by_others(opts.env, scope, pack.name, id);
+                delete_files(entry.files, target_root, protected_files);
+                forget_for(pack.name);
             }
             outcomes.push({name: pack.name, action: 'removed', version: entry.version});
         }
@@ -146,10 +245,10 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
     // install and update both need the repository contents. update only touches
     // packs the journal already knows about.
     const targets = operation === 'update'
-        ? packs.filter(p=>journal_entry(id, p.name, opts.env))
+        ? packs.filter(p=>entry_for(p.name))
         : packs;
     const pending = targets.filter(p=>{
-        const entry = journal_entry(id, p.name, opts.env);
+        const entry = entry_for(p.name);
         return operation === 'update' || !entry || entry.version !== p.version;
     });
     for (const pack of targets)
@@ -167,7 +266,7 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
     {
         for (const pack of pending)
         {
-            const entry = journal_entry(id, pack.name, opts.env);
+            const entry = entry_for(pack.name);
             outcomes.push(entry
                 ? {name: pack.name, action: 'upgraded', version: pack.version, from: entry.version}
                 : {name: pack.name, action: 'installed', version: pack.version});
@@ -188,41 +287,87 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
         };
     }
 
-    const target_root = skills_target(host.def, scope, home, cwd);
+    // A per-host filesystem failure here (a read-only destination, a corrupt
+    // clone layout, a journal write error) must become a Host_outcome, never
+    // a rejected promise — one host failing must never abort the others, and
+    // any pack already installed and journaled before the failure still counts.
     try {
         for (const pack of pending)
         {
             const from = path.join(cloned.dir, 'plugins', pack.name, 'skills');
-            const previous = journal_entry(id, pack.name, opts.env);
+            const previous = entry_for(pack.name);
+            const elsewhere = claimed_by_others(opts.env, scope, pack.name, id);
+            const known_files = previous
+                ? [...previous.files.map(f=>path.resolve(f)), ...elsewhere]
+                : [...elsewhere];
+            const skill_dirs = fs.readdirSync(from, {withFileTypes: true}).filter(e=>e.isDirectory());
+            const collision = skill_dirs.find(skill=>{
+                const dst_dir = path.join(target_root, skill.name);
+                return fs.existsSync(dst_dir) && !owns_dir(dst_dir, known_files);
+            });
+            if (collision)
+            {
+                outcomes.push({
+                    name: pack.name,
+                    action: 'failed',
+                    detail: `conflicts with an existing skill: ${collision.name}`,
+                });
+                continue;
+            }
             if (previous)
             {
-                delete_files(previous.files);
+                delete_files(previous.files, target_root, elsewhere);
             }
             const written: string[] = [];
-            for (const skill of fs.readdirSync(from, {withFileTypes: true}))
-            {
-                if (skill.isDirectory())
+            try {
+                for (const skill of skill_dirs)
                 {
-                    written.push(...copy_dir(path.join(from, skill.name), path.join(target_root, skill.name)));
+                    copy_dir(path.join(from, skill.name), path.join(target_root, skill.name), written);
                 }
+            } catch (copy_error) {
+                // Whatever landed before the failure is still on disk: journal
+                // it so a later `remove` can clean it up instead of leaving
+                // it as an orphan the journal never knew about.
+                if (written.length)
+                {
+                    record_for(pack.name, {
+                        version: pack.version, ref, commit: cloned.commit, scope,
+                        files: written, installed_at: new Date().toISOString(),
+                    });
+                }
+                throw copy_error;
             }
-            record_pack(id, pack.name, {
+            record_for(pack.name, {
                 version: pack.version,
                 ref,
                 commit: cloned.commit,
                 scope,
                 files: written,
                 installed_at: new Date().toISOString(),
-            }, opts.env);
+            });
             outcomes.push(previous
                 ? {name: pack.name, action: 'upgraded', version: pack.version, from: previous.version}
                 : {name: pack.name, action: 'installed', version: pack.version});
         }
+    } catch (error) {
+        return {
+            ...base,
+            status: outcomes.length ? 'partial' : 'failed',
+            packs: outcomes,
+            reason: 'copy-failed',
+            detail: (error as Error).message,
+            hint: 'check filesystem permissions for the skills directory, then re-run',
+        };
     } finally {
-        fs.rmSync(cloned.dir, {recursive: true, force: true});
+        try {
+            fs.rmSync(cloned.dir, {recursive: true, force: true});
+        } catch {
+            // Best-effort cleanup of the clone's temp directory — never masks
+            // the result computed above.
+        }
     }
     return {...base, packs: outcomes};
 };
 
-export {clone_repo, skills_target, run_flat};
+export {clone_repo, copy_dir, skills_target, run_flat};
 export type {Clone_fn, Clone_result, Flat_opts};
