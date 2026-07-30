@@ -68,8 +68,20 @@ describe('skills journal', ()=>{
         expect(read_journal(env())).toEqual({version: 1, hosts: {}});
     });
 
-    it('throws a RuntimeError on a corrupt journal', ()=>{
+    it('throws a RuntimeError on a corrupt journal (invalid JSON)', ()=>{
         fs.writeFileSync(path.join(dir, 'skills.json'), '{ not json');
+        expect(()=>read_journal(env())).toThrow(RuntimeError);
+    });
+
+    it('throws a RuntimeError on a corrupt journal (unexpected shape)', ()=>{
+        fs.writeFileSync(path.join(dir, 'skills.json'), '{"hosts": "nope"}');
+        expect(()=>read_journal(env())).toThrow(RuntimeError);
+    });
+
+    it('throws a RuntimeError on read errors other than ENOENT', ()=>{
+        const file_path = path.join(dir, 'skills.json');
+        // Create a directory at the file path to trigger EISDIR on readFileSync
+        fs.mkdirSync(file_path);
         expect(()=>read_journal(env())).toThrow(RuntimeError);
     });
 });

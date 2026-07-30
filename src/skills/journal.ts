@@ -25,15 +25,23 @@ type Journal = {
     hosts: Record<string, Record<string, Journal_entry>>;
 };
 
-const EMPTY: Journal = {version: 1, hosts: {}};
+const CORRUPT_HINT = 'Delete the file and re-run `reply skills install`.';
 
 const read_journal = (env?: Env): Journal=>{
     const file = skills_file(env);
     let raw: string;
     try {
         raw = fs.readFileSync(file, 'utf8');
-    } catch {
-        return {version: 1, hosts: {}};
+    } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === 'ENOENT')
+        {
+            return {version: 1, hosts: {}};
+        }
+        throw new RuntimeError('Could not read the skills journal.', {
+            code: 'skills.journal_read',
+            detail: file,
+            hint: (e as Error).message,
+        });
     }
     if (!raw.trim())
     {
@@ -43,19 +51,19 @@ const read_journal = (env?: Env): Journal=>{
     try {
         parsed = JSON.parse(raw);
     } catch {
-        throw new RuntimeError('The skills journal is corrupt.', {
+        throw new RuntimeError('The skills journal is corrupt (invalid JSON).', {
             code: 'skills.journal_corrupt',
             detail: file,
-            hint: 'Delete the file and re-run `reply skills install`.',
+            hint: CORRUPT_HINT,
         });
     }
     const doc = parsed as Journal;
     if (!doc || typeof doc !== 'object' || Array.isArray(doc) || typeof doc.hosts !== 'object' || !doc.hosts)
     {
-        throw new RuntimeError('The skills journal is corrupt.', {
+        throw new RuntimeError('The skills journal is corrupt (unexpected shape).', {
             code: 'skills.journal_corrupt',
             detail: file,
-            hint: 'Delete the file and re-run `reply skills install`.',
+            hint: CORRUPT_HINT,
         });
     }
     return {version: 1, hosts: doc.hosts};
@@ -63,8 +71,11 @@ const read_journal = (env?: Env): Journal=>{
 
 const write_journal = (journal: Journal, env?: Env): void=>{
     const file = skills_file(env);
-    fs.mkdirSync(path.dirname(file), {recursive: true, mode: 0o700});
-    fs.writeFileSync(file, JSON.stringify(journal, null, 2) + '\n', 'utf8');
+    const dir = path.dirname(file);
+    fs.mkdirSync(dir, {recursive: true, mode: 0o700});
+    const tmp = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(journal, null, 2) + '\n', 'utf8');
+    fs.renameSync(tmp, file);
 };
 
 const journal_entry = (host: string, pack: string, env?: Env): Journal_entry | undefined=>
@@ -93,5 +104,5 @@ const forget_pack = (host: string, pack: string, env?: Env): Journal_entry | und
     return existing;
 };
 
-export {EMPTY, read_journal, write_journal, journal_entry, record_pack, forget_pack};
+export {read_journal, write_journal, journal_entry, record_pack, forget_pack};
 export type {Journal, Journal_entry};
