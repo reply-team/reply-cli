@@ -27,6 +27,8 @@ describe('detect_hosts', ()=>{
         const found = detect_hosts(deps_with(['.claude'], ['claude']));
         expect(found.map(h=>h.def.id)).toEqual(['claude-code']);
         expect(found[0].bin).toBe('/usr/bin/claude');
+        const home = path.join(os.tmpdir(), 'fake-home');
+        expect(found[0].config_dir).toBe(path.join(home, '.claude'));
     });
 
     it('detects a native host with no resolvable binary and leaves bin unset', ()=>{
@@ -88,6 +90,53 @@ describe('default_detect_deps', ()=>{
             expect(deps.home.length).toBeGreaterThan(0);
         } finally {
             fs.rmSync(dir, {recursive: true, force: true});
+        }
+    });
+
+    it('glob_first expands a wildcard to resolve off-PATH binaries', ()=>{
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'reply-glob-'));
+        try {
+            // Build: <root>/AppData/Local/OpenAI/Codex/bin/abc123hash/codex.exe
+            const binDir = path.join(root, 'AppData', 'Local', 'OpenAI', 'Codex', 'bin', 'abc123hash');
+            fs.mkdirSync(binDir, {recursive: true});
+            const exePath = path.join(binDir, 'codex.exe');
+            fs.writeFileSync(exePath, '');
+
+            const deps = default_detect_deps();
+            const pattern = path.join(root, 'AppData', 'Local', 'OpenAI', 'Codex', 'bin', '*', 'codex.exe');
+            expect(deps.glob_first(pattern)).toBe(exePath);
+        } finally {
+            fs.rmSync(root, {recursive: true, force: true});
+        }
+    });
+
+    it('glob_first returns undefined when no entry in the wildcard directory matches the tail', ()=>{
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'reply-glob-'));
+        try {
+            // Build: <root>/bin/abc123hash/other.exe (no codex.exe)
+            const binDir = path.join(root, 'bin', 'abc123hash');
+            fs.mkdirSync(binDir, {recursive: true});
+            fs.writeFileSync(path.join(binDir, 'other.exe'), '');
+
+            const deps = default_detect_deps();
+            const pattern = path.join(root, 'bin', '*', 'codex.exe');
+            expect(deps.glob_first(pattern)).toBeUndefined();
+        } finally {
+            fs.rmSync(root, {recursive: true, force: true});
+        }
+    });
+
+    it('glob_first treats a pattern with no wildcard as a plain existence check', ()=>{
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'reply-glob-'));
+        try {
+            const exePath = path.join(root, 'codex.exe');
+            fs.writeFileSync(exePath, '');
+
+            const deps = default_detect_deps();
+            expect(deps.glob_first(exePath)).toBe(exePath);
+            expect(deps.glob_first(path.join(root, 'nope.exe'))).toBeUndefined();
+        } finally {
+            fs.rmSync(root, {recursive: true, force: true});
         }
     });
 });

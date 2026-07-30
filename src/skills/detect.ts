@@ -29,7 +29,7 @@ const glob_first_real = (pattern: string): string | undefined=>{
     {
         return fs.existsSync(pattern) ? pattern : undefined;
     }
-    const parent = path.dirname(pattern.slice(0, star));
+    const parent = pattern.slice(0, star).replace(/[\\/]+$/, '');
     const tail = pattern.slice(pattern.indexOf(path.sep, star) + 1);
     let entries: string[];
     try {
