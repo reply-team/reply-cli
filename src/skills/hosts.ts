@@ -15,6 +15,7 @@ const claude_cli: Host_cli = {
     install: (pack, marketplace, scope)=>['plugin', 'install', `${pack}@${marketplace}`, '--scope', scope],
     update: (pack, marketplace)=>['plugin', 'update', `${pack}@${marketplace}`],
     remove: (pack, marketplace)=>['plugin', 'uninstall', `${pack}@${marketplace}`],
+    update_scope: 'pack',
 };
 
 // Codex spells the same operations differently and takes --json on all of them.
@@ -24,6 +25,7 @@ const codex_cli: Host_cli = {
     install: (pack, marketplace)=>['plugin', 'add', `${pack}@${marketplace}`, '--json'],
     update: (_pack, marketplace)=>['plugin', 'marketplace', 'upgrade', marketplace, '--json'],
     remove: (pack, marketplace)=>['plugin', 'remove', `${pack}@${marketplace}`, '--json'],
+    update_scope: 'marketplace',
 };
 
 const HOSTS: Host_def[] = [

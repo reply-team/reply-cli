@@ -37,12 +37,14 @@ const runner_of = (results: Run_result[]): {run: Runner; calls: string[][]}=>{
 describe('installed_versions', ()=>{
     it('maps pack name to version from the host list', async()=>{
         const {run} = runner_of([ok(claude_list([{name: 'ai-sdr-core', version: '0.1.0'}]))]);
-        expect(await installed_versions(claude(), run)).toEqual({'ai-sdr-core': '0.1.0'});
+        const result = await installed_versions(claude(), run);
+        expect(result).toEqual({ok: true, versions: {'ai-sdr-core': '0.1.0'}});
     });
 
-    it('returns an empty map when the host prints nothing usable', async()=>{
+    it('returns failure when the host prints nothing usable', async()=>{
         const {run} = runner_of([ok('not json')]);
-        expect(await installed_versions(claude(), run)).toEqual({});
+        const result = await installed_versions(claude(), run);
+        expect(result).toEqual({ok: false});
     });
 });
 
@@ -84,7 +86,7 @@ describe('run_native install', ()=>{
         expect(calls).toHaveLength(3);
         expect(outcome.status).toBe('failed');
         expect(outcome.packs?.map(p=>[p.name, p.action])).toEqual([['ai-sdr-core', 'failed']]);
-        expect(outcome.hint).toContain('ai-sdr-core');
+        expect(outcome.hint).toContain('reply-adapter');
     });
 
     it('is partial when an independent pack fails but the core succeeded', async()=>{
@@ -168,5 +170,86 @@ describe('run_native list and update', ()=>{
         expect(calls[0]).toEqual(['/usr/bin/claude', 'plugin', 'marketplace', 'add', 'reply-team/reply-skills']);
         expect(calls[2]).toEqual(['/usr/bin/claude', 'plugin', 'update', 'ai-sdr-core@reply-skills']);
         expect(outcome.packs?.map(p=>p.name)).toEqual(['ai-sdr-core']);
+    });
+
+    it('update on Codex fires marketplace upgrade once for all installed packs', async()=>{
+        const listing_before = JSON.stringify({installed: [
+            {name: 'ai-sdr-core', version: '0.0.9', marketplaceName: 'reply-skills'},
+            {name: 'reply-adapter', version: '0.0.8', marketplaceName: 'reply-skills'},
+            {name: 'agentic-runtime', version: '0.0.7', marketplaceName: 'reply-skills'},
+        ]});
+        const listing_after = JSON.stringify({installed: [
+            {name: 'ai-sdr-core', version: '0.1.0', marketplaceName: 'reply-skills'},
+            {name: 'reply-adapter', version: '0.1.0', marketplaceName: 'reply-skills'},
+            {name: 'agentic-runtime', version: '0.1.0', marketplaceName: 'reply-skills'},
+        ]});
+        const {run, calls} = runner_of([ok('{}'), ok(listing_before), ok('{}'), ok(listing_after)]);
+        const outcome = await run_native({operation: 'update', host: codex(), packs: all, scope: 'user', run});
+        expect(calls.filter(c=>c[1] === 'plugin' && c[2] === 'marketplace' && c[3] === 'upgrade')).toHaveLength(1);
+        expect(outcome.packs?.map(p=>[p.name, p.action])).toEqual([['ai-sdr-core', 'upgraded'], ['reply-adapter', 'upgraded'], ['agentic-runtime', 'upgraded']]);
+    });
+
+    it('update reports current for pack already at target version', async()=>{
+        const {run, calls} = runner_of([ok(), ok(claude_list([{name: 'ai-sdr-core', version: '0.1.0'}])), ok(claude_list([{name: 'ai-sdr-core', version: '0.1.0'}]))]);
+        const outcome = await run_native({operation: 'update', host: claude(), packs: core_only, scope: 'user', run});
+        expect(outcome.packs).toEqual([{name: 'ai-sdr-core', action: 'current', version: '0.1.0'}]);
+        expect(calls).toHaveLength(2);
+    });
+
+    it('failed list on remove returns failed status with list-failed reason', async()=>{
+        const {run, calls} = runner_of([fail('network error')]);
+        const outcome = await run_native({operation: 'remove', host: claude(), packs: core_only, scope: 'user', run});
+        expect(outcome.status).toBe('failed');
+        expect(outcome.reason).toBe('list-failed');
+        expect(outcome.detail).toContain('network error');
+        expect(calls).toHaveLength(1);
+    });
+
+    it('failed list on update returns failed status with list-failed reason', async()=>{
+        const {run, calls} = runner_of([ok(), fail('network error')]);
+        const outcome = await run_native({operation: 'update', host: claude(), packs: core_only, scope: 'user', run});
+        expect(outcome.status).toBe('failed');
+        expect(outcome.reason).toBe('list-failed');
+        expect(calls).toHaveLength(2);
+    });
+
+    it('failed list on list returns failed status with list-failed reason', async()=>{
+        const {run, calls} = runner_of([fail('network error')]);
+        const outcome = await run_native({operation: 'list', host: claude(), packs: all, scope: 'user', run});
+        expect(outcome.status).toBe('failed');
+        expect(outcome.reason).toBe('list-failed');
+        expect(calls).toHaveLength(1);
+    });
+
+    it('plugin from different marketplace is treated as installed, not current', async()=>{
+        const other_marketplace_list = JSON.stringify({plugins: [{name: 'ai-sdr-core', version: '0.1.0', marketplace: 'someone-else', enabled: true}]});
+        const {run} = runner_of([ok(), ok(other_marketplace_list)]);
+        const outcome = await run_native({operation: 'install', host: claude(), packs: core_only, scope: 'user', run});
+        expect(outcome.packs).toEqual([{name: 'ai-sdr-core', action: 'installed', version: '0.1.0'}]);
+    });
+
+    it('transitive dependency chain: A fails, B depends on A, C depends on B', async()=>{
+        // Build a synthetic three-pack chain: chainA -> chainB -> chainC
+        const chainA: Pack = {name: 'chainA', display_name: 'Chain A', version: '1.0.0', description: '', dependencies: []};
+        const chainB: Pack = {name: 'chainB', display_name: 'Chain B', version: '1.0.0', description: '', dependencies: ['chainA']};
+        const chainC: Pack = {name: 'chainC', display_name: 'Chain C', version: '1.0.0', description: '', dependencies: ['chainB']};
+        const chain_packs = [chainA, chainB, chainC];
+        const {run, calls} = runner_of([ok(), ok(claude_list([])), fail('A failed')]);
+        const outcome = await run_native({operation: 'install', host: claude(), packs: chain_packs, scope: 'user', run});
+        // Should have calls: marketplace add, list json, chainA install. No chainB or chainC install.
+        const install_calls = calls.filter(c=>c[2] === 'install');
+        expect(install_calls).toHaveLength(1);
+        expect(install_calls[0][3]).toEqual('chainA@reply-skills');
+        expect(outcome.status).toBe('failed');
+        expect(outcome.hint).toContain('chainB');
+        expect(outcome.hint).toContain('chainC');
+    });
+
+    it('failure that blocks nothing produces no hint', async()=>{
+        // reply-adapter fails but nothing depends on it, so no hint
+        const {run} = runner_of([ok(), ok(claude_list([])), ok(), fail(), ok()]);
+        const outcome = await run_native({operation: 'install', host: claude(), packs: all, scope: 'user', run});
+        expect(outcome.status).toBe('partial');
+        expect(outcome.hint).toBeUndefined();
     });
 });

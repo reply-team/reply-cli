@@ -26,6 +26,9 @@ type Host_cli = {
     install: (pack: string, marketplace: string, scope: Scope)=>string[];
     update: (pack: string, marketplace: string)=>string[];
     remove: (pack: string, marketplace: string)=>string[];
+    // Scope of the update operation: 'pack' for per-pack updates (Claude Code),
+    // 'marketplace' for whole-marketplace updates (Codex).
+    update_scope: 'pack' | 'marketplace';
 };
 
 type Host_def = {
