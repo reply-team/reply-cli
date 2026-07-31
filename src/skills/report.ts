@@ -66,8 +66,14 @@ const host_line = (host: Host_outcome, report_action: Operation): string=>{
     return `${mark} ${label}· ${parts.join('; ')}${note}`;
 };
 
+// Whether this run put anything new in front of the assistant, and so whether
+// the user has to start a new session. The action labels alone cannot answer
+// it: an unchanged version reports `current` in every adapter, which is right,
+// but a flat host re-copying a newer commit at that same version did rewrite
+// the files. `refreshed` carries exactly that, so both facts are consulted.
 const changed = (report: Report): boolean=>report.hosts.some(h=>
-    (h.packs ?? []).some(p=>p.action === 'installed' || p.action === 'upgraded'));
+    (h.packs ?? []).some(p=>
+        p.action === 'installed' || p.action === 'upgraded' || p.refreshed === true));
 
 const human_lines = (report: Report): string[]=>{
     const lines: string[] = [];

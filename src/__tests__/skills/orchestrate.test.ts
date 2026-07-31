@@ -247,6 +247,24 @@ describe('run_skills', ()=>{
         expect(human_lines(report).join('\n')).not.toMatch(/new session/i);
     });
 
+    // The flat adapter clones a ref, so `update` can rewrite every file while
+    // the version stays 0.1.0. That still reports `current` — the version did
+    // not move — but the user must reload to pick the new files up.
+    it('still advises a new session when update rewrote files at an unchanged version', async()=>{
+        const clone_at = (commit: string)=>async()=>{
+            const {dir} = await fake_clone();
+            return {dir, commit};
+        };
+        await run_skills(opts({agents: ['cursor'], deps: {...opts().deps, clone: clone_at('aaaaaaa')}}));
+        const report = await run_skills(opts({
+            operation: 'update', agents: ['cursor'],
+            deps: {...opts().deps, clone: clone_at('bbbbbbb')},
+        }));
+
+        expect(report.hosts[0].packs?.map(p=>p.action)).toEqual(['current', 'current', 'current']);
+        expect(human_lines(report).join('\n')).toMatch(/new session/i);
+    });
+
     // I5 (final review): four hosts ship with paths taken from documentation
     // rather than a verification run, and nothing surfaced it.
     it('carries each host\'s verified flag into the report', async()=>{

@@ -563,6 +563,10 @@ describe('run_flat incomplete installs', ()=>{
         const entry = journal_entry('cursor', 'user', 'ai-sdr-core', env());
         expect(entry?.complete).toBe(true);
         expect(entry?.files.length).toBeGreaterThan(0);
+        // The version did not move, but a broken install became a working one:
+        // the files in front of the assistant are new, so the outcome has to
+        // say so or the reporter cannot advise a new session.
+        expect(outcome.packs?.[0].refreshed).toBe(true);
     });
 
     it('journals a copy failure as incomplete with only the files that actually landed, never the stale complete entry', async()=>{
@@ -612,6 +616,45 @@ describe('run_flat incomplete installs', ()=>{
 
         expect(outcome.packs?.map(p=>p.action)).not.toContain('current');
         expect(outcome.status).not.toBe('ok');
+    });
+});
+
+// This adapter clones a *ref*, so a new commit on `main` can rewrite every
+// file while the version stays 0.1.0. Reporting `current` for that is right —
+// the version really did not move — but the outcome must still record that the
+// bytes did, or a run that rewrote the user's files reads as a no-op.
+describe('run_flat re-copy at an unchanged version', ()=>{
+    // Same layout as fake_clone, different commit — as a second `update` a day
+    // later would see after the ref moved.
+    const clone_at = (commit: string)=>async()=>{
+        await fake_clone();
+        return {dir: clone_dir, commit};
+    };
+
+    it('marks the pack refreshed when the ref moved but the version did not', async()=>{
+        await run_flat({...flat_opts('install', core_only), clone: clone_at('aaaaaaa')});
+        const outcome = await run_flat({...flat_opts('update', core_only), clone: clone_at('bbbbbbb')});
+
+        expect(outcome.packs).toEqual([{
+            name: 'ai-sdr-core', action: 'current', version: '0.1.0', refreshed: true,
+        }]);
+        expect(journal_entry('cursor', 'user', 'ai-sdr-core', env())?.commit).toBe('bbbbbbb');
+    });
+
+    it('does not mark it refreshed when the same commit is re-copied', async()=>{
+        await run_flat({...flat_opts('install', core_only), clone: clone_at('aaaaaaa')});
+        const outcome = await run_flat({...flat_opts('update', core_only), clone: clone_at('aaaaaaa')});
+
+        expect(outcome.packs).toEqual([{name: 'ai-sdr-core', action: 'current', version: '0.1.0'}]);
+    });
+
+    it('never guesses on --dry-run, which does not clone', async()=>{
+        await run_flat({...flat_opts('install', core_only), clone: clone_at('aaaaaaa')});
+        const outcome = await run_flat({
+            ...flat_opts('update', core_only), dry_run: true,
+            clone: async()=>{ throw new Error('a dry run must not clone'); },
+        });
+        expect(outcome.packs).toEqual([{name: 'ai-sdr-core', action: 'current', version: '0.1.0'}]);
     });
 });
 

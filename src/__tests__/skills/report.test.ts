@@ -145,6 +145,17 @@ describe('human_lines', ()=>{
         expect(out).not.toMatch(/new session/i);
     });
 
+    // An unchanged version reports `current` in every adapter, which is right —
+    // but a flat host that re-copied a newer commit at that same version did
+    // rewrite the files, and the user has to reload to pick them up.
+    it('asks for a new session when files were rewritten at an unchanged version', ()=>{
+        const out = text(report([host({
+            packs: [{name: 'ai-sdr-core', action: 'current', version: '0.1.0', refreshed: true}],
+        })]));
+        expect(out).toContain('already current');
+        expect(out).toMatch(/new session/i);
+    });
+
     it('marks an outdated pack as an available update on list, not as updated', ()=>{
         const out = text(report([host({
             packs: [{name: 'ai-sdr-core', action: 'upgraded', version: '0.2.0', from: '0.1.0'}],

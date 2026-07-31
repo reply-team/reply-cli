@@ -58,6 +58,14 @@ type Pack_outcome = {
     version?: string;
     from?: string;
     detail?: string;
+    // Set by the flat adapter on a `current` pack whose files this run
+    // rewrote anyway: a newer commit on the same ref, or a repair of an
+    // install that never finished. The version did not move — so the action
+    // is `current`, never `upgraded` — but the bytes on disk did, and that is
+    // what decides whether the user has to start a new assistant session.
+    // Never set by a native host, which cannot see below its own plugin CLI,
+    // and never by a dry run, which does not clone and so cannot know.
+    refreshed?: boolean;
 };
 
 type Host_status = 'ok' | 'partial' | 'failed' | 'skipped';

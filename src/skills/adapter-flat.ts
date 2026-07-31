@@ -249,14 +249,36 @@ const kept_hint = (names: Iterable<string>): string | undefined=>{
 // even though this adapter really did re-copy from a fresh clone — the commit
 // carries that difference, the version does not. Mirrors
 // adapter-native.ts's updated_outcome so `current` means one thing everywhere.
-const copied_outcome = (name: string, version: string, from?: string): Pack_outcome=>{
-    if (from === undefined)
+//
+// But "the version moved" and "the bytes moved" are two different facts, and
+// this adapter clones a *ref*: a new commit on `main` can rewrite every file
+// at an unchanged 0.1.0, and so can repairing an install that never finished.
+// `current` cannot say that, so `refreshed` does — otherwise a run that really
+// did rewrite the user's files reads as a no-op and the reporter never tells
+// them to start a new session.
+//
+// `commit` is the commit these files were copied from, and is passed only by
+// the path that actually copied: a dry run never clones, so it cannot know
+// whether the ref moved and must not guess.
+const copied_outcome = (
+    pack_name: string,
+    version: string,
+    previous: Journal_entry | undefined,
+    commit?: string,
+): Pack_outcome=>{
+    if (previous === undefined)
     {
-        return {name, action: 'installed', version};
+        return {name: pack_name, action: 'installed', version};
     }
-    return from === version
-        ? {name, action: 'current', version}
-        : {name, action: 'upgraded', version, from};
+    if (previous.version !== version)
+    {
+        return {name: pack_name, action: 'upgraded', version, from: previous.version};
+    }
+    const refreshed = commit !== undefined
+        && (previous.commit !== commit || !previous.complete);
+    return refreshed
+        ? {name: pack_name, action: 'current', version, refreshed: true}
+        : {name: pack_name, action: 'current', version};
 };
 
 type Flat_opts = {
@@ -435,7 +457,7 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
     {
         for (const pack of pending)
         {
-            outcomes.push(copied_outcome(pack.name, pack.version, entry_for(pack.name)?.version));
+            outcomes.push(copied_outcome(pack.name, pack.version, entry_for(pack.name)));
         }
         return {...base, packs: outcomes};
     }
@@ -531,7 +553,7 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
                 complete: true,
                 installed_at: new Date().toISOString(),
             });
-            outcomes.push(copied_outcome(pack.name, pack.version, previous?.version));
+            outcomes.push(copied_outcome(pack.name, pack.version, previous, cloned.commit));
         }
     } catch (error) {
         // outcomes.length is not "something landed" — every entry pushed so
