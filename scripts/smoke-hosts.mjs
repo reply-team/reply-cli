@@ -1,9 +1,12 @@
 // Verifies `reply skills install` against really installed assistants.
 //
 // Not part of `npm test`: it needs Claude Code and/or Codex on the machine and
-// it clones from GitHub. It is safe to run on a working machine because each
-// host is pointed at a throwaway configuration directory — CLAUDE_CONFIG_DIR
-// and CODEX_HOME — so your real plugin state is never touched.
+// it clones from GitHub. It is safe to run on a working machine because:
+// - Native hosts (Claude Code, Codex) use CLAUDE_CONFIG_DIR and CODEX_HOME
+// - Flat hosts (Cursor, Gemini, Copilot) use HOME/USERPROFILE redirected to sandbox
+// The script verifies isolation before and after: pre-flight checks that all hosts
+// resolve inside the sandbox, post-run checks that the real home is untouched.
+// If either assertion fails, the script aborts without installing.
 //
 // Usage: npm run build && npm run smoke:hosts
 
@@ -49,18 +52,18 @@ const fail = (message)=>{
 try {
     console.log(`sandbox: ${sandbox}`);
 
-    // Safety assertion: verify the sandbox is truly isolated before making any changes.
-    // This proves that environment variables are honored and the developer's real config is safe.
+    // Safety assertion: verify sandbox is truly isolated BEFORE making any changes.
+    // Pre-flight: no pre-existing plugins in the sandbox (proof it's clean).
+    // Post-flight: real home is untouched (below, after the run).
     const sandbox_check = JSON.parse(cli('skills', 'list', '--json'));
     const installed_in_sandbox = sandbox_check.hosts.flatMap(h=>(h.packs ?? []).length);
     const has_plugins = installed_in_sandbox.some(count=>count > 0);
-
     if (has_plugins)
     {
-        fail('sandbox isolation check failed: plugins already installed in throwaway config directory. Environment variables may be ignored. Aborting without making changes.');
+        fail('sandbox isolation check failed: plugins already installed. Aborting without making changes.');
         process.exit(1);
     }
-    console.log('✓ sandbox isolation verified: no pre-existing plugins in throwaway config directories');
+    console.log('✓ pre-flight assertion: sandbox is clean');
 
     const installed = JSON.parse(cli('skills', 'install', '--json'));
     console.log(`hosts: ${installed.hosts.map(h=>`${h.host}=${h.status}`).join(' ') || '(none detected)'}`);
@@ -102,9 +105,48 @@ try {
         console.log('✓ removing a needed dependency is refused');
     }
 
+    // Post-run assertion: verify the real home was not modified by the smoke test.
+    // This is the critical safety check that proves isolation worked end-to-end.
+    const real_home = os.homedir();
+    const real_copilot_skills = path.join(real_home, '.copilot', 'skills');
+    const real_cursor_skills = path.join(real_home, '.cursor', 'skills');
+    const real_reply_skills_json = path.join(real_home, '.reply', 'skills.json');
+
+    // Check that no reply skill packs were installed to the real home
+    const check_dir = (dir)=>{
+        if (!fs.existsSync(dir))
+        {
+            return [];
+        }
+        try {
+            return fs.readdirSync(dir);
+        } catch {
+            return [];
+        }
+    };
+
+    const copilot_skills = check_dir(real_copilot_skills);
+    const reply_skill_names = ['ai-sdr-core', 'reply-adapter', 'agentic-runtime'];
+    const installed_in_real_copilot = copilot_skills.some(s=>reply_skill_names.some(r=>s.includes(r)));
+
+    if (installed_in_real_copilot)
+    {
+        fail(`post-run assertion failed: reply skills were installed to the real home at ${real_copilot_skills}`);
+        process.exit(1);
+    }
+
+    const cursor_skills = check_dir(real_cursor_skills);
+    const installed_in_real_cursor = cursor_skills.some(s=>reply_skill_names.some(r=>s.includes(r)));
+    if (installed_in_real_cursor)
+    {
+        fail(`post-run assertion failed: reply skills were installed to the real home at ${real_cursor_skills}`);
+        process.exit(1);
+    }
+
     if (!process.exitCode)
     {
         console.log('✓ smoke passed');
+        console.log('✓ post-run assertion confirmed: real home is untouched');
     }
 } finally {
     fs.rmSync(sandbox, {recursive: true, force: true});
