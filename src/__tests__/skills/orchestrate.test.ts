@@ -177,4 +177,46 @@ describe('run_skills', ()=>{
         expect(report.hosts[0].packs?.map(p=>p.action)).toEqual(['removed', 'removed', 'removed']);
         expect(fs.existsSync(path.join(home, '.cursor', 'skills', 'ai-sdr-core-skill'))).toBe(false);
     });
+
+    it('keeps other hosts working when one host throws unexpectedly', async()=>{
+        // run_native has no try/catch of its own around its process calls, so
+        // an injected Runner that rejects escapes it — exactly the kind of
+        // surprise (a journal write racing an antivirus scanner, a flaky
+        // network call) the orchestrator itself must contain per host.
+        const flaky_run: Runner = async(bin, args)=>{
+            if (bin === '/usr/bin/claude')
+            {
+                throw new Error('ECONNRESET');
+            }
+            return run(bin, args);
+        };
+        const report = await run_skills(opts({
+            agents: ['claude-code', 'cursor'],
+            deps: {...opts().deps, run: flaky_run},
+        }));
+        expect(report.hosts.map(h=>h.host)).toEqual(['claude-code', 'cursor']);
+        expect(report.hosts[0]).toEqual(expect.objectContaining({
+            host: 'claude-code', status: 'failed', reason: 'host-error', detail: 'ECONNRESET',
+        }));
+        // The second host was never touched by the first host's failure.
+        expect(report.hosts[1].status).toBe('ok');
+        expect(fs.existsSync(path.join(home, '.cursor', 'skills', 'ai-sdr-core-skill', 'SKILL.md'))).toBe(true);
+    });
+
+    it('reports no commit when nothing was cloned this run (native-only)', async()=>{
+        const report = await run_skills(opts({agents: ['claude-code']}));
+        expect(report.source).toEqual({repo: 'reply-team/reply-skills', ref: 'main'});
+    });
+
+    it('reports no commit when the clone failed', async()=>{
+        const failing_clone = async()=>{
+            throw new Error('git not found');
+        };
+        const report = await run_skills(opts({
+            agents: ['cursor'],
+            deps: {...opts().deps, clone: failing_clone},
+        }));
+        expect(report.hosts[0]).toEqual(expect.objectContaining({status: 'failed', reason: 'clone-failed'}));
+        expect(report.source).toEqual({repo: 'reply-team/reply-skills', ref: 'main'});
+    });
 });

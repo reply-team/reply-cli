@@ -72,6 +72,13 @@ type Host_outcome = {
     reason?: string;
     detail?: string;
     hint?: string;
+    // The commit a flat host actually cloned in this run — set only when this
+    // run cloned the skills repository (never on a native host, and never
+    // when nothing was pending, a dry run skipped the clone, or the clone
+    // itself failed). This is what lets the orchestrator report the source
+    // commit without ever attributing a stale or foreign one to a run that
+    // did not produce it.
+    commit?: string;
 };
 
 type Operation = 'install' | 'list' | 'update' | 'remove';

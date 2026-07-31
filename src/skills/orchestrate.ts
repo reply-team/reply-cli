@@ -2,7 +2,6 @@ import os from 'os';
 import {run_flat, type Clone_fn} from './adapter-flat';
 import {run_native} from './adapter-native';
 import {default_detect_deps, select_hosts, type Detect_deps} from './detect';
-import {journal_entry} from './journal';
 import {DEFAULT_REF, REPO, load_packs, resolve_packs} from './packs';
 import {summarize} from './report';
 import {UsageError} from '../utils/errors';
@@ -86,7 +85,6 @@ const run_skills = async(opts: Skills_opts): Promise<Report>=>{
 
     const {selected, missing} = select_hosts(opts.agents, detect);
     const hosts: Host_outcome[] = [];
-    let commit: string | undefined;
 
     for (const host of selected)
     {
@@ -95,17 +93,33 @@ const run_skills = async(opts: Skills_opts): Promise<Report>=>{
         // can, Codex cannot.
         const native = host.def.kind === 'native-plugin'
             && !(scope === 'project' && host.def.id === 'codex');
-        const outcome = native
-            ? await run_native({
-                operation: opts.operation, host, packs, scope,
-                run: deps.run, dry_run: opts.dry_run,
-            })
-            : await run_flat({
-                operation: opts.operation, host, packs, scope, ref,
-                run: deps.run, clone: deps.clone, dry_run: opts.dry_run,
-                home: deps.home ?? detect.home, cwd: deps.cwd,
-                tmp_root: deps.tmp_root ?? os.tmpdir(), env: deps.env,
-            });
+        let outcome: Host_outcome;
+        try {
+            outcome = native
+                ? await run_native({
+                    operation: opts.operation, host, packs, scope,
+                    run: deps.run, dry_run: opts.dry_run,
+                })
+                : await run_flat({
+                    operation: opts.operation, host, packs, scope, ref,
+                    run: deps.run, clone: deps.clone, dry_run: opts.dry_run,
+                    home: deps.home ?? detect.home, cwd: deps.cwd,
+                    tmp_root: deps.tmp_root ?? os.tmpdir(), env: deps.env,
+                });
+        } catch (error) {
+            // An adapter is expected to turn every failure it knows about
+            // into a Host_outcome; this is the backstop for the ones it
+            // doesn't (a journal write racing an antivirus scanner, a corrupt
+            // journal file) — one host's surprise must never take the others
+            // down with it.
+            outcome = {
+                host: host.def.id, label: host.def.label, kind: host.def.kind, scope,
+                status: 'failed',
+                reason: 'host-error',
+                detail: (error as Error).message,
+                hint: `re-run \`reply skills ${opts.operation}\` once the underlying error for ${host.def.label} is resolved`,
+            };
+        }
         hosts.push(outcome);
     }
     for (const def of missing)
@@ -113,23 +127,16 @@ const run_skills = async(opts: Skills_opts): Promise<Report>=>{
         hosts.push(not_detected(def.id, def.label, def.kind));
     }
 
-    // The commit is only known when something was cloned; native installs are
-    // resolved by the host, which reports versions, not commits.
-    const flat_used = hosts.some(h=>h.kind === 'flat-skills-dir' && h.status !== 'skipped');
-    if (flat_used && !opts.dry_run)
-    {
-        for (const pack of packs)
-        {
-            for (const host of hosts)
-            {
-                const entry = journal_entry(host.host, scope, pack.name, deps.env);
-                if (entry?.commit)
-                {
-                    commit = entry.commit;
-                }
-            }
-        }
-    }
+    // The commit is only known when this run itself cloned something: a flat
+    // host stamps its own outcome with the commit it cloned (see
+    // adapter-flat.ts), and only then — never on a native host, a skip, or a
+    // failure that never reached a clone. Reading it off the outcomes (rather
+    // than the journal) means a stale entry from an earlier run, or one that
+    // belongs to a different host, can never be attributed to this run. If
+    // flat hosts somehow disagree — cloning at different moments within the
+    // same run — no commit is reported rather than an arbitrary one.
+    const commits = new Set(hosts.map(h=>h.commit).filter((c): c is string=>!!c));
+    const commit = commits.size === 1 ? [...commits][0] : undefined;
 
     // `requested` is what the user asked for in canonical form; `resolved` is
     // that plus dependencies. Both are reported so an agent sees the pull

@@ -319,6 +319,10 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
             hint: 'install git (the flat-directory install clones the skills repository), then re-run',
         };
     }
+    // Stamped only now that a clone actually happened this run — every
+    // return past this point reports the commit this run cloned, never a
+    // journal entry from some earlier run or a sibling host.
+    const cloned_base: Host_outcome = {...base, commit: cloned.commit};
 
     // A per-host filesystem failure here (a read-only destination, a corrupt
     // clone layout, a journal write error) must become a Host_outcome, never
@@ -404,7 +408,7 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
         // far could itself be a collision failure, so check the actions.
         const landed = outcomes.some(p=>p.action !== 'failed');
         return {
-            ...base,
+            ...cloned_base,
             status: landed ? 'partial' : 'failed',
             packs: outcomes,
             reason: 'copy-failed',
@@ -419,7 +423,7 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
             // the result computed above.
         }
     }
-    return {...base, packs: outcomes, status: status_of(outcomes), hint: blocked_hint()};
+    return {...cloned_base, packs: outcomes, status: status_of(outcomes), hint: blocked_hint()};
 };
 
 export {clone_repo, copy_dir, skills_target, run_flat};
