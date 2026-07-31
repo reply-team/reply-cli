@@ -24,6 +24,12 @@ server. `fetch` is stubbed, and the OAuth loopback flow is exercised against a
 local `127.0.0.1` listener with an injected browser stub. CI runs the build and
 tests on Linux and Windows.
 
+`npm run smoke:hosts` is a separate check that installs the skill packs into the
+assistants actually present on your machine (Claude Code, Codex). It is not part
+of `npm test` because it needs those assistants installed and it clones from
+GitHub. It is safe to run: each host is pointed at a throwaway config directory
+(`CLAUDE_CONFIG_DIR`, `CODEX_HOME`), so your own plugin state is untouched.
+
 ## Conventions
 
 - Data is written to stdout; status and error messages go to stderr.

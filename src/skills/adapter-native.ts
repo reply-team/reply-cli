@@ -36,12 +36,33 @@ const installed_versions = async(host: Detected_host, run: Runner): Promise<List
     } catch {
         return {ok: false};
     }
+    // Claude Code returns an array directly; older versions wrapped it in {plugins:[…]}.
+    // Codex wraps it in {installed:[…]}.
     const doc = (parsed ?? {}) as Record<string, unknown>;
-    const rows = [doc.plugins, doc.installed].find(Array.isArray) as Record<string, unknown>[] | undefined;
+    const rows = Array.isArray(parsed)
+        ? parsed
+        : [doc.plugins, doc.installed].find(Array.isArray) as Record<string, unknown>[] | undefined;
     const out: Record<string, string> = {};
     for (const row of rows ?? [])
     {
-        const name = row.name;
+        // Claude Code uses 'id' (e.g. "agentic-runtime@reply-skills") instead of 'name'.
+        // Extract name from id if present, falling back to name field.
+        let name = (row.name ?? row.id) as string | undefined;
+        if (name && name.includes('@'))
+        {
+            const id_parts = name.split('@');
+            const pack_name = id_parts[0];
+            const marketplace = id_parts[1];
+            // Only accept if marketplace matches or is empty
+            if (marketplace === MARKETPLACE || marketplace === undefined)
+            {
+                name = pack_name;
+            }
+            else
+            {
+                continue;
+            }
+        }
         const version = row.version;
         // Check marketplace: accept rows that declare MARKETPLACE, or rows with no marketplace field.
         const marketplace = (row.marketplace ?? row.marketplaceName) as string | undefined;
