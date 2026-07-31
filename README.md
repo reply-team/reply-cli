@@ -165,7 +165,7 @@ reply skills install --project            # into this repository, not your home
 Then manage them:
 
 ```sh
-reply skills list             # what's installed where ('*' marks an available update)
+reply skills list             # what's installed where (notes packs with an update available)
 reply skills update           # bring installed packs to the latest version
 reply skills remove runtime   # remove one pack
 reply skills remove           # remove all of them

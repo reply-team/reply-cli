@@ -103,6 +103,21 @@ describe('human_lines', ()=>{
         const out = text(report([host({packs: [{name: 'ai-sdr-core', action: 'current', version: '0.1.0'}]})]));
         expect(out).not.toMatch(/new session/i);
     });
+
+    it('marks an outdated pack as an available update on list, not as updated', ()=>{
+        const out = text(report([host({
+            packs: [{name: 'ai-sdr-core', action: 'upgraded', version: '0.2.0', from: '0.1.0'}],
+        })], {action: 'list'}));
+        expect(out).toContain('update available');
+        expect(out).not.toContain('updated');
+    });
+
+    it('still says updated for an upgraded pack on install', ()=>{
+        const out = text(report([host({
+            packs: [{name: 'ai-sdr-core', action: 'upgraded', version: '0.2.0', from: '0.1.0'}],
+        })], {action: 'install'}));
+        expect(out).toContain('ai-sdr-core updated');
+    });
 });
 
 describe('exit_code_for', ()=>{

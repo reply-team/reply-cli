@@ -1,5 +1,5 @@
 import {pc} from '../utils/output';
-import type {Host_outcome, Report} from './types';
+import type {Host_outcome, Operation, Pack_action, Report} from './types';
 
 // Turns per-host outcomes into what the user reads and what the process
 // returns. The report names only what was found: an assistant that is not on
@@ -25,8 +25,13 @@ const verb = {
     current: 'already current', failed: 'failed',
 } as const;
 
+// `list` never changes anything: an 'upgraded' pack there means a newer
+// version is available, not that an update already happened underfoot.
+const pack_verb = (report_action: Operation, pack_action: Pack_action): string=>
+    report_action === 'list' && pack_action === 'upgraded' ? 'update available' : verb[pack_action];
+
 // Groups a host's packs by what happened, so one host is one line.
-const host_line = (host: Host_outcome): string=>{
+const host_line = (host: Host_outcome, report_action: Operation): string=>{
     const label = host.label.padEnd(12);
     if (host.status === 'skipped')
     {
@@ -39,7 +44,7 @@ const host_line = (host: Host_outcome): string=>{
     const groups = new Map<string, string[]>();
     for (const pack of host.packs ?? [])
     {
-        const key = verb[pack.action];
+        const key = pack_verb(report_action, pack.action);
         groups.set(key, [...(groups.get(key) ?? []), pack.name]);
     }
     if (!groups.size)
@@ -70,7 +75,7 @@ const human_lines = (report: Report): string[]=>{
     }
     for (const host of report.hosts)
     {
-        lines.push(host_line(host));
+        lines.push(host_line(host, report.action));
         if (host.hint)
         {
             lines.push(pc.dim(`  fix: ${host.hint}`));
