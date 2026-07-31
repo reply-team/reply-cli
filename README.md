@@ -176,6 +176,18 @@ plugin mechanism, so they keep updating through it. Other `SKILL.md` hosts
 receive the skills as files. Add `--json` for a machine-readable report, and
 `--dry-run` to see the plan without changing anything.
 
+| Assistant | How it receives the packs | Paths verified |
+|---|---|---|
+| Claude Code | its own plugin CLI | yes |
+| Codex | its own plugin CLI (`--project` copies files instead) | yes |
+| Cursor · Gemini CLI · GitHub Copilot · Windsurf | copied files | not yet |
+
+"Not yet" means the skills directory for that assistant comes from its
+documentation and has not been confirmed by a verification run of our own
+(REPLY-51268): the install works, but we cannot promise the assistant reads
+from where we put the files. Those hosts are marked `(paths not yet verified)`
+in the report and carry `"verified": false` in `--json`.
+
 Installing skills is not the same as connecting Reply: `reply-adapter` needs a
 Reply.io login (`reply auth login`) to actually do anything.
 

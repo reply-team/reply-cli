@@ -3,6 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import {run_skills} from '../../skills/orchestrate';
+import {human_lines} from '../../skills/report';
 import type {Detect_deps} from '../../skills/detect';
 import type {Runner} from '../../skills/types';
 import {UsageError} from '../../utils/errors';
@@ -109,7 +110,7 @@ describe('run_skills', ()=>{
         await expect(run_skills(opts({requested: ['ghost']}))).rejects.toThrow(UsageError);
     });
 
-    it('routes a native host through the flat adapter under --project', async()=>{
+    it('keeps a native host on its own CLI under --project when it can express project scope', async()=>{
         const report = await run_skills(opts({agents: ['claude-code'], project: true}));
         expect(report.hosts[0].scope).toBe('project');
         // Claude Code expresses project scope natively, so it stays native.
@@ -206,6 +207,60 @@ describe('run_skills', ()=>{
     it('reports no commit when nothing was cloned this run (native-only)', async()=>{
         const report = await run_skills(opts({agents: ['claude-code']}));
         expect(report.source).toEqual({repo: 'reply-team/reply-skills', ref: 'main'});
+    });
+
+    // I3 (final review): `update` was never exercised through run_skills at
+    // all, which is exactly where the disagreement showed — one native host
+    // and one flat host answering "already at the target version" two
+    // different ways in a single report.
+    it('reports current from both adapters when update finds every pack already at the target version', async()=>{
+        // The host reports all three packs installed at the registry version,
+        // so neither adapter has anything to move.
+        const installed_run: Runner = async(bin, args)=>{
+            calls.push([bin, ...args]);
+            if (args.includes('list'))
+            {
+                return {
+                    code: 0,
+                    stdout: JSON.stringify({plugins: ['ai-sdr-core', 'reply-adapter', 'agentic-runtime']
+                        .map(name=>({name, marketplace: 'reply-skills', version: '0.1.0'}))}),
+                    stderr: '',
+                };
+            }
+            return {code: 0, stdout: '', stderr: ''};
+        };
+        const with_run = (): Record<string, unknown>=>({...opts().deps, run: installed_run});
+
+        await run_skills(opts({deps: with_run()}));
+        const report = await run_skills(opts({operation: 'update', deps: with_run()}));
+
+        expect(report.hosts.map(h=>h.host)).toEqual(['claude-code', 'cursor']);
+        for (const host of report.hosts)
+        {
+            expect(host.packs?.map(p=>[p.name, p.action])).toEqual([
+                ['ai-sdr-core', 'current'],
+                ['reply-adapter', 'current'],
+                ['agentic-runtime', 'current'],
+            ]);
+        }
+        // Nothing changed, so the "start a new session" advice must not fire.
+        expect(human_lines(report).join('\n')).not.toMatch(/new session/i);
+    });
+
+    // I5 (final review): four hosts ship with paths taken from documentation
+    // rather than a verification run, and nothing surfaced it.
+    it('carries each host\'s verified flag into the report', async()=>{
+        const report = await run_skills(opts());
+        expect(report.hosts.map(h=>[h.host, h.verified])).toEqual([
+            ['claude-code', true],
+            ['cursor', false],
+        ]);
+        expect(human_lines(report).join('\n')).toContain('paths not yet verified');
+    });
+
+    it('carries the verified flag on a host that was requested but not installed', async()=>{
+        const report = await run_skills(opts({agents: ['windsurf']}));
+        expect(report.hosts[0].verified).toBe(false);
     });
 
     it('reports no commit when the clone failed', async()=>{

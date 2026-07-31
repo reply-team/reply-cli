@@ -6,7 +6,7 @@ import {DEFAULT_REF, REPO, load_packs, resolve_packs} from './packs';
 import {summarize} from './report';
 import {UsageError} from '../utils/errors';
 import type {Env} from '../config';
-import type {Host_outcome, Operation, Pack, Report, Runner, Scope} from './types';
+import type {Host_def, Host_outcome, Operation, Pack, Report, Runner, Scope} from './types';
 
 // The one flow all four commands share: detect hosts, resolve packs in
 // dependency order, run the right adapter per host, collect outcomes. Every
@@ -62,9 +62,10 @@ const guard_remove = (packs: Pack[], all: Pack[]): void=>{
     }
 };
 
-const not_detected = (id: string, label: string, kind: Host_outcome['kind']): Host_outcome=>({
-    host: id, label, kind, status: 'skipped', reason: 'not-detected',
-    detail: `${label} was requested with --agent but is not installed on this machine`,
+const not_detected = (def: Host_def): Host_outcome=>({
+    host: def.id, label: def.label, kind: def.kind, status: 'skipped', reason: 'not-detected',
+    detail: `${def.label} was requested with --agent but is not installed on this machine`,
+    verified: def.verified,
 });
 
 const run_skills = async(opts: Skills_opts): Promise<Report>=>{
@@ -120,11 +121,14 @@ const run_skills = async(opts: Skills_opts): Promise<Report>=>{
                 hint: `re-run \`reply skills ${opts.operation}\` once the underlying error for ${host.def.label} is resolved`,
             };
         }
-        hosts.push(outcome);
+        // Stamped here rather than in each adapter: whether an assistant's
+        // paths have been confirmed is registry data, not something an
+        // adapter computes, and doing it once means no path can forget it.
+        hosts.push({...outcome, verified: host.def.verified});
     }
     for (const def of missing)
     {
-        hosts.push(not_detected(def.id, def.label, def.kind));
+        hosts.push(not_detected(def));
     }
 
     // The commit is only known when this run itself cloned something: a flat

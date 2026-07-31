@@ -111,6 +111,25 @@ describe('human_lines', ()=>{
         expect(lines.filter(l=>l.match(/^  (ai-sdr-core|reply-adapter):/)).length).toBe(2);
     });
 
+    // I5: a green tick on a host whose skills directory we have never
+    // confirmed the assistant reads from claims more than we know.
+    it('marks a host whose paths are not yet verified, and only that host', ()=>{
+        const out = text(report([
+            host({verified: true}),
+            host({host: 'cursor', label: 'Cursor', verified: false}),
+        ]));
+        expect(out).toMatch(/Cursor .*paths not yet verified/);
+        expect(out.split('\n').filter(l=>l.includes('paths not yet verified'))).toHaveLength(1);
+    });
+
+    it('says nothing about verification for a host that reported no packs', ()=>{
+        const out = text(report([host({
+            host: 'cursor', label: 'Cursor', verified: false, status: 'skipped', packs: undefined,
+            reason: 'not-detected', detail: 'Cursor is not installed on this machine',
+        })]));
+        expect(out).not.toContain('paths not yet verified');
+    });
+
     it('reports a pulled dependency once', ()=>{
         expect(dependency_note(['reply-adapter'], ['ai-sdr-core', 'reply-adapter']))
             .toBe('ai-sdr-core added — required by reply-adapter');

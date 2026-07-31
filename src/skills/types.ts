@@ -79,6 +79,12 @@ type Host_outcome = {
     // commit without ever attributing a stale or foreign one to a run that
     // did not produce it.
     commit?: string;
+    // Mirrors Host_def.verified: false means this assistant's paths come from
+    // its documentation and have not been confirmed by a verification run of
+    // our own (REPLY-51268). Stamped by the orchestrator for every host it
+    // reports, so no adapter can forget it and a --json consumer can tell a
+    // confirmed success from an unconfirmed one.
+    verified?: boolean;
 };
 
 type Operation = 'install' | 'list' | 'update' | 'remove';
