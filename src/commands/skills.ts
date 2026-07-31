@@ -22,6 +22,34 @@ const read_globals = (cmd: Command): Skills_cli_opts=>{
 const wants_json = (o: Skills_cli_opts): boolean=>Boolean(o.json || o.pretty);
 const print_opts = (o: Skills_cli_opts): Print_opts=>({json: o.json, pretty: o.pretty});
 
+// What exiting 1 means, per operation. `exit_code_for` already branches on the
+// action; telling a failed `remove` that "no assistant received the skills"
+// and pointing it at `install --dry-run` misdirects the one user who most
+// needs the right command. `list` never exits 1 (it is a query), but the map
+// stays total so a new operation cannot silently inherit the wrong wording.
+const NOTHING_HAPPENED: Record<Operation, {title: string; code: string; probe: string}> = {
+    install: {
+        title: 'No assistant received the skills.',
+        code: 'skills.nothing_installed',
+        probe: 'install --dry-run',
+    },
+    update: {
+        title: 'No assistant was updated.',
+        code: 'skills.nothing_updated',
+        probe: 'update --dry-run',
+    },
+    remove: {
+        title: 'No assistant had the skills removed.',
+        code: 'skills.nothing_removed',
+        probe: 'remove --dry-run',
+    },
+    list: {
+        title: 'No assistant could be queried.',
+        code: 'skills.nothing_listed',
+        probe: 'list --json',
+    },
+};
+
 // One handler for all four operations: they differ only in the operation name,
 // so the reporting and exit-code contract stays in exactly one place.
 const handle_skills = async(
@@ -43,9 +71,13 @@ const handle_skills = async(
     }
     else
     {
+        // `list` is a data command, so its table is what the user redirects —
+        // it goes to stdout. Every other operation prints progress, which is
+        // status and belongs on stderr (see utils/output.ts).
+        const write = report.action === 'list' ? console.log : console.error;
         for (const line of human_lines(report))
         {
-            console.error(line);
+            write(line);
         }
     }
 
@@ -53,9 +85,10 @@ const handle_skills = async(
     // why each host failed.
     if (exit_code_for(report) !== 0)
     {
-        throw new RuntimeError('No assistant received the skills.', {
-            code: 'skills.nothing_installed',
-            hint: `run \`${PROGRAM_NAME} skills install --dry-run\` to see what was attempted`,
+        const failure = NOTHING_HAPPENED[operation];
+        throw new RuntimeError(failure.title, {
+            code: failure.code,
+            hint: `run \`${PROGRAM_NAME} skills ${failure.probe}\` to see what was attempted`,
         });
     }
 };

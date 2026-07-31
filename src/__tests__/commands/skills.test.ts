@@ -48,11 +48,35 @@ afterEach(()=>{
 });
 
 describe('handle_skills', ()=>{
-    it('prints the human summary on stderr and nothing on stdout', async()=>{
+    // I1: the output contract splits by what the line *is*. install/update/
+    // remove print progress, which is status and belongs on stderr; `list`
+    // prints data, which the user redirects, so it belongs on stdout.
+    it('prints install progress on stderr and nothing on stdout', async()=>{
         mock_run_skills.mockResolvedValue(report());
         const {out, err} = await capture(()=>handle_skills('install', [], {}));
         expect(err).toContain('detected Claude Code');
         expect(err).toContain('ai-sdr-core installed');
+        expect(out).toBe('');
+    });
+
+    it('prints the list table on stdout and nothing on stderr, so `skills list > file` works', async()=>{
+        mock_run_skills.mockResolvedValue(report({
+            action: 'list',
+            hosts: [{
+                host: 'claude-code', label: 'Claude Code', kind: 'native-plugin', scope: 'user', status: 'ok',
+                packs: [{name: 'ai-sdr-core', action: 'current', version: '0.1.0'}],
+            }],
+        }));
+        const {out, err} = await capture(()=>handle_skills('list', [], {}));
+        expect(out).toContain('detected Claude Code');
+        expect(out).toContain('ai-sdr-core already current');
+        expect(err).toBe('');
+    });
+
+    it('keeps remove progress on stderr', async()=>{
+        mock_run_skills.mockResolvedValue(report({action: 'remove'}));
+        const {out, err} = await capture(()=>handle_skills('remove', [], {}));
+        expect(err).toContain('detected Claude Code');
         expect(out).toBe('');
     });
 
@@ -83,7 +107,31 @@ describe('handle_skills', ()=>{
         mock_run_skills.mockResolvedValue(report({
             hosts: [], summary: {installed: 0, skipped: 0, failed: 0},
         }));
-        await expect(capture(()=>handle_skills('install', [], {}))).rejects.toMatchObject({exit_code: 1});
+        await expect(capture(()=>handle_skills('install', [], {}))).rejects.toMatchObject({
+            exit_code: 1,
+            code: 'skills.nothing_installed',
+            title: 'No assistant received the skills.',
+        });
+    });
+
+    // I4: the same handler serves all four operations, so the exit-1 message
+    // has to name the one that actually ran — a failed `remove` telling the
+    // user to try `install --dry-run` sends them the wrong way.
+    it('names the operation that actually ran in the exit-1 error', async()=>{
+        for (const [operation, code, probe] of [
+            ['remove', 'skills.nothing_removed', 'skills remove --dry-run'],
+            ['update', 'skills.nothing_updated', 'skills update --dry-run'],
+        ] as const)
+        {
+            mock_run_skills.mockResolvedValue(report({
+                action: operation, hosts: [], summary: {installed: 0, skipped: 0, failed: 0},
+            }));
+            const failure = await capture(()=>handle_skills(operation, [], {}))
+                .then(()=>undefined, (e: Error & {code?: string; hint?: string; title?: string})=>e);
+            expect(failure?.code).toBe(code);
+            expect(failure?.hint).toContain(probe);
+            expect(failure?.title).not.toContain('received the skills');
+        }
     });
 
     it('still prints the report before failing, so the reason is not lost', async()=>{
