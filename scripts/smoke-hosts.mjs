@@ -74,13 +74,24 @@ const real_reply_config_dir = ()=>{
 
 // Take a snapshot of all real flat-host directories before making any changes.
 // We snapshot the filesystem state (directory listing sorted) or "does not exist" for each path.
+//
+// Each host's root config directory is watched alongside its skills leaf
+// directory. The root is what `detect_hosts` keys presence on (see
+// src/skills/detect.ts) — an empty root with no `skills` subdirectory inside
+// it is still a host that the next `reply skills install` will detect and
+// write into, so a leaf-only snapshot misses exactly that case.
 const snapshot_state = ()=>{
     const real_home = os.homedir();
     const paths_to_check = [
+        path.join(real_home, '.copilot'),
         path.join(real_home, '.copilot', 'skills'),
+        path.join(real_home, '.cursor'),
         path.join(real_home, '.cursor', 'skills'),
+        path.join(real_home, '.gemini'),
         path.join(real_home, '.gemini', 'skills'),
+        path.join(real_home, '.codeium'),
         path.join(real_home, '.codeium', 'windsurf', 'skills'),
+        path.join(real_home, '.agents'),
         path.join(real_home, '.agents', 'skills'),
         real_reply_config_dir(),
     ];
