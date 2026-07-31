@@ -4,9 +4,14 @@
 // it clones from GitHub. It is safe to run on a working machine because:
 // - Native hosts (Claude Code, Codex) use CLAUDE_CONFIG_DIR and CODEX_HOME
 // - Flat hosts (Cursor, Gemini, Copilot) use HOME/USERPROFILE redirected to sandbox
-// The script verifies isolation before and after: pre-flight checks that all hosts
-// resolve inside the sandbox, post-run checks that the real home is untouched.
-// If either assertion fails, the script aborts without installing.
+//
+// The script uses snapshot-based comparison to prove the real home is untouched:
+// - Before any CLI invocation, snapshot all real flat-host skills directories
+// - After the smoke test, verify the snapshots are identical
+// - Any filesystem change (new dir, removed entry) fails the script non-zero
+//
+// This design catches isolation failures: if HOME/USERPROFILE redirection fails,
+// the CLI would write to the real home, changing its snapshot.
 //
 // Usage: npm run build && npm run smoke:hosts
 
@@ -24,8 +29,7 @@ const env = {
     CODEX_HOME: path.join(sandbox, 'codex'),
     REPLY_CONFIG_DIR: path.join(sandbox, 'reply'),
 };
-// Create both environment-variable config directories (for native hosts)
-// and relative directories (for detection in the sandbox home)
+// Create marker directories in sandbox so detection works (otherwise would find nothing)
 const config_dirs = [
     env.CLAUDE_CONFIG_DIR,
     env.CODEX_HOME,
@@ -49,12 +53,108 @@ const fail = (message)=>{
     process.exitCode = 1;
 };
 
+// Resolve the real reply config directory: same logic as the CLI.
+// On Windows: %APPDATA%/reply; on Unix: $XDG_CONFIG_HOME/reply or ~/.config/reply
+const real_reply_config_dir = ()=>{
+    if (process.platform === 'win32')
+    {
+        const appdata = process.env.APPDATA;
+        if (appdata)
+        {
+            return path.join(appdata, 'reply');
+        }
+    }
+    const xdg = process.env.XDG_CONFIG_HOME;
+    if (xdg)
+    {
+        return path.join(xdg, 'reply');
+    }
+    return path.join(os.homedir(), '.config', 'reply');
+};
+
+// Take a snapshot of all real flat-host directories before making any changes.
+// We snapshot the filesystem state (directory listing sorted) or "does not exist" for each path.
+const snapshot_state = ()=>{
+    const real_home = os.homedir();
+    const paths_to_check = [
+        path.join(real_home, '.copilot', 'skills'),
+        path.join(real_home, '.cursor', 'skills'),
+        path.join(real_home, '.gemini', 'skills'),
+        path.join(real_home, '.codeium', 'windsurf', 'skills'),
+        path.join(real_home, '.agents', 'skills'),
+        real_reply_config_dir(),
+    ];
+
+    const snapshot = {};
+    for (const dir of paths_to_check)
+    {
+        if (!fs.existsSync(dir))
+        {
+            snapshot[dir] = 'DOES_NOT_EXIST';
+            continue;
+        }
+        try {
+            const contents = fs.readdirSync(dir).sort();
+            snapshot[dir] = contents;
+        } catch (e) {
+            snapshot[dir] = `ERROR: ${e.message}`;
+        }
+    }
+    return snapshot;
+};
+
+// Compare two snapshots and report any differences.
+const compare_snapshots = (before, after)=>{
+    const diffs = [];
+    const all_paths = new Set([...Object.keys(before), ...Object.keys(after)]);
+
+    for (const p of all_paths)
+    {
+        const before_state = before[p];
+        const after_state = after[p];
+
+        if (JSON.stringify(before_state) !== JSON.stringify(after_state))
+        {
+            if (before_state === 'DOES_NOT_EXIST' && after_state !== 'DOES_NOT_EXIST')
+            {
+                diffs.push(`CREATED: ${p}`);
+            }
+            else if (before_state !== 'DOES_NOT_EXIST' && after_state === 'DOES_NOT_EXIST')
+            {
+                diffs.push(`DELETED: ${p}`);
+            }
+            else if (typeof before_state === 'object' && typeof after_state === 'object')
+            {
+                const before_set = new Set(before_state);
+                const after_set = new Set(after_state);
+                const added = [...after_set].filter(x=>!before_set.has(x));
+                const removed = [...before_set].filter(x=>!after_set.has(x));
+                if (added.length > 0)
+                {
+                    diffs.push(`ADDED to ${p}: ${added.join(', ')}`);
+                }
+                if (removed.length > 0)
+                {
+                    diffs.push(`REMOVED from ${p}: ${removed.join(', ')}`);
+                }
+            }
+            else
+            {
+                diffs.push(`CHANGED ${p}: ${JSON.stringify(before_state)} → ${JSON.stringify(after_state)}`);
+            }
+        }
+    }
+    return diffs;
+};
+
 try {
     console.log(`sandbox: ${sandbox}`);
 
+    // Take snapshot of real environment BEFORE any CLI invocation.
+    // This catches even read-only operations that unexpectedly write.
+    const before_snapshot = snapshot_state();
+
     // Safety assertion: verify sandbox is truly isolated BEFORE making any changes.
-    // Pre-flight: no pre-existing plugins in the sandbox (proof it's clean).
-    // Post-flight: real home is untouched (below, after the run).
     const sandbox_check = JSON.parse(cli('skills', 'list', '--json'));
     const installed_in_sandbox = sandbox_check.hosts.flatMap(h=>(h.packs ?? []).length);
     const has_plugins = installed_in_sandbox.some(count=>count > 0);
@@ -105,48 +205,21 @@ try {
         console.log('✓ removing a needed dependency is refused');
     }
 
-    // Post-run assertion: verify the real home was not modified by the smoke test.
-    // This is the critical safety check that proves isolation worked end-to-end.
-    const real_home = os.homedir();
-    const real_copilot_skills = path.join(real_home, '.copilot', 'skills');
-    const real_cursor_skills = path.join(real_home, '.cursor', 'skills');
-    const real_reply_skills_json = path.join(real_home, '.reply', 'skills.json');
+    // Post-run assertion: snapshot the real environment again and verify it is unchanged.
+    // This is the critical safety check. Any difference means isolation failed.
+    const after_snapshot = snapshot_state();
+    const diffs = compare_snapshots(before_snapshot, after_snapshot);
 
-    // Check that no reply skill packs were installed to the real home
-    const check_dir = (dir)=>{
-        if (!fs.existsSync(dir))
-        {
-            return [];
-        }
-        try {
-            return fs.readdirSync(dir);
-        } catch {
-            return [];
-        }
-    };
-
-    const copilot_skills = check_dir(real_copilot_skills);
-    const reply_skill_names = ['ai-sdr-core', 'reply-adapter', 'agentic-runtime'];
-    const installed_in_real_copilot = copilot_skills.some(s=>reply_skill_names.some(r=>s.includes(r)));
-
-    if (installed_in_real_copilot)
+    if (diffs.length > 0)
     {
-        fail(`post-run assertion failed: reply skills were installed to the real home at ${real_copilot_skills}`);
+        fail(`post-run assertion failed: real home was modified:\n${diffs.map(d=>`  ${d}`).join('\n')}`);
         process.exit(1);
     }
-
-    const cursor_skills = check_dir(real_cursor_skills);
-    const installed_in_real_cursor = cursor_skills.some(s=>reply_skill_names.some(r=>s.includes(r)));
-    if (installed_in_real_cursor)
-    {
-        fail(`post-run assertion failed: reply skills were installed to the real home at ${real_cursor_skills}`);
-        process.exit(1);
-    }
+    console.log('✓ post-run assertion: real home is untouched');
 
     if (!process.exitCode)
     {
         console.log('✓ smoke passed');
-        console.log('✓ post-run assertion confirmed: real home is untouched');
     }
 } finally {
     fs.rmSync(sandbox, {recursive: true, force: true});
