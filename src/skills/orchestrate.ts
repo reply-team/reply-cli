@@ -150,7 +150,7 @@ const run_skills = async(opts: Skills_opts): Promise<Report>=>{
         requested: opts.requested.length ? canonical : packs.map(p=>p.name),
         resolved: packs.map(p=>p.name),
         hosts,
-        summary: summarize(hosts),
+        summary: summarize(hosts, opts.operation),
     };
 };
 

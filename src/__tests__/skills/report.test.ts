@@ -14,24 +14,46 @@ const host = (over: Partial<Host_outcome> = {}): Host_outcome=>({
     ...over,
 });
 
-const report = (hosts: Host_outcome[], over: Partial<Report> = {}): Report=>({
-    action: 'install',
-    source: {repo: 'reply-team/reply-skills', ref: 'main'},
-    requested: ['ai-sdr-core', 'reply-adapter'],
-    resolved: ['ai-sdr-core', 'reply-adapter'],
-    hosts,
-    summary: summarize(hosts),
-    ...over,
-});
+const report = (hosts: Host_outcome[], over: Partial<Report> = {}): Report=>{
+    const action = over.action ?? 'install';
+    return {
+        action,
+        source: {repo: 'reply-team/reply-skills', ref: 'main'},
+        requested: ['ai-sdr-core', 'reply-adapter'],
+        resolved: ['ai-sdr-core', 'reply-adapter'],
+        hosts,
+        summary: summarize(hosts, action),
+        ...over,
+    };
+};
 
 describe('summarize', ()=>{
     it('counts hosts by outcome, not packs', ()=>{
-        expect(summarize([host(), host({host: 'codex', status: 'skipped'}), host({host: 'x', status: 'failed'})]))
+        expect(summarize([host(), host({host: 'codex', status: 'skipped'}), host({host: 'x', status: 'failed'})], 'install'))
             .toEqual({installed: 1, skipped: 1, failed: 1});
     });
 
     it('counts a partial host as installed, because something landed', ()=>{
-        expect(summarize([host({status: 'partial'})])).toEqual({installed: 1, skipped: 0, failed: 0});
+        expect(summarize([host({status: 'partial'})], 'install')).toEqual({installed: 1, skipped: 0, failed: 0});
+    });
+
+    it('for list, installed means a pack is actually present, not merely that the host answered', ()=>{
+        const empty_hosts = [host({packs: []}), host({host: 'codex', packs: []}), host({host: 'x', packs: []})];
+        expect(summarize(empty_hosts, 'list')).toEqual({installed: 0, skipped: 0, failed: 0});
+    });
+
+    it('for list, counts only the host that actually has a pack present', ()=>{
+        const hosts = [
+            host({packs: [{name: 'ai-sdr-core', action: 'current', version: '0.1.0'}]}),
+            host({host: 'codex', packs: []}),
+            host({host: 'x', packs: []}),
+        ];
+        expect(summarize(hosts, 'list')).toEqual({installed: 1, skipped: 0, failed: 0});
+    });
+
+    it('for install, the same empty-packs host shapes still count by status, unchanged', ()=>{
+        const empty_hosts = [host({packs: []}), host({host: 'codex', packs: []}), host({host: 'x', packs: []})];
+        expect(summarize(empty_hosts, 'install')).toEqual({installed: 3, skipped: 0, failed: 0});
     });
 });
 

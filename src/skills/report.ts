@@ -5,8 +5,14 @@ import type {Host_outcome, Operation, Pack_action, Report} from './types';
 // returns. The report names only what was found: an assistant that is not on
 // the machine is never mentioned.
 
-const summarize = (hosts: Host_outcome[]): Report['summary']=>({
-    installed: hosts.filter(h=>h.status === 'ok' || h.status === 'partial').length,
+// `list` is a query: a host answering "ok" says nothing about whether any pack
+// is actually there. For every other operation, "installed" is the outcome
+// status (something landed, or didn't); for `list`, it is whether a pack was
+// actually found — skipped/failed keep their host-oriented meaning either way.
+const summarize = (hosts: Host_outcome[], action: Operation): Report['summary']=>({
+    installed: action === 'list'
+        ? hosts.filter(h=>(h.packs?.length ?? 0) > 0).length
+        : hosts.filter(h=>h.status === 'ok' || h.status === 'partial').length,
     skipped: hosts.filter(h=>h.status === 'skipped').length,
     failed: hosts.filter(h=>h.status === 'failed').length,
 });
