@@ -24,6 +24,19 @@ const claude_list = (packs: {name: string; version: string}[]): string=>JSON.str
     plugins: packs.map(p=>({name: p.name, marketplace: 'reply-skills', version: p.version, enabled: true})),
 });
 
+// Claude Code's *current* `plugin list --json` shape: a direct array of rows
+// with an `id` of the form "<pack>@<marketplace>" instead of separate `name`/
+// `marketplace` fields. Captured for real from `claude plugin list --json`
+// (Claude Code 2.1.220) on 2026-07-30, trimmed to the fields the adapter
+// reads (`id`, `version`); the real output also carries `scope`, `enabled`,
+// `installPath`, `installedAt`, `lastUpdated`, which installed_versions never
+// looks at. Real row seen: {"id":"elastic-elasticsearch@elastic-agent-skills",
+// "version":"0.2.4","scope":"user","enabled":true,...} — a plugin from a
+// marketplace ('elastic-agent-skills') other than ours ('reply-skills').
+const claude_list_direct = (rows: {id: string; version: string}[]): string=>JSON.stringify(
+    rows.map(r=>({id: r.id, version: r.version, scope: 'user', enabled: true})),
+);
+
 const runner_of = (results: Run_result[]): {run: Runner; calls: string[][]}=>{
     const calls: string[][] = [];
     let i = 0;
@@ -45,6 +58,20 @@ describe('installed_versions', ()=>{
         const {run} = runner_of([ok('not json')]);
         const result = await installed_versions(claude(), run);
         expect(result).toEqual({ok: false});
+    });
+
+    it('reads installed versions from the direct-array id shape Claude Code now returns', async()=>{
+        const {run} = runner_of([ok(claude_list_direct([{id: 'ai-sdr-core@reply-skills', version: '0.1.0'}]))]);
+        const result = await installed_versions(claude(), run);
+        expect(result).toEqual({ok: true, versions: {'ai-sdr-core': '0.1.0'}});
+    });
+
+    it('excludes a foreign-marketplace row in the direct-array id shape (real row, elastic-agent-skills)', async()=>{
+        const {run} = runner_of([ok(claude_list_direct([
+            {id: 'elastic-elasticsearch@elastic-agent-skills', version: '0.2.4'},
+        ]))]);
+        const result = await installed_versions(claude(), run);
+        expect(result).toEqual({ok: true, versions: {}});
     });
 });
 
@@ -223,6 +250,16 @@ describe('run_native list and update', ()=>{
 
     it('plugin from different marketplace is treated as installed, not current', async()=>{
         const other_marketplace_list = JSON.stringify({plugins: [{name: 'ai-sdr-core', version: '0.1.0', marketplace: 'someone-else', enabled: true}]});
+        const {run} = runner_of([ok(), ok(other_marketplace_list)]);
+        const outcome = await run_native({operation: 'install', host: claude(), packs: core_only, scope: 'user', run});
+        expect(outcome.packs).toEqual([{name: 'ai-sdr-core', action: 'installed', version: '0.1.0'}]);
+    });
+
+    it('same pack name from a different marketplace, in the direct-array id shape, is treated as installed, not current', async()=>{
+        // Same pack name as ours but a foreign marketplace suffix on the id —
+        // marketplace filtering must still apply in the new shape, not just the
+        // old {plugins:[...]} envelope.
+        const other_marketplace_list = claude_list_direct([{id: 'ai-sdr-core@someone-else', version: '0.1.0'}]);
         const {run} = runner_of([ok(), ok(other_marketplace_list)]);
         const outcome = await run_native({operation: 'install', host: claude(), packs: core_only, scope: 'user', run});
         expect(outcome.packs).toEqual([{name: 'ai-sdr-core', action: 'installed', version: '0.1.0'}]);

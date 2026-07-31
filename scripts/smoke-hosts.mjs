@@ -1,14 +1,29 @@
-// Verifies `reply skills install` against really installed assistants.
+// Verifies `reply skills install` end to end, against real and simulated assistants.
 //
-// Not part of `npm test`: it needs Claude Code and/or Codex on the machine and
-// it clones from GitHub. It is safe to run on a working machine because:
-// - Native hosts (Claude Code, Codex) use CLAUDE_CONFIG_DIR and CODEX_HOME
-// - Flat hosts (Cursor, Gemini, Copilot) use HOME/USERPROFILE redirected to sandbox
+// Not part of `npm test`: it clones from GitHub, and exercising a native host for
+// real needs that assistant installed on the machine. It is safe to run on a
+// working machine because:
+// - Native hosts (Claude Code, Codex) are pointed at throwaway config directories
+//   via CLAUDE_CONFIG_DIR and CODEX_HOME. They are only *genuinely* exercised
+//   (real binary resolved from the real PATH) when really installed — otherwise
+//   they still appear in the report with status 'skipped'.
+// - Flat-directory hosts (Cursor, Gemini CLI, GitHub Copilot) are always
+//   *simulated* inside the sandbox below, regardless of what is really on this
+//   machine. That is deliberate: it is the only way the flat-directory install
+//   path gets exercised at all, on any machine. Do not read a flat host's 'ok'
+//   status here as evidence that assistant is really installed.
+// - Both rely on HOME/USERPROFILE being redirected to the sandbox. That is not
+//   assumed: before anything mutating runs, a child process given the exact same
+//   env is asked what os.homedir() resolves to, and the run aborts without
+//   making changes if it isn't inside the sandbox (see the pre-flight checks).
 //
 // The script uses snapshot-based comparison to prove the real home is untouched:
-// - Before any CLI invocation, snapshot all real flat-host skills directories
-// - After the smoke test, verify the snapshots are identical
-// - Any filesystem change (new dir, removed entry) fails the script non-zero
+// - Before any CLI invocation — before even that isolation proof — snapshot each
+//   flat host's real root config directory and skills leaf directory, plus the
+//   real reply config directory.
+// - After the smoke test, verify the snapshots are identical.
+// - Any filesystem change (new dir, removed entry) fails the script non-zero,
+//   and this comparison always runs, even if an earlier assertion already failed.
 //
 // This design catches isolation failures: if HOME/USERPROFILE redirection fails,
 // the CLI would write to the real home, changing its snapshot.
@@ -169,26 +184,84 @@ try {
     // contained here so that, no matter what goes wrong, execution always
     // reaches the post-run comparison below — never via process.exit(), which
     // would skip both that comparison and the sandbox cleanup in `finally`.
+    //
+    // `can_proceed` gates each stage instead of nested if/else: a failure at
+    // any stage stops the remaining mutating stages (matching the original
+    // "abort without making changes" intent) without ever exiting early, so
+    // control still always reaches the post-run comparison after this block.
     try {
-        // Safety assertion: verify sandbox is truly isolated BEFORE making any changes.
-        const sandbox_check = JSON.parse(cli('skills', 'list', '--json'));
-        const installed_in_sandbox = sandbox_check.hosts.flatMap(h=>(h.packs ?? []).length);
-        const has_plugins = installed_in_sandbox.some(count=>count > 0);
-        if (has_plugins)
+        // Pre-flight assertion #1: prove HOME/USERPROFILE redirection is
+        // actually in effect, before anything mutating runs. The empty-journal
+        // check below does NOT establish this — reads are gated by
+        // REPLY_CONFIG_DIR, which is set unconditionally regardless of whether
+        // HOME/USERPROFILE redirection works, so it would report "clean" even
+        // with a fully broken redirect. This checks the property every child
+        // process actually depends on directly: spawn a child with the exact
+        // same env this script uses for the CLI, and ask it what os.homedir()
+        // resolves to.
+        const homedir_probe = execFileSync(
+            process.execPath,
+            ['-e', 'process.stdout.write(require("os").homedir())'],
+            {env, encoding: 'utf8'},
+        );
+        const resolved_probe = path.resolve(homedir_probe);
+        const resolved_sandbox = path.resolve(sandbox);
+        let can_proceed = resolved_probe === resolved_sandbox;
+        if (!can_proceed)
         {
-            fail('sandbox isolation check failed: plugins already installed. Aborting without making changes.');
+            fail(`isolation proof failed: a child process given this script's env resolved os.homedir() to '${resolved_probe}', not the sandbox '${resolved_sandbox}'. Aborting without making changes.`);
         }
         else
         {
-            console.log('✓ pre-flight assertion: sandbox is clean');
+            console.log(`✓ pre-flight assertion: os.homedir() in a child process resolves inside the sandbox (${resolved_probe})`);
+        }
 
-            const installed = JSON.parse(cli('skills', 'install', '--json'));
-            console.log(`hosts: ${installed.hosts.map(h=>`${h.host}=${h.status}`).join(' ') || '(none detected)'}`);
-            if (!installed.hosts.length)
+        // Pre-flight assertion #2: the sandboxed journal reports no packs yet.
+        // This is a sanity check for stale state left by a previous interrupted
+        // run — not an isolation proof (see above) — since it only reads
+        // whatever REPLY_CONFIG_DIR points at.
+        if (can_proceed)
+        {
+            const sandbox_check = JSON.parse(cli('skills', 'list', '--json'));
+            const installed_in_sandbox = sandbox_check.hosts.flatMap(h=>(h.packs ?? []).length);
+            const has_plugins = installed_in_sandbox.some(count=>count > 0);
+            if (has_plugins)
             {
-                console.log('⚠ no assistant detected — nothing to verify on this machine');
+                fail('sandbox isolation check failed: plugins already installed. Aborting without making changes.');
+                can_proceed = false;
             }
             else
+            {
+                console.log('✓ pre-flight assertion: sandbox journal is clean');
+            }
+        }
+
+        if (can_proceed)
+        {
+            const installed = JSON.parse(cli('skills', 'install', '--json'));
+            console.log(`hosts: ${installed.hosts.map(h=>`${h.host}=${h.status}`).join(' ') || '(none detected)'}`);
+
+            // Flat hosts are always simulated (see header), so `installed.hosts`
+            // is never actually empty on any machine with git on PATH — the
+            // brief's original "no assistant at all" exit is dead code below.
+            // What is real and worth reporting is whether a *native* host (the
+            // only kind that is only exercised when genuinely installed) was
+            // actually present: status 'skipped' means its config directory
+            // marker existed but the real binary could not be resolved from
+            // the real PATH, i.e. it is not really installed here.
+            const native_ids = new Set(['claude-code', 'codex']);
+            const native_present = installed.hosts.some(h=>native_ids.has(h.host) && h.status !== 'skipped');
+            console.log(native_present
+                ? '✓ at least one native assistant (Claude Code/Codex) is really installed and was exercised for real'
+                : 'ℹ no native assistant (Claude Code, Codex) is really installed on this machine — only the always-simulated flat hosts were exercised');
+
+            if (!installed.hosts.length)
+            {
+                console.log('⚠ no hosts detected at all — nothing to verify on this machine');
+                can_proceed = false;
+            }
+
+            if (can_proceed)
             {
                 if (!installed.hosts.some(h=>h.status === 'ok'))
                 {
