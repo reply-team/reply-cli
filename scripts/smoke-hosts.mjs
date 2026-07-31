@@ -154,68 +154,84 @@ try {
     // This catches even read-only operations that unexpectedly write.
     const before_snapshot = snapshot_state();
 
-    // Safety assertion: verify sandbox is truly isolated BEFORE making any changes.
-    const sandbox_check = JSON.parse(cli('skills', 'list', '--json'));
-    const installed_in_sandbox = sandbox_check.hosts.flatMap(h=>(h.packs ?? []).length);
-    const has_plugins = installed_in_sandbox.some(count=>count > 0);
-    if (has_plugins)
-    {
-        fail('sandbox isolation check failed: plugins already installed. Aborting without making changes.');
-        process.exit(1);
-    }
-    console.log('✓ pre-flight assertion: sandbox is clean');
-
-    const installed = JSON.parse(cli('skills', 'install', '--json'));
-    console.log(`hosts: ${installed.hosts.map(h=>`${h.host}=${h.status}`).join(' ') || '(none detected)'}`);
-    if (!installed.hosts.length)
-    {
-        console.log('⚠ no assistant detected — nothing to verify on this machine');
-        process.exit(0);
-    }
-    if (!installed.hosts.some(h=>h.status === 'ok'))
-    {
-        fail('no host reported ok');
-    }
-    if (installed.resolved.join(',') !== 'ai-sdr-core,reply-adapter,agentic-runtime')
-    {
-        fail(`unexpected resolve order: ${installed.resolved.join(',')}`);
-    }
-
-    // Idempotency: the second run must change nothing.
-    const again = JSON.parse(cli('skills', 'install', '--json'));
-    const actions = again.hosts.flatMap(h=>(h.packs ?? []).map(p=>p.action));
-    if (actions.some(a=>a !== 'current'))
-    {
-        fail(`re-install was not idempotent: ${actions.join(',')}`);
-    }
-
-    // Selective install pulls the core.
-    cli('skills', 'remove', '--json');
-    const selective = JSON.parse(cli('skills', 'install', 'adapter', '--json'));
-    if (selective.resolved.join(',') !== 'ai-sdr-core,reply-adapter')
-    {
-        fail(`selective install did not pull the core: ${selective.resolved.join(',')}`);
-    }
-
-    // Removing the core alone must be refused.
+    // Everything that can fail (an assertion or an unexpected thrown error) is
+    // contained here so that, no matter what goes wrong, execution always
+    // reaches the post-run comparison below — never via process.exit(), which
+    // would skip both that comparison and the sandbox cleanup in `finally`.
     try {
-        cli('skills', 'remove', 'core', '--json');
-        fail('removing the core while the adapter is installed was allowed');
-    } catch {
-        console.log('✓ removing a needed dependency is refused');
+        // Safety assertion: verify sandbox is truly isolated BEFORE making any changes.
+        const sandbox_check = JSON.parse(cli('skills', 'list', '--json'));
+        const installed_in_sandbox = sandbox_check.hosts.flatMap(h=>(h.packs ?? []).length);
+        const has_plugins = installed_in_sandbox.some(count=>count > 0);
+        if (has_plugins)
+        {
+            fail('sandbox isolation check failed: plugins already installed. Aborting without making changes.');
+        }
+        else
+        {
+            console.log('✓ pre-flight assertion: sandbox is clean');
+
+            const installed = JSON.parse(cli('skills', 'install', '--json'));
+            console.log(`hosts: ${installed.hosts.map(h=>`${h.host}=${h.status}`).join(' ') || '(none detected)'}`);
+            if (!installed.hosts.length)
+            {
+                console.log('⚠ no assistant detected — nothing to verify on this machine');
+            }
+            else
+            {
+                if (!installed.hosts.some(h=>h.status === 'ok'))
+                {
+                    fail('no host reported ok');
+                }
+                if (installed.resolved.join(',') !== 'ai-sdr-core,reply-adapter,agentic-runtime')
+                {
+                    fail(`unexpected resolve order: ${installed.resolved.join(',')}`);
+                }
+
+                // Idempotency: the second run must change nothing.
+                const again = JSON.parse(cli('skills', 'install', '--json'));
+                const actions = again.hosts.flatMap(h=>(h.packs ?? []).map(p=>p.action));
+                if (actions.some(a=>a !== 'current'))
+                {
+                    fail(`re-install was not idempotent: ${actions.join(',')}`);
+                }
+
+                // Selective install pulls the core.
+                cli('skills', 'remove', '--json');
+                const selective = JSON.parse(cli('skills', 'install', 'adapter', '--json'));
+                if (selective.resolved.join(',') !== 'ai-sdr-core,reply-adapter')
+                {
+                    fail(`selective install did not pull the core: ${selective.resolved.join(',')}`);
+                }
+
+                // Removing the core alone must be refused.
+                try {
+                    cli('skills', 'remove', 'core', '--json');
+                    fail('removing the core while the adapter is installed was allowed');
+                } catch {
+                    console.log('✓ removing a needed dependency is refused');
+                }
+            }
+        }
+    } catch (e) {
+        fail(`smoke run failed unexpectedly: ${e.message}`);
     }
 
     // Post-run assertion: snapshot the real environment again and verify it is unchanged.
     // This is the critical safety check. Any difference means isolation failed.
+    // It runs unconditionally — even if an assertion above already failed — so a
+    // failing smoke still tells the user whether their machine was touched.
     const after_snapshot = snapshot_state();
     const diffs = compare_snapshots(before_snapshot, after_snapshot);
 
     if (diffs.length > 0)
     {
         fail(`post-run assertion failed: real home was modified:\n${diffs.map(d=>`  ${d}`).join('\n')}`);
-        process.exit(1);
     }
-    console.log('✓ post-run assertion: real home is untouched');
+    else
+    {
+        console.log('✓ post-run assertion: real home is untouched');
+    }
 
     if (!process.exitCode)
     {
