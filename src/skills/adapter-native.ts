@@ -106,6 +106,34 @@ const status_of = (packs: Pack_outcome[]): Host_outcome['status']=>{
     return failed.length === packs.length ? 'failed' : 'partial';
 };
 
+// The two dependency guards report the same way: name the packs the guard held
+// back, so the user is told what is still to do rather than left to infer it.
+// Install refuses a pack whose dependency failed; remove refuses a pack whose
+// dependent failed. adapter-flat.ts carries the same pair verbatim — the two
+// adapters are twin implementations of one rule, like status_of above.
+const blocked_hint = (names: Iterable<string>): string | undefined=>{
+    const list = [...names];
+    return list.length
+        ? `packs ${list.join(', ')} were not attempted because their dependencies failed; fix those installs and re-run`
+        : undefined;
+};
+
+const kept_hint = (names: Iterable<string>): string | undefined=>{
+    const list = [...names];
+    return list.length
+        ? `packs ${list.join(', ')} were kept because packs that depend on them could not be removed; fix those removals and re-run`
+        : undefined;
+};
+
+// A version that did not move is `current`, never `upgraded`. Every update
+// path in both adapters answers this question through a helper like this one,
+// so one machine can never report "already current" and "updated 0.1.0 →
+// 0.1.0" for the same fact side by side.
+const updated_outcome = (name: string, from: string, to: string): Pack_outcome=>
+    from === to
+        ? {name, action: 'current', version: to}
+        : {name, action: 'upgraded', version: to, from};
+
 const run_native = async(opts: Native_opts): Promise<Host_outcome>=>{
     const {operation, host, packs, scope} = opts;
     const run = opts.run ?? default_runner;
@@ -180,8 +208,32 @@ const run_native = async(opts: Native_opts): Promise<Host_outcome>=>{
         }
         const installed = listing.versions;
         // Reverse dependency order: a dependent never outlives its dependency.
+        // Ordering alone is not enough, though — if a dependent's removal
+        // fails, removing its dependency anyway leaves the host holding an
+        // adapter with no core, the one state this installer exists to
+        // prevent. So the install guard below is mirrored here, transposed:
+        // install refuses a pack whose dependency failed, remove refuses a
+        // pack whose dependent did. Reverse order means every dependent has
+        // already been visited by the time its dependency comes up, so the
+        // block propagates transitively down the chain.
+        const failed_names = new Set<string>();
+        const blocked_names = new Set<string>();
+        const kept_names = new Set<string>();
         for (const pack of [...packs].reverse())
         {
+            const blocker = packs.find(p=>p.dependencies.includes(pack.name)
+                && (failed_names.has(p.name) || blocked_names.has(p.name)));
+            if (blocker)
+            {
+                blocked_names.add(pack.name);
+                // Only a pack that is actually here is "kept" — blocking one
+                // the host never had is bookkeeping for the chain, not news.
+                if (installed[pack.name])
+                {
+                    kept_names.add(pack.name);
+                }
+                continue;
+            }
             if (!installed[pack.name])
             {
                 continue;
@@ -192,11 +244,15 @@ const run_native = async(opts: Native_opts): Promise<Host_outcome>=>{
                 continue;
             }
             const result = await run(host.bin, cli.remove(pack.name, MARKETPLACE));
-            outcomes.push(result.code === 0
-                ? {name: pack.name, action: 'removed', version: installed[pack.name]}
-                : {name: pack.name, action: 'failed', detail: (result.stderr || result.stdout).trim()});
+            if (result.code !== 0)
+            {
+                failed_names.add(pack.name);
+                outcomes.push({name: pack.name, action: 'failed', detail: (result.stderr || result.stdout).trim()});
+                continue;
+            }
+            outcomes.push({name: pack.name, action: 'removed', version: installed[pack.name]});
         }
-        return {...base, packs: outcomes, status: status_of(outcomes)};
+        return {...base, packs: outcomes, status: status_of(outcomes), hint: kept_hint(kept_names)};
     }
 
     if (operation === 'update')
@@ -224,7 +280,7 @@ const run_native = async(opts: Native_opts): Promise<Host_outcome>=>{
                 {
                     for (const pack of installed_packs)
                     {
-                        outcomes.push({name: pack.name, action: 'upgraded', version: pack.version, from: installed[pack.name]});
+                        outcomes.push(updated_outcome(pack.name, installed[pack.name], pack.version));
                     }
                 }
                 else
@@ -233,7 +289,10 @@ const run_native = async(opts: Native_opts): Promise<Host_outcome>=>{
                     const result = await run(host.bin, cli.update(installed_packs[0].name, MARKETPLACE));
                     if (result.code === 0)
                     {
-                        // Re-read listing to get actual versions
+                        // Re-read listing to get actual versions. A whole-
+                        // marketplace upgrade exits 0 whether or not any pack
+                        // moved, so the post-update versions — not the exit
+                        // code — decide between `upgraded` and `current`.
                         const post_listing = await installed_versions(host, run);
                         if (post_listing.ok)
                         {
@@ -241,12 +300,9 @@ const run_native = async(opts: Native_opts): Promise<Host_outcome>=>{
                             for (const pack of installed_packs)
                             {
                                 const have = pre_update_versions.get(pack.name);
-                                outcomes.push({
-                                    name: pack.name,
-                                    action: 'upgraded',
-                                    version: post_installed[pack.name] ?? pack.version,
-                                    from: have ?? '',
-                                });
+                                outcomes.push(updated_outcome(
+                                    pack.name, have ?? '', post_installed[pack.name] ?? pack.version,
+                                ));
                             }
                         }
                         else
@@ -255,7 +311,7 @@ const run_native = async(opts: Native_opts): Promise<Host_outcome>=>{
                             for (const pack of installed_packs)
                             {
                                 const have = pre_update_versions.get(pack.name);
-                                outcomes.push({name: pack.name, action: 'upgraded', version: pack.version, from: have ?? ''});
+                                outcomes.push(updated_outcome(pack.name, have ?? '', pack.version));
                             }
                         }
                     }
@@ -294,21 +350,20 @@ const run_native = async(opts: Native_opts): Promise<Host_outcome>=>{
                 const result = await run(host.bin, cli.update(pack.name, MARKETPLACE));
                 if (result.code === 0)
                 {
-                    // Re-read listing to get actual version
+                    // Re-read listing to get actual version. `plugin update`
+                    // can exit 0 without moving the version, so this reports
+                    // `current` rather than `upgraded 0.1.0 -> 0.1.0`.
                     const post_listing = await installed_versions(host, run);
                     if (post_listing.ok)
                     {
-                        outcomes.push({
-                            name: pack.name,
-                            action: 'upgraded',
-                            version: post_listing.versions[pack.name] ?? pack.version,
-                            from: have,
-                        });
+                        outcomes.push(updated_outcome(
+                            pack.name, have, post_listing.versions[pack.name] ?? pack.version,
+                        ));
                     }
                     else
                     {
                         // Re-read failed; use target version from registry
-                        outcomes.push({name: pack.name, action: 'upgraded', version: pack.version, from: have});
+                        outcomes.push(updated_outcome(pack.name, have, pack.version));
                     }
                 }
                 else
@@ -360,11 +415,7 @@ const run_native = async(opts: Native_opts): Promise<Host_outcome>=>{
             : {name: pack.name, action, version: pack.version});
     }
 
-    const status = status_of(outcomes);
-    const hint = blocked_names.size
-        ? `packs ${[...blocked_names].join(', ')} were not attempted because their dependencies failed; fix those installs and re-run`
-        : undefined;
-    return {...base, packs: outcomes, status, hint};
+    return {...base, packs: outcomes, status: status_of(outcomes), hint: blocked_hint(blocked_names)};
 };
 
 export {default_runner, installed_versions, run_native};

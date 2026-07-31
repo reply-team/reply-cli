@@ -3,7 +3,7 @@ import {run_native, installed_versions} from '../../skills/adapter-native';
 import {host_by_id} from '../../skills/hosts';
 import {PACKS_FALLBACK, resolve_packs} from '../../skills/packs';
 import type {Detected_host} from '../../skills/detect';
-import type {Run_result, Runner} from '../../skills/types';
+import type {Pack, Run_result, Runner} from '../../skills/types';
 
 const ok = (stdout = ''): Run_result=>({code: 0, stdout, stderr: ''});
 const fail = (stderr = 'boom'): Run_result=>({code: 1, stdout: '', stderr});
@@ -181,6 +181,51 @@ describe('run_native remove', ()=>{
         expect(outcome.packs).toEqual([]);
         expect(calls).toHaveLength(1);
     });
+
+    // C1 (final review): reverse order alone is not enough. A failed
+    // `plugin uninstall reply-adapter` followed by a successful
+    // `plugin uninstall ai-sdr-core` leaves the host with an adapter and no
+    // core — the state this installer exists to prevent.
+    it('never removes a dependency once removing a pack that depends on it failed', async()=>{
+        const installed = claude_list([
+            {name: 'ai-sdr-core', version: '0.1.0'}, {name: 'reply-adapter', version: '0.1.0'},
+        ]);
+        const {run, calls} = runner_of([ok(installed), fail('file is locked')]);
+        const outcome = await run_native({operation: 'remove', host: claude(), packs: adapter, scope: 'user', run});
+        // The listing, then the dependent's uninstall — and nothing else.
+        expect(calls.slice(1).map(c=>c[3])).toEqual(['reply-adapter@reply-skills']);
+        expect(outcome.packs).toEqual([
+            {name: 'reply-adapter', action: 'failed', detail: 'file is locked'},
+        ]);
+        expect(outcome.status).toBe('failed');
+        expect(outcome.hint).toContain('ai-sdr-core');
+    });
+
+    it('propagates the block down a dependency chain when the outermost removal failed', async()=>{
+        const chain_a: Pack = {name: 'chainA', display_name: 'A', version: '1.0.0', description: '', dependencies: []};
+        const chain_b: Pack = {name: 'chainB', display_name: 'B', version: '1.0.0', description: '', dependencies: ['chainA']};
+        const chain_c: Pack = {name: 'chainC', display_name: 'C', version: '1.0.0', description: '', dependencies: ['chainB']};
+        const listing = JSON.stringify({plugins: [chain_a, chain_b, chain_c].map(p=>
+            ({name: p.name, marketplace: 'reply-skills', version: p.version}))});
+        const {run, calls} = runner_of([ok(listing), fail('C is locked')]);
+        const outcome = await run_native({
+            operation: 'remove', host: claude(), packs: [chain_a, chain_b, chain_c], scope: 'user', run,
+        });
+        expect(calls.filter(c=>c[2] === 'uninstall').map(c=>c[3])).toEqual(['chainC@reply-skills']);
+        expect(outcome.hint).toContain('chainB');
+        expect(outcome.hint).toContain('chainA');
+    });
+
+    it('reports no hint and removes everything when nothing fails', async()=>{
+        const installed = claude_list([
+            {name: 'ai-sdr-core', version: '0.1.0'}, {name: 'reply-adapter', version: '0.1.0'},
+        ]);
+        const {run} = runner_of([ok(installed), ok(), ok()]);
+        const outcome = await run_native({operation: 'remove', host: claude(), packs: adapter, scope: 'user', run});
+        expect(outcome.packs?.map(p=>p.action)).toEqual(['removed', 'removed']);
+        expect(outcome.status).toBe('ok');
+        expect(outcome.hint).toBeUndefined();
+    });
 });
 
 describe('run_native list and update', ()=>{
@@ -214,6 +259,45 @@ describe('run_native list and update', ()=>{
         const outcome = await run_native({operation: 'update', host: codex(), packs: all, scope: 'user', run});
         expect(calls.filter(c=>c[1] === 'plugin' && c[2] === 'marketplace' && c[3] === 'upgrade')).toHaveLength(1);
         expect(outcome.packs?.map(p=>[p.name, p.action])).toEqual([['ai-sdr-core', 'upgraded'], ['reply-adapter', 'upgraded'], ['agentic-runtime', 'upgraded']]);
+    });
+
+    // I3 (final review): the marketplace path exits 0 whether or not anything
+    // moved, and used to hardcode `upgraded`. On a machine with Claude Code
+    // and Codex that printed "already current" and "updated" for one fact.
+    it('update on Codex reports current when the marketplace upgrade moved nothing', async()=>{
+        const listing = JSON.stringify({installed: [
+            {name: 'ai-sdr-core', version: '0.1.0', marketplaceName: 'reply-skills'},
+            {name: 'reply-adapter', version: '0.1.0', marketplaceName: 'reply-skills'},
+        ]});
+        // Same versions before and after — the upgrade succeeded, nothing moved.
+        const {run} = runner_of([ok('{}'), ok(listing), ok('{}'), ok(listing)]);
+        const outcome = await run_native({operation: 'update', host: codex(), packs: adapter, scope: 'user', run});
+        expect(outcome.packs).toEqual([
+            {name: 'ai-sdr-core', action: 'current', version: '0.1.0'},
+            {name: 'reply-adapter', action: 'current', version: '0.1.0'},
+        ]);
+    });
+
+    it('update on Codex reports current on --dry-run when every pack is already at the target version', async()=>{
+        const listing = JSON.stringify({installed: [
+            {name: 'ai-sdr-core', version: '0.1.0', marketplaceName: 'reply-skills'},
+        ]});
+        // A dry run registers no marketplace, so the listing is the first call.
+        const {run} = runner_of([ok(listing)]);
+        const outcome = await run_native({
+            operation: 'update', host: codex(), packs: core_only, scope: 'user', run, dry_run: true,
+        });
+        expect(outcome.packs).toEqual([{name: 'ai-sdr-core', action: 'current', version: '0.1.0'}]);
+    });
+
+    it('update reports current when the host update verb exits 0 without moving the version', async()=>{
+        // Registry target 0.1.0, host on 0.0.9, `plugin update` succeeds but
+        // the post-update listing still says 0.0.9 — nothing changed, so the
+        // report must not claim an upgrade happened.
+        const stale = claude_list([{name: 'ai-sdr-core', version: '0.0.9'}]);
+        const {run} = runner_of([ok(), ok(stale), ok(), ok(stale)]);
+        const outcome = await run_native({operation: 'update', host: claude(), packs: core_only, scope: 'user', run});
+        expect(outcome.packs).toEqual([{name: 'ai-sdr-core', action: 'current', version: '0.0.9'}]);
     });
 
     it('update reports current for pack already at target version', async()=>{

@@ -15,6 +15,13 @@ type Journal_entry = {
     ref: string;
     commit?: string;
     scope: Scope;
+    // The resolved project root a project-scope entry belongs to. The key
+    // below is host -> scope -> pack, which cannot tell two checkouts apart:
+    // without this, `remove --project` run from a second repository finds the
+    // first one's entry, deletes nothing (containment refuses every path) and
+    // still forgets the entry. Absent on user-scope entries, whose directory
+    // is the home directory and therefore unambiguous.
+    project_root?: string;
     // Absolute paths written by the flat adapter.
     files: string[];
     // False when the copy this entry describes did not finish — a version

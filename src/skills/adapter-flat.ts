@@ -80,25 +80,47 @@ const is_within = (root: string, target: string): boolean=>{
 const paths_equal = (a: string, b: string): boolean=>
     path.relative(a, b) === '';
 
+// What delete_files could not do. `outside` are paths the containment check
+// refused — a tampered or stale journal entry naming somewhere else; `failed`
+// are files the OS would not delete. Both are returned rather than swallowed:
+// a caller that reports `removed` for a file still sitting on disk is lying,
+// which is the only way this adapter's `remove` could ever mislead.
+type Delete_failure = {file: string; message: string};
+type Delete_result = {outside: string[]; failed: Delete_failure[]};
+
 // Removes the files we're told to, minus two carve-outs: anything outside
 // `target_root` (a tampered or stale journal entry) and anything another
 // host's own journal entry still claims (several flat hosts share the same
 // project-scope directory, see claimed_by_others). What's left is pruned back
 // to empty directories, but `target_root` itself is never removed.
-const delete_files = (files: string[], target_root: string, protected_files: Set<string> = new Set()): void=>{
+const delete_files = (files: string[], target_root: string, protected_files: Set<string> = new Set()): Delete_result=>{
     const resolved_root = path.resolve(target_root);
     const dirs = new Set<string>();
+    const outside: string[] = [];
+    const failed: Delete_failure[] = [];
     for (const file of files)
     {
         const resolved = path.resolve(file);
-        if (!is_within(resolved_root, resolved) || [...protected_files].some(p=>paths_equal(p, resolved)))
+        if (!is_within(resolved_root, resolved))
+        {
+            outside.push(resolved);
+            continue;
+        }
+        // A sibling host still claims this one; not deleting it is the point,
+        // so it is neither a failure nor a refusal.
+        if ([...protected_files].some(p=>paths_equal(p, resolved)))
         {
             continue;
         }
         try {
+            // `force` already makes a missing file a no-op, so removal stays
+            // idempotent without a catch. Anything that does throw here is a
+            // real failure — a read-only file on Windows (EPERM), an open
+            // handle (EBUSY) — and must be reported, not swallowed.
             fs.rmSync(resolved, {force: true});
-        } catch {
-            // Already gone — removal stays idempotent.
+        } catch (error) {
+            failed.push({file: resolved, message: (error as Error).message});
+            continue;
         }
         dirs.add(path.dirname(resolved));
     }
@@ -117,13 +139,39 @@ const delete_files = (files: string[], target_root: string, protected_files: Set
             // Non-empty or missing — leave it alone.
         }
     }
+    return {outside, failed};
+};
+
+// The user-facing reason a removal did not fully happen, or undefined when it
+// did. Anything but undefined means the pack must be reported `failed` and its
+// journal entry kept, so the next run can retry.
+const delete_detail = (result: Delete_result, target_root: string): string | undefined=>{
+    const reasons: string[] = [];
+    if (result.outside.length)
+    {
+        reasons.push(`${result.outside.length} recorded file(s) sit outside ${target_root} and were left alone`
+            + `, starting with ${result.outside[0]}`);
+    }
+    for (const failure of result.failed)
+    {
+        reasons.push(`could not delete ${failure.file}: ${failure.message}`);
+    }
+    return reasons.length ? reasons.join('; ') : undefined;
 };
 
 // Absolute file paths that some *other* host's journal entry for this exact
 // (scope, pack) still claims. Several flat hosts resolve the same physical
 // project-scope directory (`.agents/skills`), so deleting or overwriting one
 // host's copy must not break a sibling host's install of the same pack.
-const claimed_by_others = (env: Env | undefined, scope: Scope, pack_name: string, exclude_host: string): Set<string>=>{
+// `project_root` narrows this to the repository this run is acting on: a
+// sibling's entry recorded in a different checkout claims nothing here.
+const claimed_by_others = (
+    env: Env | undefined,
+    scope: Scope,
+    pack_name: string,
+    exclude_host: string,
+    project_root?: string,
+): Set<string>=>{
     const journal = read_journal(env);
     const claimed = new Set<string>();
     for (const [host, scopes] of Object.entries(journal.hosts))
@@ -134,6 +182,11 @@ const claimed_by_others = (env: Env | undefined, scope: Scope, pack_name: string
         }
         const entry = scopes[scope]?.[pack_name];
         if (!entry)
+        {
+            continue;
+        }
+        if (project_root !== undefined && entry.project_root !== undefined
+            && !paths_equal(entry.project_root, project_root))
         {
             continue;
         }
@@ -175,6 +228,37 @@ const status_of = (packs: Pack_outcome[]): Host_outcome['status']=>{
     return failed.length === packs.length ? 'failed' : 'partial';
 };
 
+// Twins of adapter-native.ts's pair, for the same reason status_of is a twin:
+// install refuses a pack whose dependency failed, remove refuses a pack whose
+// dependent failed, and the user reads the identical sentence either way.
+const blocked_hint = (names: Iterable<string>): string | undefined=>{
+    const list = [...names];
+    return list.length
+        ? `packs ${list.join(', ')} were not attempted because their dependencies failed; fix those installs and re-run`
+        : undefined;
+};
+
+const kept_hint = (names: Iterable<string>): string | undefined=>{
+    const list = [...names];
+    return list.length
+        ? `packs ${list.join(', ')} were kept because packs that depend on them could not be removed; fix those removals and re-run`
+        : undefined;
+};
+
+// A copy that landed at the version the pack was already on is not an upgrade,
+// even though this adapter really did re-copy from a fresh clone — the commit
+// carries that difference, the version does not. Mirrors
+// adapter-native.ts's updated_outcome so `current` means one thing everywhere.
+const copied_outcome = (name: string, version: string, from?: string): Pack_outcome=>{
+    if (from === undefined)
+    {
+        return {name, action: 'installed', version};
+    }
+    return from === version
+        ? {name, action: 'current', version}
+        : {name, action: 'upgraded', version, from};
+};
+
 type Flat_opts = {
     operation: Operation;
     host: Detected_host;
@@ -203,14 +287,34 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
     const base: Host_outcome = {
         host: id, label: host.def.label, kind: 'flat-skills-dir', scope, status: 'ok',
     };
+    // The repository a project-scope run acts on, and the identity a
+    // project-scope journal entry is stamped with. Undefined under user scope,
+    // whose directory is the home directory and cannot be confused with
+    // another one.
+    const project_root = scope === 'project' ? path.resolve(cwd) : undefined;
+    // An entry written from a different checkout is not this run's to read,
+    // replace or forget: `remove --project` from the wrong repository must
+    // report nothing, rather than delete nothing (containment refuses every
+    // path) and still claim `removed`. Entries written before the field
+    // existed carry no root and are treated as ours, so nothing already
+    // journaled becomes unreachable.
+    const belongs_here = (entry: Journal_entry): boolean=>
+        project_root === undefined
+        || entry.project_root === undefined
+        || paths_equal(entry.project_root, project_root);
     // Scope-bound wrappers: every journal lookup for this run goes through
-    // these, so `scope` can never be forgotten at a call site.
-    const entry_for = (pack_name: string): Journal_entry | undefined=>
-        journal_entry(id, scope, pack_name, opts.env);
+    // these, so neither `scope` nor the project root can be forgotten at a
+    // call site.
+    const entry_for = (pack_name: string): Journal_entry | undefined=>{
+        const entry = journal_entry(id, scope, pack_name, opts.env);
+        return entry && belongs_here(entry) ? entry : undefined;
+    };
     const record_for = (pack_name: string, data: Journal_entry): void=>
-        record_pack(id, scope, pack_name, data, opts.env);
+        record_pack(id, scope, pack_name, project_root ? {...data, project_root} : data, opts.env);
     const forget_for = (pack_name: string): Journal_entry | undefined=>
         forget_pack(id, scope, pack_name, opts.env);
+    const others_claim = (pack_name: string): Set<string>=>
+        claimed_by_others(opts.env, scope, pack_name, id, project_root);
     const outcomes: Pack_outcome[] = [];
 
     if (operation === 'list')
@@ -257,22 +361,54 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
 
     if (operation === 'remove')
     {
+        // Reverse dependency order, and — since delete_files can now report a
+        // file it could not remove — the same transposed guard as
+        // adapter-native.ts: a dependency is never dropped once a pack that
+        // depends on it failed to be removed, so no host is left holding an
+        // adapter with no core. Reverse order means every dependent has
+        // already been visited, so the block propagates down the chain.
+        const failed_names = new Set<string>();
+        const blocked_names = new Set<string>();
+        const kept_names = new Set<string>();
         for (const pack of [...packs].reverse())
         {
+            const blocker = packs.find(p=>p.dependencies.includes(pack.name)
+                && (failed_names.has(p.name) || blocked_names.has(p.name)));
+            if (blocker)
+            {
+                blocked_names.add(pack.name);
+                if (entry_for(pack.name))
+                {
+                    kept_names.add(pack.name);
+                }
+                continue;
+            }
             const entry = entry_for(pack.name);
             if (!entry)
             {
                 continue;
             }
-            if (!dry_run)
+            if (dry_run)
             {
-                const protected_files = claimed_by_others(opts.env, scope, pack.name, id);
-                delete_files(entry.files, target_root, protected_files);
-                forget_for(pack.name);
+                outcomes.push({name: pack.name, action: 'removed', version: entry.version});
+                continue;
             }
+            const refusal = delete_detail(
+                delete_files(entry.files, target_root, others_claim(pack.name)),
+                target_root,
+            );
+            if (refusal)
+            {
+                // The entry stays: forgetting it would strand whatever is
+                // still on disk with nothing left tracking it.
+                failed_names.add(pack.name);
+                outcomes.push({name: pack.name, action: 'failed', detail: refusal});
+                continue;
+            }
+            forget_for(pack.name);
             outcomes.push({name: pack.name, action: 'removed', version: entry.version});
         }
-        return {...base, packs: outcomes};
+        return {...base, packs: outcomes, status: status_of(outcomes), hint: kept_hint(kept_names)};
     }
 
     // install and update both need the repository contents. update only touches
@@ -299,10 +435,7 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
     {
         for (const pack of pending)
         {
-            const entry = entry_for(pack.name);
-            outcomes.push(entry
-                ? {name: pack.name, action: 'upgraded', version: pack.version, from: entry.version}
-                : {name: pack.name, action: 'installed', version: pack.version});
+            outcomes.push(copied_outcome(pack.name, pack.version, entry_for(pack.name)?.version));
         }
         return {...base, packs: outcomes};
     }
@@ -335,10 +468,6 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
     // way regardless of which adapter is doing the installing.
     const failed_names = new Set<string>();
     const blocked_names = new Set<string>();
-    const blocked_hint = (): string | undefined=>
-        blocked_names.size
-            ? `packs ${[...blocked_names].join(', ')} were not attempted because their dependencies failed; fix those installs and re-run`
-            : undefined;
     try {
         for (const pack of pending)
         {
@@ -350,7 +479,7 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
             }
             const from = path.join(cloned.dir, 'plugins', pack.name, 'skills');
             const previous = entry_for(pack.name);
-            const elsewhere = claimed_by_others(opts.env, scope, pack.name, id);
+            const elsewhere = others_claim(pack.name);
             const known_files = previous
                 ? [...previous.files.map(f=>path.resolve(f)), ...elsewhere]
                 : [...elsewhere];
@@ -371,6 +500,9 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
             }
             if (previous)
             {
+                // Best-effort: a file that survives here is either overwritten
+                // by the copy below or fails it, and either way the copy's own
+                // error path — not a silent skip — is what reaches the user.
                 delete_files(previous.files, target_root, elsewhere);
             }
             const written: string[] = [];
@@ -399,9 +531,7 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
                 complete: true,
                 installed_at: new Date().toISOString(),
             });
-            outcomes.push(previous
-                ? {name: pack.name, action: 'upgraded', version: pack.version, from: previous.version}
-                : {name: pack.name, action: 'installed', version: pack.version});
+            outcomes.push(copied_outcome(pack.name, pack.version, previous?.version));
         }
     } catch (error) {
         // outcomes.length is not "something landed" — every entry pushed so
@@ -413,7 +543,7 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
             packs: outcomes,
             reason: 'copy-failed',
             detail: (error as Error).message,
-            hint: blocked_hint() ?? 'check filesystem permissions for the skills directory, then re-run',
+            hint: blocked_hint(blocked_names) ?? 'check filesystem permissions for the skills directory, then re-run',
         };
     } finally {
         try {
@@ -423,7 +553,7 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
             // the result computed above.
         }
     }
-    return {...cloned_base, packs: outcomes, status: status_of(outcomes), hint: blocked_hint()};
+    return {...cloned_base, packs: outcomes, status: status_of(outcomes), hint: blocked_hint(blocked_names)};
 };
 
 export {clone_repo, copy_dir, skills_target, run_flat};

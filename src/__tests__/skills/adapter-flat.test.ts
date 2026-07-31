@@ -252,7 +252,7 @@ describe('run_flat copy failures', ()=>{
 // directory, and must never remove the skills directory itself, even when
 // the journal entry driving it is hand-edited or stale.
 describe('run_flat deletion containment', ()=>{
-    it('does not delete a journaled path outside the skills directory', async()=>{
+    it('refuses a journaled path outside the skills directory and says so instead of claiming removed', async()=>{
         const outside = path.join(root, 'outside.txt');
         fs.writeFileSync(outside, 'do not touch');
         record_pack('cursor', 'user', 'ai-sdr-core', {
@@ -261,7 +261,33 @@ describe('run_flat deletion containment', ()=>{
         }, env());
         const outcome = await run_flat(flat_opts('remove', core_only));
         expect(fs.existsSync(outside)).toBe(true);
-        expect(outcome.packs).toEqual([{name: 'ai-sdr-core', action: 'removed', version: '0.1.0'}]);
+        // Nothing was deleted, so nothing may be reported as removed — and the
+        // entry stays, because forgetting it would strand the recorded files
+        // with nothing left tracking them.
+        expect(outcome.status).toBe('failed');
+        expect(outcome.packs?.map(p=>[p.name, p.action])).toEqual([['ai-sdr-core', 'failed']]);
+        expect(outcome.packs?.[0].detail).toContain(outside);
+        expect(journal_entry('cursor', 'user', 'ai-sdr-core', env())?.version).toBe('0.1.0');
+    });
+
+    // Deferred minor promoted to must-fix: `fs.rmSync(file, {force: true})`
+    // does not clear the read-only attribute on Windows and throws EPERM.
+    // Swallowing that left the file on disk and the pack reported `removed`.
+    it('reports a file it could not delete instead of a false success', async()=>{
+        await run_flat(flat_opts('install', core_only));
+        const rm_spy = vi.spyOn(fs, 'rmSync').mockImplementationOnce(()=>{
+            throw Object.assign(new Error('EPERM: operation not permitted, unlink'), {code: 'EPERM'});
+        });
+        try {
+            const outcome = await run_flat(flat_opts('remove', core_only));
+            expect(outcome.status).toBe('failed');
+            expect(outcome.packs?.map(p=>[p.name, p.action])).toEqual([['ai-sdr-core', 'failed']]);
+            expect(outcome.packs?.[0].detail).toContain('EPERM');
+        } finally {
+            rm_spy.mockRestore();
+        }
+        // Still tracked, so a later `remove` can retry it.
+        expect(journal_entry('cursor', 'user', 'ai-sdr-core', env())?.version).toBe('0.1.0');
     });
 
     it('deletes a journaled file directly under the skills root without pruning the root itself', async()=>{
@@ -333,6 +359,106 @@ describe('run_flat dependency blocking', ()=>{
         expect(fs.existsSync(path.join(target, 'agentic-runtime-skill'))).toBe(false);
         expect(journal_entry('cursor', 'user', 'reply-adapter', env())).toBeUndefined();
         expect(journal_entry('cursor', 'user', 'agentic-runtime', env())).toBeUndefined();
+    });
+});
+
+// C1 (final review): reverse removal order is necessary but not sufficient.
+// Once delete_files can report a file it could not remove, a failed removal
+// must stop its dependency being removed too, or the host is left holding an
+// adapter with no core — the one state this installer exists to prevent.
+describe('run_flat remove dependency guard', ()=>{
+    it('keeps a dependency installed when removing a pack that depends on it failed', async()=>{
+        await run_flat(flat_opts('install', all));
+        const target = path.join(home, '.cursor', 'skills');
+
+        // Removal walks [agentic-runtime, reply-adapter, ai-sdr-core]; the
+        // first rmSync is agentic-runtime's only file.
+        const rm_spy = vi.spyOn(fs, 'rmSync').mockImplementationOnce(()=>{
+            throw Object.assign(new Error('EPERM: operation not permitted, unlink'), {code: 'EPERM'});
+        });
+        let outcome;
+        try {
+            outcome = await run_flat(flat_opts('remove', all));
+        } finally {
+            rm_spy.mockRestore();
+        }
+
+        expect(outcome.packs?.map(p=>[p.name, p.action])).toEqual([
+            ['agentic-runtime', 'failed'],
+            ['reply-adapter', 'removed'],
+        ]);
+        expect(outcome.status).toBe('partial');
+        expect(outcome.hint).toContain('ai-sdr-core');
+        // The core survives on disk and in the journal, because a pack that
+        // depends on it is still installed.
+        expect(fs.existsSync(path.join(target, 'ai-sdr-core-skill', 'SKILL.md'))).toBe(true);
+        expect(journal_entry('cursor', 'user', 'ai-sdr-core', env())?.version).toBe('0.1.0');
+        expect(journal_entry('cursor', 'user', 'agentic-runtime', env())?.version).toBe('0.1.0');
+        expect(journal_entry('cursor', 'user', 'reply-adapter', env())).toBeUndefined();
+    });
+
+    it('removes everything, in reverse order, when nothing fails', async()=>{
+        await run_flat(flat_opts('install', all));
+        const outcome = await run_flat(flat_opts('remove', all));
+        expect(outcome.packs?.map(p=>[p.name, p.action])).toEqual([
+            ['agentic-runtime', 'removed'],
+            ['reply-adapter', 'removed'],
+            ['ai-sdr-core', 'removed'],
+        ]);
+        expect(outcome.status).toBe('ok');
+        expect(outcome.hint).toBeUndefined();
+        expect(fs.readdirSync(path.join(home, '.cursor', 'skills'))).toEqual([]);
+    });
+});
+
+// I2 (final review): a project-scope entry is keyed host -> 'project' -> pack,
+// which cannot tell two checkouts apart. Without the project root on the
+// entry, `remove --project` from a second repository deletes nothing (the
+// containment check refuses every path) and still reports `removed`.
+describe('run_flat project-scope entries belong to one repository', ()=>{
+    const other_project = ()=>path.join(root, 'other-project');
+
+    it('leaves another repository\'s install alone and does not claim to have removed it', async()=>{
+        await run_flat({...flat_opts('install', core_only), scope: 'project'});
+        const installed_file = path.join(root, 'project', '.agents', 'skills', 'ai-sdr-core-skill', 'SKILL.md');
+        expect(fs.existsSync(installed_file)).toBe(true);
+        expect(journal_entry('cursor', 'project', 'ai-sdr-core', env())?.project_root)
+            .toBe(path.resolve(path.join(root, 'project')));
+
+        // Same machine, same host, same journal — a different repository.
+        const outcome = await run_flat({
+            ...flat_opts('remove', core_only), scope: 'project', cwd: other_project(),
+        });
+
+        expect(outcome.packs).toEqual([]);
+        expect(fs.existsSync(installed_file)).toBe(true);
+        // The first repository's entry is not this run's to forget.
+        expect(journal_entry('cursor', 'project', 'ai-sdr-core', env())?.version).toBe('0.1.0');
+    });
+
+    it('does not report another repository\'s install in a project-scope list', async()=>{
+        await run_flat({...flat_opts('install', core_only), scope: 'project'});
+        const outcome = await run_flat({
+            ...flat_opts('list', core_only), scope: 'project', cwd: other_project(),
+            clone: async()=>{ throw new Error('list must not clone'); },
+        });
+        expect(outcome.packs).toEqual([]);
+    });
+
+    it('still removes a project install run from the repository that owns it', async()=>{
+        await run_flat({...flat_opts('install', core_only), scope: 'project'});
+        const outcome = await run_flat({...flat_opts('remove', core_only), scope: 'project'});
+        expect(outcome.packs).toEqual([{name: 'ai-sdr-core', action: 'removed', version: '0.1.0'}]);
+        expect(journal_entry('cursor', 'project', 'ai-sdr-core', env())).toBeUndefined();
+    });
+
+    it('leaves user-scope entries unkeyed and removable exactly as before', async()=>{
+        await run_flat(flat_opts('install', core_only));
+        expect(journal_entry('cursor', 'user', 'ai-sdr-core', env())?.project_root).toBeUndefined();
+        // A different cwd is irrelevant to a user-scope install.
+        const outcome = await run_flat({...flat_opts('remove', core_only), cwd: other_project()});
+        expect(outcome.packs).toEqual([{name: 'ai-sdr-core', action: 'removed', version: '0.1.0'}]);
+        expect(journal_entry('cursor', 'user', 'ai-sdr-core', env())).toBeUndefined();
     });
 });
 
@@ -416,7 +542,7 @@ describe('clone_repo', ()=>{
 // finished copy from a partial one; `pending` and `list` must both treat an
 // incomplete entry as work still to do, never as current.
 describe('run_flat incomplete installs', ()=>{
-    it('re-attempts a pack whose entry is marked incomplete, even at the target version, instead of reporting current', async()=>{
+    it('really re-copies a pack whose entry is marked incomplete, even at the target version', async()=>{
         record_pack('cursor', 'user', 'ai-sdr-core', {
             version: '0.1.0', ref: 'main', commit: 'deadbee', scope: 'user',
             files: [], complete: false, installed_at: '2026-07-30T00:00:00.000Z',
@@ -424,8 +550,13 @@ describe('run_flat incomplete installs', ()=>{
 
         const outcome = await run_flat(flat_opts('install', core_only));
 
+        // The repair landed at the same version, so the action is `current`
+        // (I3: an unchanged version is never `upgraded`). What proves the copy
+        // actually ran — rather than the entry short-circuiting to `current`
+        // as it did before Journal_entry.complete existed — is the filesystem
+        // and the journal below, not the action.
         expect(outcome.packs?.map(p=>({name: p.name, action: p.action}))).toEqual([
-            {name: 'ai-sdr-core', action: 'upgraded'},
+            {name: 'ai-sdr-core', action: 'current'},
         ]);
         const target = path.join(home, '.cursor', 'skills');
         expect(fs.existsSync(path.join(target, 'ai-sdr-core-skill', 'SKILL.md'))).toBe(true);
@@ -533,11 +664,15 @@ describe('run_flat case-insensitive path comparisons', ()=>{
         fs.writeFileSync(path.join(target, 'ai-sdr-core-skill', 'SKILL.md'), 'old content');
 
         // `update`, not `install`: the entry is already complete at the
-        // target version, so `install` would report `current` without ever
-        // reaching the collision/ownership check this test exercises.
+        // target version, so `install` would skip the copy entirely without
+        // ever reaching the collision/ownership check this test exercises.
         const outcome = await run_flat(flat_opts('update', core_only));
 
-        expect(outcome.packs).toEqual([{name: 'ai-sdr-core', action: 'upgraded', version: '0.1.0', from: '0.1.0'}]);
+        // Re-copied from a fresh clone, but at the same version — so `current`
+        // (I3), and the file is proof the copy itself was not skipped.
+        expect(outcome.packs).toEqual([{name: 'ai-sdr-core', action: 'current', version: '0.1.0'}]);
         expect(fs.existsSync(path.join(target, 'ai-sdr-core-skill', 'SKILL.md'))).toBe(true);
+        expect(fs.readFileSync(path.join(target, 'ai-sdr-core-skill', 'SKILL.md'), 'utf8'))
+            .not.toBe('old content');
     });
 });
