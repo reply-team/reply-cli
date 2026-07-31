@@ -688,16 +688,21 @@ describe('run_flat abort status', ()=>{
     });
 });
 
-// Minor, folded in for the same reason: owns_dir/protected_files compared
-// paths case-sensitively while is_within does not, so a differently-cased
-// path — routine on Windows, which CI runs — was recognised by one and not
-// the other. Both must agree.
-describe('run_flat case-insensitive path comparisons', ()=>{
-    it('recognises a differently-cased journaled path as already ours, not a foreign collision', async()=>{
+// owns_dir/protected_files once compared paths case-sensitively while
+// is_within did not, so the two disagreed about a differently-cased path.
+// They now share `path.relative`, whose case sensitivity deliberately follows
+// the platform's filesystem: on Windows the two spellings are one file, on
+// Linux they are two. Both readings are correct, so the expectation differs
+// per platform rather than one of them being a bug — asserting a single
+// answer here is what turned CI red on Linux while passing on Windows.
+const CASE_INSENSITIVE_FS = process.platform === 'win32' || process.platform === 'darwin';
+
+describe('run_flat differently-cased journaled paths', ()=>{
+    // `update`, not `install`: the entry is already complete at the target
+    // version, so `install` would skip the copy entirely without ever
+    // reaching the collision/ownership check these tests exercise.
+    const seed_differently_cased_entry = (): string=>{
         const target = path.join(home, '.cursor', 'skills');
-        // Same physical file as fake_clone will produce, but recorded with
-        // different case — as a differently-cased-but-equivalent path from a
-        // prior run might be, on a case-insensitive filesystem.
         const differently_cased = path.join(target, 'AI-SDR-CORE-SKILL', 'SKILL.MD');
         record_pack('cursor', 'user', 'ai-sdr-core', {
             version: '0.1.0', ref: 'main', commit: 'deadbee', scope: 'user',
@@ -705,17 +710,32 @@ describe('run_flat case-insensitive path comparisons', ()=>{
         }, env());
         fs.mkdirSync(path.join(target, 'ai-sdr-core-skill'), {recursive: true});
         fs.writeFileSync(path.join(target, 'ai-sdr-core-skill', 'SKILL.md'), 'old content');
+        return target;
+    };
 
-        // `update`, not `install`: the entry is already complete at the
-        // target version, so `install` would skip the copy entirely without
-        // ever reaching the collision/ownership check this test exercises.
+    it.skipIf(!CASE_INSENSITIVE_FS)('treats it as already ours where the filesystem ignores case', async()=>{
+        const target = seed_differently_cased_entry();
+
         const outcome = await run_flat(flat_opts('update', core_only));
 
-        // Re-copied from a fresh clone, but at the same version — so `current`
-        // (I3), and the file is proof the copy itself was not skipped.
+        // Re-copied from a fresh clone, but at the same version — so `current`,
+        // and the replaced content is proof the copy itself was not skipped.
         expect(outcome.packs).toEqual([{name: 'ai-sdr-core', action: 'current', version: '0.1.0'}]);
-        expect(fs.existsSync(path.join(target, 'ai-sdr-core-skill', 'SKILL.md'))).toBe(true);
         expect(fs.readFileSync(path.join(target, 'ai-sdr-core-skill', 'SKILL.md'), 'utf8'))
             .not.toBe('old content');
+    });
+
+    it.skipIf(CASE_INSENSITIVE_FS)('treats it as a foreign file where case distinguishes paths', async()=>{
+        const target = seed_differently_cased_entry();
+
+        const outcome = await run_flat(flat_opts('update', core_only));
+
+        // On a case-sensitive filesystem the journaled path names a different
+        // file, so the one on disk is not ours and must not be overwritten.
+        expect(outcome.packs).toEqual([{
+            name: 'ai-sdr-core', action: 'failed', detail: 'conflicts with an existing skill: ai-sdr-core-skill',
+        }]);
+        expect(fs.readFileSync(path.join(target, 'ai-sdr-core-skill', 'SKILL.md'), 'utf8'))
+            .toBe('old content');
     });
 });
