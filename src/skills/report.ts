@@ -1,0 +1,102 @@
+import {pc} from '../utils/output';
+import type {Host_outcome, Report} from './types';
+
+// Turns per-host outcomes into what the user reads and what the process
+// returns. The report names only what was found: an assistant that is not on
+// the machine is never mentioned.
+
+const summarize = (hosts: Host_outcome[]): Report['summary']=>({
+    installed: hosts.filter(h=>h.status === 'ok' || h.status === 'partial').length,
+    skipped: hosts.filter(h=>h.status === 'skipped').length,
+    failed: hosts.filter(h=>h.status === 'failed').length,
+});
+
+const dependency_note = (requested: string[], resolved: string[]): string | undefined=>{
+    const added = resolved.filter(name=>!requested.includes(name));
+    if (!added.length || !requested.length)
+    {
+        return undefined;
+    }
+    return `${added.join(', ')} added — required by ${requested.join(', ')}`;
+};
+
+const verb = {
+    installed: 'installed', upgraded: 'updated', removed: 'removed',
+    current: 'already current', failed: 'failed',
+} as const;
+
+// Groups a host's packs by what happened, so one host is one line.
+const host_line = (host: Host_outcome): string=>{
+    const label = host.label.padEnd(12);
+    if (host.status === 'skipped')
+    {
+        return pc.yellow(`⚠ ${label}· skipped — ${host.detail ?? host.reason ?? 'not usable'}`);
+    }
+    if (host.status === 'failed' && !host.packs?.length)
+    {
+        return pc.yellow(`⚠ ${label}· failed — ${host.detail ?? host.reason ?? 'unknown error'}`);
+    }
+    const groups = new Map<string, string[]>();
+    for (const pack of host.packs ?? [])
+    {
+        const key = verb[pack.action];
+        groups.set(key, [...(groups.get(key) ?? []), pack.name]);
+    }
+    if (!groups.size)
+    {
+        return pc.dim(`· ${label}· nothing to do`);
+    }
+    const parts = [...groups.entries()].map(([action, names])=>`${names.join(', ')} ${action}`);
+    const mark = host.status === 'ok' ? pc.green('✓') : pc.yellow('⚠');
+    return `${mark} ${label}· ${parts.join('; ')}`;
+};
+
+const changed = (report: Report): boolean=>report.hosts.some(h=>
+    (h.packs ?? []).some(p=>p.action === 'installed' || p.action === 'upgraded'));
+
+const human_lines = (report: Report): string[]=>{
+    const lines: string[] = [];
+    if (!report.hosts.length)
+    {
+        lines.push(pc.yellow('⚠ no supported assistant found on this machine'));
+        lines.push(pc.dim('  Install Claude Code or Codex, or pass --agent to name one explicitly.'));
+        return lines;
+    }
+    lines.push(pc.green(`✓ detected ${report.hosts.map(h=>h.label).join(', ')}`));
+    const note = dependency_note(report.requested, report.resolved);
+    if (note && report.action === 'install')
+    {
+        lines.push(pc.dim(`  ${note}`));
+    }
+    for (const host of report.hosts)
+    {
+        lines.push(host_line(host));
+        if (host.hint)
+        {
+            lines.push(pc.dim(`  fix: ${host.hint}`));
+        }
+        // Surface pack-level details for failed packs
+        const failed_packs = (host.packs ?? []).filter(p=>p.action === 'failed' && p.detail);
+        for (const pack of failed_packs)
+        {
+            lines.push(pc.dim(`  ${pack.detail}`));
+        }
+    }
+    if (changed(report) && report.action !== 'list')
+    {
+        lines.push(pc.dim('Start a new session in each assistant so the skills load.'));
+    }
+    return lines;
+};
+
+// Best-effort across hosts: one host failing does not fail the command, but
+// installing nowhere does. `list` is a query, so it is never a failure.
+const exit_code_for = (report: Report): number=>{
+    if (report.action === 'list')
+    {
+        return 0;
+    }
+    return report.summary.installed > 0 ? 0 : 1;
+};
+
+export {summarize, dependency_note, host_line, human_lines, exit_code_for};
