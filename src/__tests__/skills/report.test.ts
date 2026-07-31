@@ -67,13 +67,26 @@ describe('human_lines', ()=>{
     });
 
     it('surfaces a pack-level detail when the pack action is failed', ()=>{
-        const out = text(report([host({
+        const lines = human_lines(report([host({
             packs: [
                 {name: 'ai-sdr-core', action: 'installed', version: '0.1.0'},
                 {name: 'reply-adapter', action: 'failed', version: '0.1.0', detail: 'installation incomplete; run `reply skills install` to repair'},
             ],
-        })]));
-        expect(out).toContain('installation incomplete; run `reply skills install` to repair');
+        })])).map(strip);
+        expect(lines).toContain('  reply-adapter: installation incomplete; run `reply skills install` to repair');
+        expect(lines.filter(l=>l.startsWith('  ') && l.includes('installation incomplete')).length).toBe(1);
+    });
+
+    it('distinguishes multiple failed packs with their own detail lines', ()=>{
+        const lines = human_lines(report([host({
+            packs: [
+                {name: 'ai-sdr-core', action: 'failed', version: '0.1.0', detail: 'network timeout'},
+                {name: 'reply-adapter', action: 'failed', version: '0.1.0', detail: 'disk full'},
+            ],
+        })])).map(strip);
+        expect(lines).toContain('  ai-sdr-core: network timeout');
+        expect(lines).toContain('  reply-adapter: disk full');
+        expect(lines.filter(l=>l.match(/^  (ai-sdr-core|reply-adapter):/)).length).toBe(2);
     });
 
     it('reports a pulled dependency once', ()=>{

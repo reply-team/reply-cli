@@ -79,7 +79,7 @@ const human_lines = (report: Report): string[]=>{
         const failed_packs = (host.packs ?? []).filter(p=>p.action === 'failed' && p.detail);
         for (const pack of failed_packs)
         {
-            lines.push(pc.dim(`  ${pack.detail}`));
+            lines.push(pc.dim(`  ${pack.name}: ${pack.detail}`));
         }
     }
     if (changed(report) && report.action !== 'list')
