@@ -5,6 +5,7 @@ import {auth_command} from './commands/auth';
 import {profile_command} from './commands/profile';
 import {team_command} from './commands/team';
 import {api_command} from './commands/api';
+import {skills_command} from './commands/skills';
 import {CliError} from './utils/errors';
 import {set_quiet} from './utils/output';
 
@@ -44,6 +45,7 @@ const build_program = (): Command=>{
     program.addCommand(profile_command);
     program.addCommand(team_command);
     program.addCommand(api_command);
+    program.addCommand(skills_command);
 
     program.addHelpText('after', `
 Credential precedence:
@@ -94,6 +96,8 @@ Examples:
   ${PROGRAM_NAME} auth status
   ${PROGRAM_NAME} team list
   ${PROGRAM_NAME} api /v3/sequences
+  ${PROGRAM_NAME} skills install
+  ${PROGRAM_NAME} skills list --json
 `);
 
     return program;

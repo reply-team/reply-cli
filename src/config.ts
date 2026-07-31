@@ -86,9 +86,13 @@ const credentials_file = (env: Env = process.env): string=>
 const config_file = (env: Env = process.env): string=>
     path.join(config_dir(env), 'config.json');
 
+// What the installer wrote into flat-directory hosts (see skills/journal.ts).
+const skills_file = (env: Env = process.env): string=>
+    path.join(config_dir(env), 'skills.json');
+
 export {
     PROGRAM_NAME, APP_NAME,
     env_prefix, env_var, get_env, cli_version, user_agent,
-    default_config_dir, config_dir, credentials_file, config_file,
+    default_config_dir, config_dir, credentials_file, config_file, skills_file,
 };
 export type {Env};

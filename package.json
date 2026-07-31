@@ -13,6 +13,7 @@
         "clean": "rm -rf dist",
         "test": "vitest run",
         "test:watch": "vitest",
+        "smoke:hosts": "node scripts/smoke-hosts.mjs",
         "prepare": "husky"
     },
     "author": "Reply.io",

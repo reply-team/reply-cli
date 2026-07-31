@@ -129,6 +129,68 @@ It prints `{ "code": <status>, "data": <body> }` and exits non-zero on HTTP
 stderr. Add `--verbose` for a full request/response trace on stderr with
 credentials redacted; stdout stays the plain JSON, so pipes keep working.
 
+## Skills
+
+Reply's outbound expertise ships as three markdown skill packs in
+[reply-skills](https://github.com/reply-team/reply-skills). One command installs
+them into every AI assistant on your machine, dependencies resolved:
+
+```sh
+reply skills install
+```
+
+```
+✓ detected Claude Code, Codex
+✓ Claude Code · ai-sdr-core, reply-adapter, agentic-runtime installed
+✓ Codex       · ai-sdr-core, reply-adapter, agentic-runtime installed
+Start a new session in each assistant so the skills load.
+```
+
+| Pack | Alias | What it gives your agent |
+|---|---|---|
+| `ai-sdr-core` | `core` | Vendor-neutral SDR operations, playbooks and guardrails |
+| `reply-adapter` | `adapter` | Executing those operations against Reply.io |
+| `agentic-runtime` | `runtime` | Durable multi-session work: plans, checkpoints, reports |
+
+Install a subset — dependencies come along automatically, so `adapter` pulls
+`core`:
+
+```sh
+reply skills install core
+reply skills install adapter runtime
+reply skills install --agent codex        # only this assistant
+reply skills install --project            # into this repository, not your home
+```
+
+Then manage them:
+
+```sh
+reply skills list             # what's installed where (notes packs with an update available)
+reply skills update           # bring installed packs to the latest version
+reply skills remove runtime   # remove one pack
+reply skills remove           # remove all of them
+```
+
+On Claude Code and Codex the packs are installed through the assistant's own
+plugin mechanism, so they keep updating through it. Other `SKILL.md` hosts
+receive the skills as files. Add `--json` for a machine-readable report, and
+`--dry-run` to see the plan without changing anything.
+
+| Assistant | How it receives the packs | Paths verified |
+|---|---|---|
+| Claude Code | its own plugin CLI | yes |
+| Codex | its own plugin CLI (`--project` copies files instead) | yes |
+| Cursor · Gemini CLI · GitHub Copilot · Windsurf | copied files | not yet |
+
+"Not yet" means the skills directory for that assistant comes from its
+documentation and has not been confirmed by a verification run of our own
+(REPLY-51268): the install works, but we cannot promise the assistant reads
+from where we put the files. Those hosts are marked `(paths not yet verified)`
+in the report and carry `"verified": false` in `--json`.
+
+Installing skills is not the same as connecting Reply: `reply-adapter` needs a
+Reply.io login (`reply auth login`) to actually do anything.
+
 ## Environment variables
 
 | Variable | Description |

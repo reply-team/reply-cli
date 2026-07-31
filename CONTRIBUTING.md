@@ -24,6 +24,19 @@ server. `fetch` is stubbed, and the OAuth loopback flow is exercised against a
 local `127.0.0.1` listener with an injected browser stub. CI runs the build and
 tests on Linux and Windows.
 
+`npm run smoke:hosts` is a separate check that runs `reply skills install`
+entirely inside a throwaway `HOME`/`USERPROFILE` sandbox, and proves your real
+home is untouched with a before/after filesystem snapshot. Native hosts
+(Claude Code, Codex) are only genuinely exercised when actually installed —
+each is additionally pointed at a throwaway config directory
+(`CLAUDE_CONFIG_DIR`, `CODEX_HOME`) so its real plugin state is untouched
+either way. Flat-directory hosts (Cursor, Gemini CLI, GitHub Copilot) are
+always *simulated* inside the sandbox, regardless of what is really on your
+machine — that's deliberate, since it's the only way the flat-directory
+install path gets exercised at all. It is not part of `npm test` because it
+clones from GitHub and, for native hosts, needs a real assistant installed to
+exercise for real.
+
 ## Conventions
 
 - Data is written to stdout; status and error messages go to stderr.
