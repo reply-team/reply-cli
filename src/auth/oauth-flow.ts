@@ -12,7 +12,7 @@ import {
 } from './token';
 import type {Oauth_record} from '../credentials/types';
 
-// Public PKCE client registered in IdentityServer (REPLY-51291 / REPLY-50627).
+// Public PKCE client registered in IdentityServer.
 const CLIENT_ID = 'Reply.Cli';
 const SCOPE = 'openid profile email reply-web-api offline_access';
 const DEFAULT_TIMEOUT_MS = 300_000;   // 5 minutes to complete the browser step

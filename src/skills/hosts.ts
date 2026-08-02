@@ -4,7 +4,7 @@ import type {Host_cli, Host_def} from './types';
 
 // One entry per assistant. Adding a host is a data change plus a verification
 // run — never a branch inside an adapter. `verified: false` means the paths come
-// from documentation we have not confirmed by installing (see REPLY-51268).
+// from documentation we have not confirmed by installing ourselves.
 //
 // {home} in binary_paths is expanded by detect.ts; a leading '~/' is not used
 // so the strings stay platform-agnostic.
