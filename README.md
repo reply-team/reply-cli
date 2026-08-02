@@ -102,6 +102,7 @@ reply profile use alice@reply.io           # make it the active profile
 reply auth login                           # signs in alice@reply.io
 
 reply profile list                         # '*' marks the active profile
+reply profile current                      # just the active profile's name
 reply --profile bob@reply.io auth whoami   # override for a single command
 ```
 
@@ -111,11 +112,21 @@ set with `profile use` → the built-in default.
 Manage profiles after creating them:
 
 ```sh
-reply profile show                         # inspect the current profile (no secrets)
-reply profile show alice@reply.io          # inspect a specific one
-reply profile rename alice@reply.io ally   # also moves the stored credential
-reply profile unset ally team-id           # clear a field (authority|api_base|team-id)
-reply profile delete ally                  # remove it and its stored credential
+reply profile show                              # inspect the current profile (no secrets)
+reply profile show alice@reply.io               # inspect a specific one
+reply profile set alice@reply.io --team-id 1045 # edit in place; only what you pass changes
+reply profile rename alice@reply.io ally        # also moves the stored credential
+reply profile unset ally team-id                # clear a field (authority|api_base|team-id)
+reply profile delete ally                       # remove it and its stored credential (-y skips the prompt)
+```
+
+`profile set` takes `--team-id`, and `--authority` / `--api-base` for pointing a
+profile at a non-production backend. Naming `default` edits the built-in
+profile, which is how you pin a team for everything without creating a profile
+first:
+
+```sh
+reply profile set default --team-id 1045
 ```
 
 `profile show` lists the backend URLs, pinned team, and which authorization
