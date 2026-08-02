@@ -116,6 +116,14 @@ npm install -g @reply-team/reply-cli          # newest internal build (@latest)
 npm install -g @reply-team/reply-cli@0.3.0    # a specific build
 ```
 
+`reply install` works on an internal build too, and keeps you on the internal
+channel: it reads the package name it is running as, so it will never move you
+between the two. Because the internal package lives on GitHub Packages, the
+registry line and the `read:packages` token above have to be in place — the
+command reminds you of both if the update fails. What it compares against is the
+newest release of any kind, pre-releases included, which is exactly the internal
+stream; the public channel compares against the promoted release instead.
+
 ## Releases
 
 Releases are automated with [semantic-release](https://semantic-release.gitbook.io/).

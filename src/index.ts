@@ -86,6 +86,12 @@ Raw API (agent/CI escape hatch) — docs: https://docs.reply.io/api-reference/in
     ${PROGRAM_NAME} api /v3/whoami --verbose         # full req/resp to stderr (creds redacted)
   Prints {code, data}; exits non-zero on HTTP >= 400.
 
+Keeping the CLI current:
+  ${PROGRAM_NAME} install                  # update to the newest release, or say how
+  ${PROGRAM_NAME} install --dry-run        # report only; exits 1 when an update exists
+  ${PROGRAM_NAME} --version                # mentions a newer release when there is one
+  ${PREFIX}_NO_UPDATE_CHECK=1        # never check for a newer release
+
 Configuration (env vars):
   ${PREFIX}_API_KEY      API key used as the bearer credential
   ${PREFIX}_PROFILE      Profile to use (same as --profile)
@@ -101,6 +107,7 @@ Examples:
   ${PROGRAM_NAME} api /v3/sequences
   ${PROGRAM_NAME} skills install
   ${PROGRAM_NAME} skills list --json
+  ${PROGRAM_NAME} install
 `);
 
     return program;
