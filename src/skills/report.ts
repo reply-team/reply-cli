@@ -61,7 +61,7 @@ const host_line = (host: Host_outcome, report_action: Operation): string=>{
     const mark = host.status === 'ok' ? pc.green('✓') : pc.yellow('⚠');
     // A confident tick on a host whose skills directory we have never
     // confirmed the assistant reads from would overstate what we know
-    // (REPLY-51268). Only said where a claim is actually being made.
+    // Only said where a claim is actually being made.
     const note = host.verified === false ? pc.dim(' (paths not yet verified)') : '';
     return `${mark} ${label}· ${parts.join('; ')}${note}`;
 };

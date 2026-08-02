@@ -80,7 +80,7 @@ const request = async<T = unknown>(
     const headers: Record<string, string> = {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',
-        'User-Agent': user_agent(),   // identifies CLI traffic for telemetry (REPLY-51325)
+        'User-Agent': user_agent(),   // identifies CLI traffic for telemetry
         ...(opts.headers ?? {}),
     };
     const init: RequestInit = {method, headers};
