@@ -17,4 +17,14 @@ type Install_info = {
     module_dir: string;
 };
 
-export type {Install_kind, Channel, Install_info};
+// One published release, as the CLI cares about it. `version` is the tag
+// without its leading v — the tag is the version of record, because the
+// repository's package.json is deliberately 0.0.0-development.
+type Release = {
+    version: string;
+    tag: string;
+    url: string;
+    prerelease: boolean;
+};
+
+export type {Install_kind, Channel, Install_info, Release};
