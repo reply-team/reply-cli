@@ -30,6 +30,41 @@ describe('how_installed', ()=>{
         expect(info.kind).toBe('npm-local');
     });
 
+    it('calls it local when the owning project is an ancestor of the working directory', ()=>{
+        // node resolves upward, so a copy in /home/artem/app/node_modules is
+        // this project's whether you stand in app or in app/src.
+        const project = at('home', 'artem', 'app');
+        const info = how_installed({
+            module_dir: path.join(project, 'node_modules', 'reply-cli'),
+            cwd: path.join(project, 'src', 'deep'),
+            read_package: pkg('reply-cli'),
+        });
+        expect(info.kind).toBe('npm-local');
+    });
+
+    it('still calls a version-manager install global from the home directory', ()=>{
+        // The regression that matters: ~/.nvm/... is under $HOME, so asking
+        // whether the module sits under cwd would call this project-local and
+        // refuse to update the one install we can actually drive.
+        const home = at('home', 'artem');
+        const info = how_installed({
+            module_dir: path.join(home, '.nvm', 'versions', 'node', 'v22.17.1', 'lib', 'node_modules', 'reply-cli'),
+            cwd: home,
+            read_package: pkg('reply-cli'),
+        });
+        expect(info.kind).toBe('npm-global');
+    });
+
+    it('attributes a nested copy to the project that owns the tree', ()=>{
+        const project = at('home', 'artem', 'app');
+        const info = how_installed({
+            module_dir: path.join(project, 'node_modules', 'some-tool', 'node_modules', 'reply-cli'),
+            cwd: project,
+            read_package: pkg('reply-cli'),
+        });
+        expect(info.kind).toBe('npm-local');
+    });
+
     it('recognises npx before node_modules, since an npx cache has both', ()=>{
         const info = how_installed({
             module_dir: at('home', 'artem', '.npm', '_npx', 'a1b2', 'node_modules', 'reply-cli'),

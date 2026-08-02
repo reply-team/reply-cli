@@ -44,6 +44,14 @@ const inside = (parent: string, child: string): boolean=>{
     return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
 };
 
+// The directory whose node_modules holds this package — its first one, so a
+// transitive copy under a nested node_modules is still attributed to the
+// project that owns the tree.
+const owning_project = (module_dir: string, first_node_modules: number): string=>{
+    const depth = module_dir.split(/[\\/]+/).length - first_node_modules;
+    return path.resolve(module_dir, ...Array<string>(depth).fill('..'));
+};
+
 const classify = (module_dir: string, cwd: string): Install_kind=>{
     const parts = module_dir.split(/[\\/]+/);
     // Checked before node_modules on purpose: an npx cache contains both.
@@ -51,11 +59,19 @@ const classify = (module_dir: string, cwd: string): Install_kind=>{
     {
         return 'npx';
     }
-    if (parts.includes('node_modules'))
+    const at = parts.indexOf('node_modules');
+    if (at === -1)
     {
-        return inside(cwd, module_dir) ? 'npm-local' : 'npm-global';
+        return 'source';
     }
-    return 'source';
+    // Local means node resolves it by walking up from the working directory,
+    // so the owning project must BE the working directory or an ancestor of
+    // it. Asking only whether module_dir sits under cwd gets this backwards
+    // for a version-manager install — ~/.nvm/.../node_modules is under $HOME,
+    // and a user standing in $HOME would see their global install called
+    // project-local, with the update refused for a project that isn't there.
+    const project = owning_project(module_dir, at);
+    return project === cwd || inside(project, cwd) ? 'npm-local' : 'npm-global';
 };
 
 const how_installed = (deps: Detect_deps = {}): Install_info=>{
