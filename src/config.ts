@@ -90,9 +90,14 @@ const config_file = (env: Env = process.env): string=>
 const skills_file = (env: Env = process.env): string=>
     path.join(config_dir(env), 'skills.json');
 
+// When we last asked whether a newer release exists (see selfupdate/cache.ts).
+const update_check_file = (env: Env = process.env): string=>
+    path.join(config_dir(env), 'update-check.json');
+
 export {
     PROGRAM_NAME, APP_NAME,
     env_prefix, env_var, get_env, cli_version, user_agent,
     default_config_dir, config_dir, credentials_file, config_file, skills_file,
+    update_check_file,
 };
 export type {Env};
