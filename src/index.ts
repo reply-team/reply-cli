@@ -6,6 +6,7 @@ import {profile_command} from './commands/profile';
 import {team_command} from './commands/team';
 import {api_command} from './commands/api';
 import {skills_command} from './commands/skills';
+import {install_command} from './commands/install';
 import {CliError} from './utils/errors';
 import {set_quiet} from './utils/output';
 
@@ -46,6 +47,7 @@ const build_program = (): Command=>{
     program.addCommand(team_command);
     program.addCommand(api_command);
     program.addCommand(skills_command);
+    program.addCommand(install_command);
 
     program.addHelpText('after', `
 Credential precedence:
