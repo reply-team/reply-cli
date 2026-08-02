@@ -30,6 +30,14 @@ const human_report = (report: Install_report, dry_run: boolean): void=>{
     if (report.action === 'failed')
     {
         warn(`Could not update automatically: ${report.detail}.`);
+        if (report.npm_output)
+        {
+            info('  npm said:');
+            for (const line of report.npm_output.split('\n'))
+            {
+                info(`    ${line}`);
+            }
+        }
     }
     else
     {
@@ -48,7 +56,10 @@ const handle_install = async(opts: Install_cli_opts): Promise<void>=>{
     {
         info(`Checking for a newer ${PROGRAM_NAME} release…`);
     }
-    const report = await run_install({dry_run});
+    const report = await run_install({dry_run}, {
+        // Silent under --json, where the only output allowed is the report.
+        progress: wants_json(opts) ? undefined : (message: string)=>info(`  ${message}`),
+    });
 
     if (wants_json(opts))
     {

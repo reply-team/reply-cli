@@ -109,6 +109,28 @@ describe('run_install', ()=>{
         expect(report.action).toBe('failed');
         expect(report.detail).toBe('npm exited with code 1');
         expect(report.command).toBe('npm install -g reply-cli@latest');
+        expect(report.npm_output).toBe('npm error code E404');
+    });
+
+    it('carries npm output only when npm failed', async()=>{
+        const ok = await run_install({}, deps({
+            run_npm: async()=>npm_outcome({output_tail: 'added 1 package'}),
+        }));
+        expect(ok.npm_output).toBeUndefined();
+    });
+
+    it('announces the npm run, which buffers for as long as it takes', async()=>{
+        const said: string[] = [];
+        await run_install({}, deps({progress: m=>said.push(m)}));
+        expect(said).toEqual(['0.4.0 → 0.5.0, updating with npm…']);
+    });
+
+    it('says nothing before a run it will not make', async()=>{
+        const said: string[] = [];
+        await run_install({dry_run: true}, deps({progress: m=>said.push(m)}));
+        await run_install({}, deps({install: installed({kind: 'npx'}), progress: m=>said.push(m)}));
+        await run_install({}, deps({release: async()=>released('0.4.0'), progress: m=>said.push(m)}));
+        expect(said).toEqual([]);
     });
 
     it('escalates to sudo on a permission failure, but not on Windows', async()=>{

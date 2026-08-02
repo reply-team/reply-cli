@@ -69,19 +69,27 @@ describe('handle_install', ()=>{
         expect(thrown).toMatchObject({exit_code: 1, code: 'update.manual'});
     });
 
-    it('reports why npm failed and offers the elevated command', async()=>{
+    it('reports why npm failed, shows what npm said, and offers the elevated command', async()=>{
         mock_run_install.mockResolvedValue(report({
             action: 'failed',
             detail: 'npm exited with code 243 (permission denied)',
             command: 'sudo npm install -g reply-cli@latest',
+            npm_output: 'npm error code EACCES\nnpm error syscall mkdir',
         }));
         let thrown: unknown;
         const {err} = await capture(async()=>{
             await handle_install({}).catch((e: unknown)=>{thrown = e;});
         });
         expect(err).toContain('Could not update automatically: npm exited with code 243 (permission denied).');
+        expect(err).toContain('npm error syscall mkdir');
         expect(err).toContain('sudo npm install -g reply-cli@latest');
         expect(thrown).toMatchObject({code: 'update.npm_failed'});
+    });
+
+    it('does not narrate progress under --json', async()=>{
+        mock_run_install.mockResolvedValue(report());
+        await capture(()=>handle_install({json: true}));
+        expect(mock_run_install.mock.calls[0][1]).toEqual({progress: undefined});
     });
 
     it('marks a dry run as having changed nothing, and still exits 1', async()=>{
@@ -90,7 +98,7 @@ describe('handle_install', ()=>{
         const {err} = await capture(async()=>{
             await handle_install({dryRun: true}).catch((e: unknown)=>{thrown = e;});
         });
-        expect(mock_run_install).toHaveBeenCalledWith({dry_run: true});
+        expect(mock_run_install.mock.calls[0][0]).toEqual({dry_run: true});
         expect(err).toContain('--dry-run');
         expect(thrown).toBeInstanceOf(RuntimeError);
     });

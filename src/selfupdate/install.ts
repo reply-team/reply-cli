@@ -25,6 +25,8 @@ type Install_report = {
     command: string;
     note: string;
     detail?: string;
+    // Present only on a failed run: the tail of what npm printed.
+    npm_output?: string;
 };
 
 type Install_deps = {
@@ -34,6 +36,9 @@ type Install_deps = {
     env?: Env;
     now?: ()=>Date;
     platform?: NodeJS.Platform;
+    // Called once, just before npm is spawned. npm buffers for as long as it
+    // takes, and a silent half-minute reads as a hung command.
+    progress?: (message: string)=>void;
 };
 
 // Elevation differs per platform and is never done for the user: we print what
@@ -83,6 +88,7 @@ const run_install = async(
         action: Install_action,
         command: string,
         detail?: string,
+        npm_output?: string,
     ): Install_report=>({
         current: install.version,
         latest: release.version,
@@ -93,6 +99,7 @@ const run_install = async(
         command,
         note: route.note,
         ...(detail ? {detail} : {}),
+        ...(npm_output ? {npm_output} : {}),
     });
 
     if (!is_newer(release.version, install.version))
@@ -104,6 +111,7 @@ const run_install = async(
         return report('manual', route.command);
     }
 
+    deps.progress?.(`${install.version} → ${release.version}, updating with npm…`);
     const outcome = await (deps.run_npm ?? (pkg=>run_npm_install(pkg)))(install.package_name);
     if (outcome.ok)
     {
@@ -113,6 +121,9 @@ const run_install = async(
         'failed',
         outcome.permission_denied ? elevated(route.command, platform) : route.command,
         failure_detail(outcome, platform),
+        // npm's own words are what makes an unexpected failure diagnosable;
+        // carried only when it failed, so a normal run stays quiet.
+        outcome.output_tail || undefined,
     );
 };
 
