@@ -7,8 +7,9 @@ import {team_command} from './commands/team';
 import {api_command} from './commands/api';
 import {skills_command} from './commands/skills';
 import {install_command} from './commands/install';
+import {update_notice} from './selfupdate/notice';
 import {CliError} from './utils/errors';
-import {set_quiet} from './utils/output';
+import {info, set_quiet} from './utils/output';
 
 // Route every command through commander's throwing mode so usage errors reach
 // our handler and map to exit code 2 (vs 1 for runtime/API failures).
@@ -114,7 +115,25 @@ const main = async(): Promise<void>=>{
     await program.parseAsync(process.argv);
 };
 
-void main().catch((error: unknown)=>{
+// --version is the only command allowed to check for a newer release. The
+// version itself is already on stdout by the time we get here; the hint is
+// status, so it follows on stderr — and only when update_notice allows it.
+const version_hint = async(): Promise<void>=>{
+    try {
+        const hint = await update_notice({
+            json: wants_json(),
+            quiet: process.argv.includes('-q') || process.argv.includes('--quiet'),
+        });
+        if (hint)
+        {
+            info(hint);
+        }
+    } catch {
+        // A hint is never worth failing --version over.
+    }
+};
+
+void main().catch(async(error: unknown)=>{
     if (error instanceof CommanderError)
     {
         // commander has already written help/usage text; help & version exit 0,
@@ -122,6 +141,10 @@ void main().catch((error: unknown)=>{
         const ok = error.code === 'commander.helpDisplayed'
             || error.code === 'commander.version'
             || error.code === 'commander.help';
+        if (error.code === 'commander.version')
+        {
+            await version_hint();
+        }
         process.exit(ok ? 0 : 2);
     }
     if (error instanceof CliError)

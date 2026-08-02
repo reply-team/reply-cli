@@ -74,35 +74,43 @@ const run_install = async(
     }
 
     const route = route_for(install);
-    const base = {
+    // Field order is part of what `--json` readers see, so it is built in one
+    // place rather than spread differently per branch.
+    const report = (
+        action: Install_action,
+        command: string,
+        detail?: string,
+    ): Install_report=>({
         current: install.version,
         latest: release.version,
+        up_to_date: action === 'current',
+        action,
         channel: install.channel,
         install: {kind: install.kind, package: install.package_name, path: install.module_dir},
+        command,
         note: route.note,
-    };
+        ...(detail ? {detail} : {}),
+    });
 
     if (!is_newer(release.version, install.version))
     {
-        return {...base, up_to_date: true, action: 'current', command: route.command};
+        return report('current', route.command);
     }
     if (opts.dry_run || !route.drivable)
     {
-        return {...base, up_to_date: false, action: 'manual', command: route.command};
+        return report('manual', route.command);
     }
 
     const outcome = await (deps.run_npm ?? (pkg=>run_npm_install(pkg)))(install.package_name);
     if (outcome.ok)
     {
-        return {...base, up_to_date: false, action: 'updated', command: route.command};
+        return report('updated', route.command);
     }
-    return {
-        ...base,
-        up_to_date: false,
-        action: 'failed',
-        command: outcome.permission_denied ? elevated(route.command, platform) : route.command,
-        detail: failure_detail(outcome),
-    };
+    return report(
+        'failed',
+        outcome.permission_denied ? elevated(route.command, platform) : route.command,
+        failure_detail(outcome),
+    );
 };
 
 export {run_install};
