@@ -117,8 +117,11 @@ describe('run_install', ()=>{
         expect(posix.command).toBe('sudo npm install -g reply-cli@latest');
         expect(posix.detail).toContain('permission denied');
 
+        // No sudo to prepend on Windows, so the remedy has to be in the words.
         const windows = await run_install({}, deps({platform: 'win32', run_npm: async()=>denied}));
         expect(windows.command).toBe('npm install -g reply-cli@latest');
+        expect(windows.detail).toContain('elevated terminal');
+        expect(posix.detail).not.toContain('elevated terminal');
     });
 
     it('says plainly when npm itself is missing', async()=>{

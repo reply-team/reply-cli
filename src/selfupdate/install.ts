@@ -41,14 +41,17 @@ type Install_deps = {
 const elevated = (command: string, platform: NodeJS.Platform): string=>
     platform === 'win32' ? command : `sudo ${command}`;
 
-const failure_detail = (outcome: Npm_outcome): string=>{
+const failure_detail = (outcome: Npm_outcome, platform: NodeJS.Platform): string=>{
     if (outcome.npm_missing)
     {
         return 'npm is not on PATH';
     }
     if (outcome.permission_denied)
     {
-        return `npm exited with code ${outcome.code} (permission denied)`;
+        // Windows has no sudo to prepend, so the command alone would leave the
+        // user with nothing to change on a second attempt.
+        const remedy = platform === 'win32' ? '; try an elevated terminal' : '';
+        return `npm exited with code ${outcome.code} (permission denied${remedy})`;
     }
     return `npm exited with code ${outcome.code}`;
 };
@@ -109,7 +112,7 @@ const run_install = async(
     return report(
         'failed',
         outcome.permission_denied ? elevated(route.command, platform) : route.command,
-        failure_detail(outcome),
+        failure_detail(outcome, platform),
     );
 };
 
