@@ -27,4 +27,12 @@ type Release = {
     prerelease: boolean;
 };
 
-export type {Install_kind, Channel, Install_info, Release};
+// What can be done about an install, and what to tell the user otherwise.
+// `drivable` is true only where running npm ourselves is safe.
+type Route = {
+    drivable: boolean;
+    command: string;
+    note: string;
+};
+
+export type {Install_kind, Channel, Install_info, Release, Route};
