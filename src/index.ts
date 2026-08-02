@@ -6,8 +6,10 @@ import {profile_command} from './commands/profile';
 import {team_command} from './commands/team';
 import {api_command} from './commands/api';
 import {skills_command} from './commands/skills';
+import {install_command} from './commands/install';
+import {update_notice} from './selfupdate/notice';
 import {CliError} from './utils/errors';
-import {set_quiet} from './utils/output';
+import {info, set_quiet} from './utils/output';
 
 // Route every command through commander's throwing mode so usage errors reach
 // our handler and map to exit code 2 (vs 1 for runtime/API failures).
@@ -46,6 +48,7 @@ const build_program = (): Command=>{
     program.addCommand(team_command);
     program.addCommand(api_command);
     program.addCommand(skills_command);
+    program.addCommand(install_command);
 
     program.addHelpText('after', `
 Credential precedence:
@@ -83,6 +86,12 @@ Raw API (agent/CI escape hatch) — docs: https://docs.reply.io/api-reference/in
     ${PROGRAM_NAME} api /v3/whoami --verbose         # full req/resp to stderr (creds redacted)
   Prints {code, data}; exits non-zero on HTTP >= 400.
 
+Keeping the CLI current:
+  ${PROGRAM_NAME} install                  # update to the newest release, or say how
+  ${PROGRAM_NAME} install --dry-run        # report only; exits 1 when an update exists
+  ${PROGRAM_NAME} --version                # mentions a newer release when there is one
+  ${PREFIX}_NO_UPDATE_CHECK=1        # never check for a newer release
+
 Configuration (env vars):
   ${PREFIX}_API_KEY      API key used as the bearer credential
   ${PREFIX}_PROFILE      Profile to use (same as --profile)
@@ -98,6 +107,7 @@ Examples:
   ${PROGRAM_NAME} api /v3/sequences
   ${PROGRAM_NAME} skills install
   ${PROGRAM_NAME} skills list --json
+  ${PROGRAM_NAME} install
 `);
 
     return program;
@@ -112,7 +122,25 @@ const main = async(): Promise<void>=>{
     await program.parseAsync(process.argv);
 };
 
-void main().catch((error: unknown)=>{
+// --version is the only command allowed to check for a newer release. The
+// version itself is already on stdout by the time we get here; the hint is
+// status, so it follows on stderr — and only when update_notice allows it.
+const version_hint = async(): Promise<void>=>{
+    try {
+        const hint = await update_notice({
+            json: wants_json(),
+            quiet: process.argv.includes('-q') || process.argv.includes('--quiet'),
+        });
+        if (hint)
+        {
+            info(hint);
+        }
+    } catch {
+        // A hint is never worth failing --version over.
+    }
+};
+
+void main().catch(async(error: unknown)=>{
     if (error instanceof CommanderError)
     {
         // commander has already written help/usage text; help & version exit 0,
@@ -120,6 +148,10 @@ void main().catch((error: unknown)=>{
         const ok = error.code === 'commander.helpDisplayed'
             || error.code === 'commander.version'
             || error.code === 'commander.help';
+        if (error.code === 'commander.version')
+        {
+            await version_hint();
+        }
         process.exit(ok ? 0 : 2);
     }
     if (error instanceof CliError)

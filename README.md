@@ -8,7 +8,9 @@ contacts, and the inbox are on the way.
 
 ## Installation
 
-Requires [Node.js](https://nodejs.org) 20 or newer. Install globally from npm:
+`reply` runs on [Node.js](https://nodejs.org) **20 or newer** — check yours with
+`node --version`, and install or upgrade Node first if it is older. Then install
+the CLI globally from npm:
 
 ```sh
 npm install -g reply-cli
@@ -17,6 +19,41 @@ npm install -g reply-cli
 ```sh
 reply --version
 ```
+
+That is the whole installation. There is nothing else to run.
+
+## Staying up to date
+
+One command keeps the CLI current:
+
+```sh
+reply install
+```
+
+It looks up the newest release, and when it can update your copy safely it runs
+npm for you and reports the result:
+
+```
+✓ reply 0.4.0 → 0.5.0 installed
+```
+
+Already on the newest release, it says so and does nothing. Where the copy is
+not ours to change — installed inside a project, run through `npx`, or built
+from a checkout — it prints the exact command that fits your setup and leaves
+everything alone. It exits non-zero whenever an update exists and was not
+applied, so `reply install --dry-run` works as a check in CI.
+
+`reply --version` mentions a newer release when there is one:
+
+```
+0.4.0
+reply 0.4.0 → 0.5.0 available · run `reply install`
+```
+
+That check reads the public GitHub releases, is cached for a day, times out
+after a second and a half, and stays silent when it fails. It never runs for any
+other command, and never at all with `--json`, when output is piped, in CI, or
+with `REPLY_NO_UPDATE_CHECK=1` set.
 
 ## Usage
 
@@ -199,6 +236,7 @@ Reply.io login (`reply auth login`) to actually do anything.
 | `REPLY_PROFILE` | Profile to use (same as `--profile`) |
 | `REPLY_TEAM_ID` | Team/workspace id sent as `X-TEAM-ID` (same as `--team-id`) |
 | `REPLY_CONFIG_DIR` | Config directory (default `~/.config/reply`; `%APPDATA%\reply` on Windows) |
+| `REPLY_NO_UPDATE_CHECK` | Set to `1` to never check whether a newer release exists |
 
 ## Contributing
 
