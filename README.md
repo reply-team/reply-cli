@@ -55,6 +55,22 @@ after a second and a half, and stays silent when it fails. It never runs for any
 other command, and never at all with `--json`, when output is piped, in CI, or
 with `REPLY_NO_UPDATE_CHECK=1` set.
 
+## Where this fits
+
+Reply's agentic toolkit is three pieces. They are complementary, not alternatives:
+
+| | What it is | When you want it |
+|---|---|---|
+| **reply CLI** (this repo) | `npm i -g reply-cli` — authenticated access to *every* v3 endpoint via `reply api` | Your agent has a shell. This is the complete surface. |
+| **[Reply MCP](https://github.com/reply-team/reply-mcp)** | A curated tool catalog over `mcp.reply.io` | Your client speaks MCP and has no shell — desktop apps, hosted assistants. |
+| **[reply-skills](https://github.com/reply-team/reply-skills)** | Outbound expertise as markdown skills: what to do, in what order, with what guardrails | Your agent knows *how* to call things but not *what* to run. |
+
+MCP gives your agent tools. Skills give it judgement. Most setups want both; a shell-capable
+agent can do everything through the CLI alone.
+
+The shortest path that works: install the CLI, `reply auth login`, `reply skills install`, then
+talk to your agent in plain words. MCP is optional — add it when your client has no shell.
+
 ## Usage
 
 ```sh
@@ -66,6 +82,16 @@ Run `reply --help` for the full command list. Add `--json` to any command for
 machine-readable output suitable for scripts.
 
 ## Authentication
+
+**You need a Reply.io account.** If you have one, sign in with it. If you don't, `reply auth
+login` takes you to the browser, where you can create one and start a free trial — no credit
+card. The CLI, the skill packs and the local tooling are free and open source; what a Reply.io
+account gives you is the execution: mailboxes, sending, the contact store, the inbox, analytics.
+
+> **Open source, not self-hosted.** The CLI and the skill packs are MIT and yours to fork.
+> Execution always runs against Reply.io — the API, the hosted MCP server at `mcp.reply.io`,
+> your mailboxes and your data. There is no local mode, and outreach without a Reply.io account
+> is not something this toolkit can do.
 
 Log in through your browser with OAuth:
 
