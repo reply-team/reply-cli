@@ -1,0 +1,76 @@
+name: Notify site sync
+
+# Tell the documentation site that a new version of this CLI is on public npm, so it can
+# check itself and open a pull request against its own pages.
+#
+# Trigger: the completion of `publish-public`, which is the moment a version becomes public
+# — it publishes to npm and then flips that tag's GitHub Release to latest. The `release`
+# event is deliberately NOT used: that flip is performed with the default GITHUB_TOKEN, and
+# events raised by it do not start other workflows.
+#
+# The version is read back from npm rather than taken from the run's inputs. What the site
+# must advertise is what `npm install -g reply-cli` actually fetches, and the registry is the
+# only thing that knows that. This repository's package.json is `0.0.0-development` by design
+# — semantic-release stamps the real version at publish time — so it is never a source here.
+#
+# This workflow sends a notification and nothing else. It cannot edit the site, and the site
+# never publishes anything without a human merging a pull request. If the notification never
+# arrives, the site re-checks on a weekly schedule anyway; the notification only shortens the
+# delay from days to minutes.
+#
+# Setup, once, by someone with admin on both repositories:
+#   - variable SITE_SYNC_REPO — the `owner/name` of the site repository to notify
+#   - secret   SITE_SYNC_TOKEN — a fine-grained PAT with `contents: read/write` on that
+#                                repository. A repository's own GITHUB_TOKEN cannot reach
+#                                across repositories, which is the whole reason this exists.
+# With either missing, the job warns and succeeds. It is never a build failure.
+
+on:
+  workflow_run:
+    workflows: ["publish-public"]
+    types: [completed]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: notify-site-sync
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    # A failed or cancelled promotion changed nothing public, so there is nothing to announce.
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve the version now on public npm
+        id: ver
+        run: |
+          VERSION="$(npm view reply-cli version)"
+          [ -n "$VERSION" ] || { echo "::error::could not read reply-cli version from npm"; exit 1; }
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "::notice::public npm now serves reply-cli@$VERSION"
+
+      - name: Notify the site that a release was promoted
+        env:
+          TOKEN: ${{ secrets.SITE_SYNC_TOKEN }}
+          TARGET: ${{ vars.SITE_SYNC_REPO }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          if [ -z "$TARGET" ]; then
+            echo "::warning::SITE_SYNC_REPO is not set — skipping the site-sync notification."
+            exit 0
+          fi
+          if [ -z "$TOKEN" ]; then
+            echo "::warning::SITE_SYNC_TOKEN is not set — skipping the site-sync notification. The site will pick this release up on its next scheduled check."
+            exit 0
+          fi
+          code=$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${TARGET}/dispatches" \
+            -d "{\"event_type\":\"cli-released\",\"client_payload\":{\"version\":\"${VERSION}\",\"tag\":\"v${VERSION}\"}}")
+          echo "dispatch HTTP $code"
+          [ "$code" = "204" ] || { echo "::error::dispatch failed ($code)"; exit 1; }
