@@ -116,5 +116,16 @@ class Api_error extends CliError {
     }
 }
 
-export {CliError, UsageError, RuntimeError, Api_error};
+// Render a hint for the terminal. Api_error bakes its hint into the message, but
+// UsageError and RuntimeError carry it as a field — and the top-level handler used
+// to print only `message`, so 47 hints across the CLI were written and never seen,
+// including the one that tells you how to switch team. Shape follows Api_error's
+// `  Hint: ...` so both kinds of failure read the same; continuation lines keep
+// their own indentation, which is what makes a quoted command stand out.
+const format_hint = (hint: string): string=>hint
+    .split('\n')
+    .map((line, i)=>(i === 0 ? `  Hint: ${line}` : `  ${line}`))
+    .join('\n');
+
+export {CliError, UsageError, RuntimeError, Api_error, format_hint};
 export type {Error_json, Api_error_body};

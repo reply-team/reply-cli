@@ -203,6 +203,22 @@ It prints `{ "code": <status>, "data": <body> }` and exits non-zero on HTTP
 stderr. Add `--verbose` for a full request/response trace on stderr with
 credentials redacted; stdout stays the plain JSON, so pipes keep working.
 
+### Windows: Git Bash rewrites the path
+
+Under Git Bash / MSYS, `reply api /v3/whoami` never reaches the CLI as you typed
+it — MSYS converts a leading-slash argument into a Windows path, so the request
+would go to `https://api.reply.io/C:/Program Files/Git/v3/whoami`. **Quoting does
+not help**: quotes are removed before the conversion. Either of these does:
+
+```sh
+reply api //v3/whoami                     # a doubled leading slash survives
+MSYS_NO_PATHCONV=1 reply api /v3/whoami   # or turn the conversion off
+```
+
+The CLI refuses such a path instead of sending it, and exits `2` (usage) rather
+than `1`, so a mangled path can never be mistaken for an endpoint that does not
+exist. PowerShell, cmd, macOS and Linux are unaffected.
+
 ## Skills
 
 Reply's outbound expertise ships as three markdown skill packs in

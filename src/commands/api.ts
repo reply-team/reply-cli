@@ -108,12 +108,49 @@ const resolve_method = (flag: string | undefined, has_body: boolean): string=>{
     return m;
 };
 
+// A drive-prefixed path is the signature of MSYS/Cygwin path conversion, not of
+// anything a caller would type: Git Bash on Windows rewrites a leading-slash
+// argument into a Windows path before the CLI is even started.
+const MSYS_DRIVE = /^[A-Za-z]:[\\/]/;
+// Recover the intended path out of a mangled one, so the fix can be quoted back
+// verbatim instead of described. `C:/Program Files/Git/v3/whoami` -> `v3/whoami`.
+// Both separators, because MSYS emits forward slashes but a path pasted from cmd
+// arrives with backslashes.
+const VERSION_SEGMENT = /[\\/](v\d+[\\/].*)$/;
+
+// The request URL is built literally as api_base + path, so a path that is not a
+// path silently produces a nonsense URL and a 404 — indistinguishable from an
+// endpoint that genuinely does not exist. That is not hypothetical: an agent hit
+// exactly this under Git Bash and told its user a documented feature was "not
+// enabled on this account". Refuse instead, before spending a request, and exit 2
+// (usage) so the failure cannot be mistaken for an upstream one.
+const assert_api_path = (path: string): void=>{
+    if (path.startsWith('/'))
+    {
+        return;
+    }
+    const recovered = path.match(VERSION_SEGMENT)?.[1].replace(/\\/g, '/');
+    const intended = recovered ? `/${recovered}` : '/v3/whoami';
+    const hint = MSYS_DRIVE.test(path)
+        ? [
+            'Your shell rewrote the argument before the CLI saw it: Git Bash / MSYS on',
+            'Windows turns a leading-slash argument into a Windows path. Quoting does not',
+            'help — quotes are removed before the conversion. Any of these does:',
+            `  reply api /${intended}`,
+            `  MSYS_NO_PATHCONV=1 reply api ${intended}`,
+            '  ...or run the same command from PowerShell or cmd.',
+        ].join('\n')
+        : `Paths are taken verbatim from the docs and start with a slash, e.g. ${intended}.`;
+    throw new UsageError(`The path must start with '/' — got '${path}'.`, {code: 'usage.api', hint});
+};
+
 // Raw passthrough to a v3 endpoint. Prints {code, data} for any status; exits 1
 // on >=400. On a team/user-resolution conflict, adds tailored guidance to stderr
 // — this is the workload surface where such guidance belongs.
 const handle_api = async(
     path: string, opts: {method?: string; body?: string}, ctx: Cli_context, g: Global_opts,
 ): Promise<void>=>{
+    assert_api_path(path);
     const body = read_body_arg(opts.body);
     const method = resolve_method(opts.method, body !== undefined);
     const {token, headers} = await authed(ctx, g);
@@ -151,11 +188,14 @@ const api_command = new Command('api')
         + '  reply api /v3/contacts --pretty             # list contacts (indented)\n'
         + '  reply api /v3/sequences/12345               # one sequence by id\n'
         + '  reply api /v3/contacts --body @contact.json # create a contact (POST; body per docs)\n'
-        + '  echo \'<json>\' | reply api /v3/contacts --body -   # body from stdin')
+        + '  echo \'<json>\' | reply api /v3/contacts --body -   # body from stdin\n'
+        + '\nGit Bash / MSYS on Windows rewrites a leading-slash argument into a Windows\n'
+        + 'path, and quoting does not help. Double the slash — reply api //v3/whoami —\n'
+        + 'or set MSYS_NO_PATHCONV=1. PowerShell, macOS and Linux are unaffected.')
     .action(async function(this: Command, path: string) {
         const g = read_globals(this);
         const o = this.opts();
         await handle_api(path, {method: o.method, body: o.body}, build_context({profile: g.profile}), g);
     });
 
-export {api_command, handle_api, read_body_arg};
+export {api_command, handle_api, read_body_arg, assert_api_path};
