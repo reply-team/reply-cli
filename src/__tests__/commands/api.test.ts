@@ -6,7 +6,7 @@ import path from 'path';
 const mock_fetch = vi.fn();
 vi.stubGlobal('fetch', mock_fetch);
 
-import {handle_api, read_body_arg} from '../../commands/api';
+import {handle_api, read_body_arg, assert_api_path} from '../../commands/api';
 import {UsageError} from '../../utils/errors';
 import type {Cli_context} from '../../context';
 import type {CredentialStore, Api_key_record} from '../../credentials/types';
@@ -75,6 +75,16 @@ describe('handle_api', ()=>{
         await expect(handle_api('/x', {body: '{bad'}, ctx(), {})).rejects.toThrow(UsageError);
     });
 
+    // Git Bash / MSYS on Windows rewrites `/v3/whoami` into a Windows path before
+    // the CLI starts. Left alone it produced https://api.reply.io/C:/Program
+    // Files/Git/v3/whoami, a 404 that reads exactly like a missing endpoint — one
+    // agent concluded a working feature was disabled on the account and said so.
+    it('refuses a shell-mangled path without spending a request', async()=>{
+        await expect(handle_api('C:/Program Files/Git/v3/whoami', {}, ctx(), {}))
+            .rejects.toThrow(UsageError);
+        expect(mock_fetch).not.toHaveBeenCalled();
+    });
+
     it('rejects a disallowed method', async()=>{
         await expect(handle_api('/x', {method: 'FROB'}, ctx(), {})).rejects.toThrow(UsageError);
     });
@@ -111,6 +121,57 @@ describe('handle_api', ()=>{
         expect(err).toMatch(/multiple teams/i);
         expect(err).toContain('1045');
         expect(process.exitCode).toBe(1);
+    });
+});
+
+describe('assert_api_path', ()=>{
+    it('accepts any path that starts with a slash', ()=>{
+        for (const p of ['/v3/whoami', '/v3/contacts?top=5', '/', '//v3/whoami'])
+        {
+            expect(()=>assert_api_path(p)).not.toThrow();
+        }
+    });
+
+    it('names MSYS and quotes back the two remedies that actually work', ()=>{
+        try {
+            assert_api_path('C:/Program Files/Git/v3/whoami');
+            throw new Error('expected a UsageError');
+        } catch (e) {
+            const err = e as UsageError;
+            expect(err).toBeInstanceOf(UsageError);
+            // Exit 2 is the point: a real upstream 404 exits 1, so the two can never
+            // be confused by a caller reading exit codes.
+            expect(err.exit_code).toBe(2);
+            expect(err.message).toContain('C:/Program Files/Git/v3/whoami');
+            expect(err.hint).toMatch(/MSYS/);
+            // The intended path is recovered from the mangled one, so the fix is
+            // copy-pasteable rather than described.
+            expect(err.hint).toContain('reply api //v3/whoami');
+            expect(err.hint).toContain('MSYS_NO_PATHCONV=1 reply api /v3/whoami');
+            // Quoting is the first thing anyone tries and it does not help; saying so
+            // is the difference between an actionable error and a frustrating one.
+            expect(err.hint).toMatch(/[Qq]uoting does not/);
+        }
+    });
+
+    it('recovers the path for any version segment, not just v3', ()=>{
+        try {
+            assert_api_path('D:\\msys64\\v9\\sequences/12345');
+            throw new Error('expected a UsageError');
+        } catch (e) {
+            expect((e as UsageError).hint).toContain('/v9/sequences/12345');
+        }
+    });
+
+    it('gives plain guidance for a slashless path that is not shell mangling', ()=>{
+        try {
+            assert_api_path('v3/whoami');
+            throw new Error('expected a UsageError');
+        } catch (e) {
+            const err = e as UsageError;
+            expect(err.hint).toContain('start with a slash');
+            expect(err.hint).not.toMatch(/MSYS/);
+        }
     });
 });
 

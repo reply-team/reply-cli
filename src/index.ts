@@ -8,7 +8,7 @@ import {api_command} from './commands/api';
 import {skills_command} from './commands/skills';
 import {install_command} from './commands/install';
 import {update_notice} from './selfupdate/notice';
-import {CliError} from './utils/errors';
+import {CliError, format_hint} from './utils/errors';
 import {info, set_quiet} from './utils/output';
 
 // Route every command through commander's throwing mode so usage errors reach
@@ -163,6 +163,10 @@ void main().catch(async(error: unknown)=>{
         else
         {
             console.error(error.message);
+            if (error.hint)
+            {
+                console.error(format_hint(error.hint));
+            }
         }
         process.exit(error.exit_code);
     }

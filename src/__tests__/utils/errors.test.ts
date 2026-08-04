@@ -1,5 +1,5 @@
 import {describe, it, expect} from 'vitest';
-import {CliError, UsageError, RuntimeError, Api_error} from '../../utils/errors';
+import {CliError, UsageError, RuntimeError, Api_error, format_hint} from '../../utils/errors';
 
 describe('utils/errors', ()=>{
     describe('UsageError', ()=>{
@@ -67,6 +67,24 @@ describe('utils/errors', ()=>{
             expect(e.hint).toBe('run login');
             expect(e.message).toContain('run login');
             expect(e.to_json().error.hint).toBe('run login');
+        });
+    });
+
+    describe('format_hint', ()=>{
+        // Until this existed the top-level handler printed only `message`, so every
+        // hint on a UsageError or RuntimeError was written and never shown — 47 of
+        // them, including the one explaining how to switch team.
+        it('prefixes a single-line hint the way Api_error does', ()=>{
+            expect(format_hint('run `reply team use 1045`')).toBe('  Hint: run `reply team use 1045`');
+        });
+
+        it('keeps a quoted command indented on continuation lines', ()=>{
+            expect(format_hint('Any of these works:\n  reply api //v3/whoami'))
+                .toBe('  Hint: Any of these works:\n    reply api //v3/whoami');
+        });
+
+        it('leaves an empty hint alone rather than emitting a bare prefix', ()=>{
+            expect(format_hint('')).toBe('  Hint: ');
         });
     });
 });
