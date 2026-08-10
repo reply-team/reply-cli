@@ -265,15 +265,15 @@ describe('run_skills', ()=>{
         expect(human_lines(report).join('\n')).toMatch(/new session/i);
     });
 
-    // I5 (final review): four hosts ship with paths taken from documentation
-    // rather than a verification run, and nothing surfaced it.
+    // I5 (final review): three hosts still ship with paths taken from
+    // documentation rather than a verification run, and nothing surfaced it.
     it('carries each host\'s verified flag into the report', async()=>{
         const report = await run_skills(opts());
         expect(report.hosts.map(h=>[h.host, h.verified])).toEqual([
             ['claude-code', true],
-            ['cursor', false],
+            ['cursor', true],
         ]);
-        expect(human_lines(report).join('\n')).toContain('paths not yet verified');
+        expect(human_lines(report).join('\n')).not.toContain('paths not yet verified');
     });
 
     it('carries the verified flag on a host that was requested but not installed', async()=>{

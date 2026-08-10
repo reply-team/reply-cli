@@ -64,7 +64,7 @@ const HOSTS: Host_def[] = [
         binary_paths: [],
         user_skills_dir: path.join('.cursor', 'skills'),
         project_skills_dir: path.join('.agents', 'skills'),
-        verified: false,
+        verified: true,
     },
     {
         id: 'gemini-cli',
