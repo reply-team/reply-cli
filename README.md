@@ -270,7 +270,7 @@ receive the skills as files. Add `--json` for a machine-readable report, and
 |---|---|---|---|---|
 | Claude Code | its own plugin CLI | managed by the plugin CLI | yes | start a new session |
 | Codex | its own plugin CLI (`--project` copies files instead) | managed by the plugin CLI | yes | start a new session |
-| Cursor | copied files | `~/.cursor/skills`, or `.agents/skills` with `--project` | Cursor 3.14.27, cursor-agent 2026.08.04-aaa8809 | start a new chat |
+| Cursor | copied files | `~/.cursor/skills`, or `.agents/skills` with `--project` | Cursor 3.14.27, cursor-agent 2026.08.04-aaa8809 | a new session (a new chat) |
 | Gemini CLI · GitHub Copilot · Windsurf | copied files | each vendor's documented directory | not yet | — |
 
 "Not yet" means the skills directory for that assistant comes from its

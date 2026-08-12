@@ -80,7 +80,7 @@ const human_lines = (report: Report): string[]=>{
     if (!report.hosts.length)
     {
         lines.push(pc.yellow('⚠ no supported assistant found on this machine'));
-        lines.push(pc.dim('  Install Claude Code or Codex, or pass --agent to name one explicitly.'));
+        lines.push(pc.dim('  Install Claude Code, Codex or Cursor, or pass --agent to name one explicitly.'));
         return lines;
     }
     lines.push(pc.green(`✓ detected ${report.hosts.map(h=>h.label).join(', ')}`));
