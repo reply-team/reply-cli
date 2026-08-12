@@ -266,17 +266,19 @@ plugin mechanism, so they keep updating through it. Other `SKILL.md` hosts
 receive the skills as files. Add `--json` for a machine-readable report, and
 `--dry-run` to see the plan without changing anything.
 
-| Assistant | How it receives the packs | Paths verified |
-|---|---|---|
-| Claude Code | its own plugin CLI | yes |
-| Codex | its own plugin CLI (`--project` copies files instead) | yes |
-| Cursor · Gemini CLI · GitHub Copilot · Windsurf | copied files | not yet |
+| Assistant | How it receives the packs | Skills path | Paths verified | To take effect |
+|---|---|---|---|---|
+| Claude Code | its own plugin CLI | managed by the plugin CLI | yes | start a new session |
+| Codex | its own plugin CLI (`--project` copies files instead) | managed by the plugin CLI | yes | start a new session |
+| Cursor | copied files | `~/.cursor/skills`, or `.agents/skills` with `--project` | Cursor 3.14.27, cursor-agent 2026.08.04-aaa8809 | a new session (a new chat) |
+| Gemini CLI · GitHub Copilot · Windsurf | copied files | each vendor's documented directory | not yet | — |
 
 "Not yet" means the skills directory for that assistant comes from its
 documentation and has not been confirmed by a verification run of our own: the
 install works, but we cannot promise the assistant reads from where we put the
-files. Those hosts are marked `(paths not yet verified)`
-in the report and carry `"verified": false` in `--json`.
+files. The remaining three are marked `(paths not yet verified)`
+in the report and carry `"verified": false` in `--json`. Cursor was verified
+with reply-cli 0.5.1.
 
 Installing skills is not the same as connecting Reply: `reply-adapter` needs a
 Reply.io login (`reply auth login`) to actually do anything.
