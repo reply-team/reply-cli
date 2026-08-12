@@ -14,7 +14,7 @@ describe('host registry', ()=>{
     });
 
     it('marks only the hosts we actually verified', ()=>{
-        expect(HOSTS.filter(h=>h.verified).map(h=>h.id)).toEqual(['claude-code', 'codex', 'cursor']);
+        expect(HOSTS.filter(h=>h.verified).map(h=>h.id)).toEqual(['claude-code', 'codex', 'cursor', 'windsurf']);
     });
 
     it('gives every native host a CLI and every flat host a skills directory', ()=>{

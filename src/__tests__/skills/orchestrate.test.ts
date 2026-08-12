@@ -265,11 +265,11 @@ describe('run_skills', ()=>{
         expect(human_lines(report).join('\n')).toMatch(/new session/i);
     });
 
-    // I5 (final review): three hosts still ship with paths taken from
+    // I5 (final review): two hosts still ship with paths taken from
     // documentation rather than a verification run. Gemini CLI is detected here
-    // alongside the two verified hosts so this asserts both halves at once —
-    // the flag travels from the registry into a real report, and the warning
-    // still reaches a host that needs it.
+    // alongside the verified hosts so this asserts both halves at once — the
+    // flag travels from the registry into a real report, and the warning still
+    // reaches a host that needs it.
     it('carries each host\'s verified flag into the report', async()=>{
         fs.mkdirSync(path.join(home, '.gemini'), {recursive: true});
         const report = await run_skills(opts());
@@ -282,7 +282,7 @@ describe('run_skills', ()=>{
     });
 
     it('carries the verified flag on a host that was requested but not installed', async()=>{
-        const report = await run_skills(opts({agents: ['windsurf']}));
+        const report = await run_skills(opts({agents: ['gemini-cli']}));
         expect(report.hosts[0].verified).toBe(false);
     });
 

@@ -271,14 +271,15 @@ receive the skills as files. Add `--json` for a machine-readable report, and
 | Claude Code | its own plugin CLI | managed by the plugin CLI | yes | start a new session |
 | Codex | its own plugin CLI (`--project` copies files instead) | managed by the plugin CLI | yes | start a new session |
 | Cursor | copied files | `~/.cursor/skills`, or `.agents/skills` with `--project` | Cursor 3.14.27, cursor-agent 2026.08.04-aaa8809 | a new session (a new chat) |
-| Gemini CLI · GitHub Copilot · Windsurf | copied files | each vendor's documented directory | not yet | — |
+| Windsurf (ships as Devin) | copied files | `~/.codeium/windsurf/skills`, or `.windsurf/skills` with `--project` | Devin 3.6.27, devin CLI 3000.3.27 | a new session (the next `devin` run) |
+| Gemini CLI · GitHub Copilot | copied files | each vendor's documented directory | not yet | — |
 
 "Not yet" means the skills directory for that assistant comes from its
 documentation and has not been confirmed by a verification run of our own: the
 install works, but we cannot promise the assistant reads from where we put the
-files. The remaining three are marked `(paths not yet verified)`
-in the report and carry `"verified": false` in `--json`. Cursor was verified
-with reply-cli 0.5.1.
+files. The remaining two are marked `(paths not yet verified)`
+in the report and carry `"verified": false` in `--json`. Cursor and Windsurf
+were verified with reply-cli 0.5.1.
 
 Installing skills is not the same as connecting Reply: `reply-adapter` needs a
 Reply.io login (`reply auth login`) to actually do anything.

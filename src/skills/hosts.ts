@@ -97,7 +97,7 @@ const HOSTS: Host_def[] = [
         binary_paths: [],
         user_skills_dir: path.join('.codeium', 'windsurf', 'skills'),
         project_skills_dir: path.join('.windsurf', 'skills'),
-        verified: false,
+        verified: true,
     },
 ];
 
