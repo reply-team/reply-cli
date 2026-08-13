@@ -2,6 +2,7 @@ import {describe, it, expect, beforeEach, afterEach, vi} from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import {HOSTS} from '../../skills/hosts';
 import {run_skills} from '../../skills/orchestrate';
 import {human_lines} from '../../skills/report';
 import type {Detect_deps} from '../../skills/detect';
@@ -265,24 +266,36 @@ describe('run_skills', ()=>{
         expect(human_lines(report).join('\n')).toMatch(/new session/i);
     });
 
-    // I5 (final review): two hosts still ship with paths taken from
-    // documentation rather than a verification run. Gemini CLI is detected here
-    // alongside the verified hosts so this asserts both halves at once — the
-    // flag travels from the registry into a real report, and the warning still
-    // reaches a host that needs it.
+    // I5 (final review): some hosts still ship with paths taken from
+    // documentation rather than a verification run, and one of them is detected
+    // here alongside the verified hosts so this asserts both halves at once —
+    // the flag travels from the registry into a real report, and the warning
+    // still reaches a host that needs it.
+    //
+    // Which host that is comes from the registry rather than a name, because two
+    // PRs in a row had to edit this test after verifying one. When the list
+    // finally empties, the guard below fails loudly and someone decides what
+    // this should assert, instead of the assertion quietly passing on nothing.
+    const unverified = HOSTS.find(h=>!h.verified);
+    // Registry order rather than a fixed list: the report prints hosts in that
+    // order, so deriving it keeps this correct even if an unverified host is
+    // added ahead of the two the fixture always detects.
+    const detected_ids = (id: string): string[]=>
+        HOSTS.filter(h=>['claude-code', 'cursor', id].includes(h.id)).map(h=>h.id);
+
     it('carries each host\'s verified flag into the report', async()=>{
-        fs.mkdirSync(path.join(home, '.gemini'), {recursive: true});
+        expect(unverified, 'every host is verified — decide what this should assert now').toBeDefined();
+        fs.mkdirSync(path.join(home, unverified!.config_dirs[0]), {recursive: true});
         const report = await run_skills(opts());
-        expect(report.hosts.map(h=>[h.host, h.verified])).toEqual([
-            ['claude-code', true],
-            ['cursor', true],
-            ['gemini-cli', false],
-        ]);
+        expect(report.hosts.map(h=>[h.host, h.verified])).toEqual(
+            detected_ids(unverified!.id).map(id=>[id, id !== unverified!.id]),
+        );
         expect(human_lines(report).join('\n')).toContain('paths not yet verified');
     });
 
     it('carries the verified flag on a host that was requested but not installed', async()=>{
-        const report = await run_skills(opts({agents: ['gemini-cli']}));
+        expect(unverified, 'every host is verified — decide what this should assert now').toBeDefined();
+        const report = await run_skills(opts({agents: [unverified!.id]}));
         expect(report.hosts[0].verified).toBe(false);
     });
 

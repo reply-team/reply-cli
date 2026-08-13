@@ -71,7 +71,11 @@ describe('human_lines', ()=>{
     });
 
     it('lists the packs per host', ()=>{
-        expect(text(report([host()]))).toContain('Claude Code · ai-sdr-core, reply-adapter installed');
+        // Label then packs, with the gap left loose: the label is padded to the
+        // widest name in the registry so the separators line up, and that width
+        // moves whenever a host is added or renamed. Pinning it made this test
+        // fail for a rename that changed nothing it exists to check.
+        expect(text(report([host()]))).toMatch(/Claude Code +· ai-sdr-core, reply-adapter installed/);
     });
 
     it('says current rather than installed when nothing changed', ()=>{

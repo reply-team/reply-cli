@@ -274,6 +274,12 @@ receive the skills as files. Add `--json` for a machine-readable report, and
 | Windsurf (ships as Devin) | copied files | `~/.codeium/windsurf/skills`, or `.windsurf/skills` with `--project` | Devin 3.6.27, devin CLI 3000.3.27 | a new session (the next `devin` run) |
 | Gemini CLI · GitHub Copilot | copied files | each vendor's documented directory | not yet | — |
 
+The project directories overlap in a way the rows above do not show: Windsurf
+also reads `.agents/skills`, which is where `--project` puts things for Cursor
+and Codex. A project-scope install aimed at one of them therefore makes those
+skills visible in the others, and removing them for one changes what the others
+see. Use user scope when you want a host's skills to itself.
+
 "Not yet" means the skills directory for that assistant comes from its
 documentation and has not been confirmed by a verification run of our own: the
 install works, but we cannot promise the assistant reads from where we put the
