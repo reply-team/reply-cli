@@ -120,16 +120,16 @@ describe('human_lines', ()=>{
     it('marks a host whose paths are not yet verified, and only that host', ()=>{
         const out = text(report([
             host({verified: true}),
-            host({host: 'gemini-cli', label: 'Gemini CLI', verified: false}),
+            host({host: 'github-copilot', label: 'GitHub Copilot', verified: false}),
         ]));
-        expect(out).toMatch(/Gemini CLI .*paths not yet verified/);
+        expect(out).toMatch(/GitHub Copilot .*paths not yet verified/);
         expect(out.split('\n').filter(l=>l.includes('paths not yet verified'))).toHaveLength(1);
     });
 
     it('says nothing about verification for a host that reported no packs', ()=>{
         const out = text(report([host({
-            host: 'gemini-cli', label: 'Gemini CLI', verified: false, status: 'skipped', packs: undefined,
-            reason: 'not-detected', detail: 'Gemini CLI is not installed on this machine',
+            host: 'github-copilot', label: 'GitHub Copilot', verified: false, status: 'skipped', packs: undefined,
+            reason: 'not-detected', detail: 'GitHub Copilot is not installed on this machine',
         })]));
         expect(out).not.toContain('paths not yet verified');
     });

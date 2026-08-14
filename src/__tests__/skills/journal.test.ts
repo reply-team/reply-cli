@@ -46,9 +46,9 @@ describe('skills journal', ()=>{
 
     it('keeps hosts isolated', ()=>{
         record_pack('cursor', 'user', 'ai-sdr-core', entry(), env());
-        record_pack('gemini-cli', 'user', 'ai-sdr-core', entry('0.9.0'), env());
+        record_pack('github-copilot', 'user', 'ai-sdr-core', entry('0.9.0'), env());
         expect(journal_entry('cursor', 'user', 'ai-sdr-core', env())?.version).toBe('0.1.0');
-        expect(journal_entry('gemini-cli', 'user', 'ai-sdr-core', env())?.version).toBe('0.9.0');
+        expect(journal_entry('github-copilot', 'user', 'ai-sdr-core', env())?.version).toBe('0.9.0');
     });
 
     it('keeps scopes isolated on the same host', ()=>{
