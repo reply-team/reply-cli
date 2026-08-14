@@ -16,7 +16,7 @@ describe('host registry', ()=>{
 
     it('marks only the hosts we actually verified', ()=>{
         expect(HOSTS.filter(h=>h.verified).map(h=>h.id))
-            .toEqual(['claude-code', 'codex', 'antigravity', 'cursor', 'windsurf']);
+            .toEqual(['claude-code', 'codex', 'antigravity', 'cursor', 'github-copilot', 'windsurf']);
     });
 
     it('marks only the hosts that pick up skills without a new session', ()=>{

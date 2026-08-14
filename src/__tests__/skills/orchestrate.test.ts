@@ -267,17 +267,10 @@ describe('run_skills', ()=>{
         expect(human_lines(report).join('\n')).toMatch(/new session/i);
     });
 
-    // I5 (final review): some hosts still ship with paths taken from
-    // documentation rather than a verification run, and one of them is detected
-    // here alongside the verified hosts so this asserts both halves at once —
-    // the flag travels from the registry into a real report, and the warning
-    // still reaches a host that needs it.
-    //
-    // Which host that is comes from the registry rather than a name, because two
-    // PRs in a row had to edit this test after verifying one. When the list
-    // finally empties, the guard below fails loudly and someone decides what
-    // this should assert, instead of the assertion quietly passing on nothing.
-    const unverified = HOSTS.find(h=>!h.verified);
+    // Asserted with `verified` because it is the only mixed flag now that every
+    // host is verified, so a hardcoded stamp still fails.
+    const in_session = HOSTS.find(h=>!h.needs_new_session);
+    const flags_guard = 'every host needs a new session — decide what this should assert now';
     // Derived from which directories exist rather than from a list of ids, in
     // registry order, because creating one host's config directory can reveal
     // another whose own directory is an ancestor of it — a fixed list silently
@@ -288,21 +281,21 @@ describe('run_skills', ()=>{
         HOSTS.filter(h=>h.config_dirs.some(dir=>
             made.some(m=>m === dir || m.startsWith(`${dir}${path.sep}`))));
 
-    it('carries each host\'s verified flag into the report', async()=>{
-        expect(unverified, 'every host is verified — decide what this should assert now').toBeDefined();
-        const made = ['.claude', '.cursor', unverified!.config_dirs[0]];
-        fs.mkdirSync(path.join(home, unverified!.config_dirs[0]), {recursive: true});
+    it('carries each host\'s registry flags into the report', async()=>{
+        expect(in_session, flags_guard).toBeDefined();
+        const made = ['.claude', '.cursor', in_session!.config_dirs[0]];
+        fs.mkdirSync(path.join(home, in_session!.config_dirs[0]), {recursive: true});
         const report = await run_skills(opts());
-        expect(report.hosts.map(h=>[h.host, h.verified])).toEqual(
-            detected_defs(made).map(h=>[h.id, h.verified]),
+        expect(report.hosts.map(h=>[h.host, h.verified, h.needs_new_session])).toEqual(
+            detected_defs(made).map(h=>[h.id, h.verified, h.needs_new_session]),
         );
-        expect(human_lines(report).join('\n')).toContain('paths not yet verified');
     });
 
-    it('carries the verified flag on a host that was requested but not installed', async()=>{
-        expect(unverified, 'every host is verified — decide what this should assert now').toBeDefined();
-        const report = await run_skills(opts({agents: [unverified!.id]}));
-        expect(report.hosts[0].verified).toBe(false);
+    it('carries the registry flags on a host that was requested but not installed', async()=>{
+        expect(in_session, flags_guard).toBeDefined();
+        const report = await run_skills(opts({agents: [in_session!.id]}));
+        expect([report.hosts[0].verified, report.hosts[0].needs_new_session])
+            .toEqual([in_session!.verified, in_session!.needs_new_session]);
     });
 
     // Retiring a host leaves its journal branch behind, and nothing else in this

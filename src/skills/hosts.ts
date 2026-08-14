@@ -100,9 +100,11 @@ const HOSTS: Host_def[] = [
         binaries: [],
         binary_paths: [],
         user_skills_dir: path.join('.copilot', 'skills'),
+        // It also reads .github/skills and .claude/skills for project scope.
         project_skills_dir: path.join('.agents', 'skills'),
+        // `/skills reload` picks them up too, without a restart.
         needs_new_session: true,
-        verified: false,
+        verified: true,
     },
     {
         id: 'windsurf',
