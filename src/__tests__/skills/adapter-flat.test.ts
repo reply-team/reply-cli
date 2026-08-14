@@ -791,16 +791,64 @@ describe('run_flat differently-cased journaled paths', ()=>{
     // — puts the filesystem's opinion under the test's control, so what gets
     // asserted is the logic: ownership recognised through a case difference,
     // everywhere, and a foreign file still refused.
-    const lower_casing = (target: string): string=>target.toLowerCase();
+    // Stands in for a case-insensitive filesystem by resolving each segment
+    // against what is on disk, case-blind. Lower-casing the whole path instead
+    // names a file that exists nowhere — `SKILL.MD` becomes `skill.md`, not the
+    // `SKILL.md` that is there — which passed on macOS only because the raw
+    // existence check answered first, and failed on Linux.
+    const ignoring_case = (target_path: string): string=>{
+        const [root, ...segments] = target_path.split(path.sep);
+        let resolved = root || path.sep;
+        for (const segment of segments.filter(Boolean))
+        {
+            const listed = fs.existsSync(resolved) && fs.statSync(resolved).isDirectory()
+                ? fs.readdirSync(resolved).find(entry=>entry.toLowerCase() === segment.toLowerCase())
+                : undefined;
+            resolved = path.join(resolved, listed ?? segment);
+        }
+        return resolved;
+    };
 
     it('recognises our own file through a case difference on any platform', async()=>{
         const target = seed_differently_cased_entry();
+        // The stub answers with the spelling on disk, so the assertion below is
+        // about the adapter rather than about the runner's filesystem.
+        expect(ignoring_case(path.join(target, 'AI-SDR-CORE-SKILL', 'SKILL.MD')))
+            .toBe(path.join(target, 'ai-sdr-core-skill', 'SKILL.md'));
 
-        const outcome = await run_flat({...flat_opts('update', core_only), canonicalise: lower_casing});
+        const outcome = await run_flat({...flat_opts('update', core_only), canonicalise: ignoring_case});
 
         expect(outcome.packs).toEqual([{name: 'ai-sdr-core', action: 'current', version: '0.1.0'}]);
         expect(fs.readFileSync(path.join(target, 'ai-sdr-core-skill', 'SKILL.md'), 'utf8'))
             .not.toBe('old content');
+    });
+
+    // Pins the branch only a case-sensitive runner reached, on every platform:
+    // the recorded path does not exist as written anywhere, and the canonicaliser
+    // is the only thing that maps it to the file that does. Without it, `install`
+    // and `list` disagree with owns_dir about whether the pack is present, and a
+    // re-copy reports `installed` on Linux and `current` on macOS for the same
+    // inputs — which is exactly how CI caught this.
+    it('counts a recorded file as present when only its canonical form exists', async()=>{
+        const target = path.join(home, '.cursor', 'skills');
+        const real = path.join(target, 'ai-sdr-core-skill', 'SKILL.md');
+        fs.mkdirSync(path.dirname(real), {recursive: true});
+        fs.writeFileSync(real, 'old content');
+        const recorded = path.join(target, 'recorded-under-another-name', 'SKILL.md');
+        record_pack('cursor', 'user', 'ai-sdr-core', {
+            version: '0.1.0', ref: 'main', commit: 'deadbee', scope: 'user',
+            files: [recorded], complete: true, installed_at: '2026-07-30T00:00:00.000Z',
+        }, env());
+
+        const outcome = await run_flat({
+            ...flat_opts('install', core_only),
+            canonicalise: (target_path)=>target_path === recorded ? real : target_path,
+        });
+
+        // Complete, at the target version, and its file is there — so nothing to
+        // do. Judging presence on the raw path alone would call this a repair.
+        expect(outcome.packs).toEqual([{name: 'ai-sdr-core', action: 'current', version: '0.1.0'}]);
+        expect(fs.readFileSync(real, 'utf8')).toBe('old content');
     });
 
     it('still refuses a file no journal entry claims, whatever the canonical form', async()=>{
@@ -808,7 +856,7 @@ describe('run_flat differently-cased journaled paths', ()=>{
         fs.mkdirSync(path.join(target, 'ai-sdr-core-skill'), {recursive: true});
         fs.writeFileSync(path.join(target, 'ai-sdr-core-skill', 'SKILL.md'), 'someone else wrote this');
 
-        const outcome = await run_flat({...flat_opts('install', core_only), canonicalise: lower_casing});
+        const outcome = await run_flat({...flat_opts('install', core_only), canonicalise: ignoring_case});
 
         expect(outcome.packs).toEqual([{
             name: 'ai-sdr-core', action: 'failed', detail: 'conflicts with an existing skill: ai-sdr-core-skill',

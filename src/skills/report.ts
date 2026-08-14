@@ -119,11 +119,9 @@ const human_lines = (report: Report): string[]=>{
             lines.push(pc.dim(`  ${pack.name}: ${pack.detail}`));
         }
     }
-    // Only the hosts that actually need it. Asking someone to restart an
-    // assistant that re-reads its skills every turn tells them to do something
-    // the host does not require, and naming the hosts is the honest form when a
-    // run touched both kinds. `needs_new_session` is registry data the
-    // orchestrator stamps, so this never has to know which host is which.
+    // Only the hosts that need it — restarting one that re-reads its skills
+    // every turn is work the host does not ask for. Named when a run touched
+    // both kinds.
     const restart = changed_hosts(report).filter(h=>h.needs_new_session !== false);
     if (restart.length && report.action !== 'list')
     {

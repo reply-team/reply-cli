@@ -82,16 +82,15 @@ const is_within = (root: string, target: string): boolean=>{
 const paths_equal = (a: string, b: string): boolean=>
     path.relative(a, b) === '';
 
-// Whether the files an entry claims are still on disk. A complete entry at the
-// right version says nothing about the filesystem: the directory can be deleted
-// by hand, moved by a host upgrade, or eaten by a sync tool, and the entry keeps
-// asserting the pack is installed. Consulted by `install` and `list` so neither
-// reports a pack that is not there — otherwise `install` short-circuits to
-// `current` over an empty directory, writes nothing, exits 0, and cannot repair
-// what it just declared healthy. Per file, not per directory: a half-deleted
-// pack is the same problem and needs the same repair.
-const entry_files_present = (entry: Journal_entry): boolean=>
-    entry.files.every(file=>fs.existsSync(file));
+// Whether the files an entry claims are still there. A complete entry at the
+// right version says nothing about the filesystem, so `install` and `list` ask
+// this before reporting a pack installed. Canonical form too, so this agrees
+// with owns_dir about a path recorded in a different spelling.
+const entry_files_present = (
+    entry: Journal_entry,
+    canonicalise: (target: string)=>string = canonical,
+): boolean=>
+    entry.files.every(file=>fs.existsSync(file) || fs.existsSync(canonicalise(file)));
 
 // What delete_files could not do. `outside` are paths the containment check
 // refused — a tampered or stale journal entry naming somewhere else; `failed`
@@ -214,12 +213,9 @@ const claimed_by_others = (
     return claimed;
 };
 
-// The path as the filesystem itself spells it, so two spellings of one file
-// compare equal. `path.relative` is case-sensitive on POSIX, but macOS is
-// case-insensitive, so a journal entry recording a different case than what is
-// on disk names the same file while comparing as a different one. Only the OS
-// can settle that, and only for a path that exists; anything else is returned
-// resolved and unchanged.
+// The path as the filesystem spells it, so two spellings of one file compare
+// equal — `path.relative` is case-sensitive on POSIX while macOS is not. Only
+// answerable for a path that exists; anything else comes back resolved.
 const canonical = (target: string): string=>{
     try {
         return fs.realpathSync.native(target);
@@ -229,14 +225,10 @@ const canonical = (target: string): string=>{
 };
 
 // True when every file under `dir` is accounted for by files we already know
-// about — our own previous install of this pack, or a sibling host's install
-// of the same pack at a shared directory. Anything else sitting at `dir` is
-// foreign (typically user-authored) and must not be clobbered.
-//
-// Compared both raw and canonicalised: raw keeps this agreeing with
-// delete_files' containment check, and canonical is what recognises our own
-// skill through a case difference — without it, an install reports a conflict
-// against a file its own journal entry claims, and refuses to touch it.
+// about — our own previous install, or a sibling host's at a shared directory.
+// Anything else there is foreign and must not be clobbered. Raw comparison keeps
+// this agreeing with delete_files; canonical recognises our own skill through a
+// case difference, without which an install refuses a file it wrote itself.
 const owns_dir = (
     dir: string,
     known_files: Iterable<string>,
@@ -332,10 +324,8 @@ type Flat_opts = {
     env?: Env;
     dry_run?: boolean;
     clone?: Clone_fn;
-    // How the filesystem spells a path, injected for the same reason detect.ts
-    // injects `exists`: what needs asserting is that ownership survives a case
-    // difference, and that cannot depend on whether the runner's filesystem
-    // happens to ignore case. Defaults to asking the OS.
+    // Injected like detect.ts's `exists`, so case handling is assertable without
+    // depending on the runner's filesystem. Defaults to asking the OS.
     canonicalise?: (target: string)=>string;
 };
 
@@ -378,7 +368,7 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
     
     const previous_for = (pack_name: string): Journal_entry | undefined=>{
         const entry = entry_for(pack_name);
-        return entry && entry_files_present(entry) ? entry : undefined;
+        return entry && entry_files_present(entry, canonicalise) ? entry : undefined;
     };
     const record_for = (pack_name: string, data: Journal_entry): void=>
         record_pack(id, scope, pack_name, project_root ? {...data, project_root} : data, opts.env);
@@ -402,7 +392,7 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
             // install, not a clean bill of health. Files that have since gone
             // missing are the same answer for the user: the pack is not usable
             // and `install` is what fixes it.
-            if (!entry.complete || !entry_files_present(entry))
+            if (!entry.complete || !entry_files_present(entry, canonicalise))
             {
                 outcomes.push({
                     name: pack.name,
@@ -492,7 +482,7 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
     const pending = targets.filter(p=>{
         const entry = entry_for(p.name);
         return operation === 'update' || !entry || !entry.complete || entry.version !== p.version
-            || !entry_files_present(entry);
+            || !entry_files_present(entry, canonicalise);
     });
     for (const pack of targets)
     {

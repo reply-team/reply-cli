@@ -61,32 +61,22 @@ const HOSTS: Host_def[] = [
         id: 'antigravity',
         label: 'Antigravity',
         kind: 'flat-skills-dir',
-        // .gemini/config is this host's global "customization root" and
-        // .agents its workspace one; skills under either are found with no
-        // manifest and no plugin, as its own bundled agy-customizations skill
-        // documents. Not .gemini/skills one level up, which it does not read.
-        //
-        // Detection keys on .gemini/antigravity and deliberately NOT on .gemini,
-        // which this app also creates: .gemini alone was Google's Gemini CLI's
-        // config directory, so matching it detected that host on every machine
-        // running this one, and a plain install then wrote a full set of skills
-        // into a directory nothing reads. Do not "simplify" this to the root the
-        // skills go into. The app writes .gemini/antigravity/installation_id on
-        // first launch, before anything skills-related, so this is present on a
-        // machine that has the host and has never run `reply skills install`.
+        // .gemini/config is this host's global "customization root" and .agents
+        // its workspace one; skills under either need no manifest and no plugin.
+        // Detection keys on .gemini/antigravity, NOT on .gemini — that belonged
+        // to the retired Gemini CLI, so matching it detected that host wherever
+        // this one ran. Written on first launch, so it is there before any
+        // install. Do not point this at the directory the skills go into.
         config_dirs: [path.join('.gemini', 'antigravity')],
         binaries: [],
         binary_paths: [],
         user_skills_dir: path.join('.gemini', 'config', 'skills'),
-        // Its workspace customization root, found by walking up from the open
-        // folder to the repository root. Not reported by the host's own
-        // GetAllSkills, which only answers for user scope — a project install is
-        // confirmed by what a session in that repository loads.
+        // Its workspace root, found by walking up to the repository root. The
+        // host's own GetAllSkills answers for user scope only, so a project
+        // install is confirmed by what a session in that repository loads.
         project_skills_dir: path.join('.agents', 'skills'),
-        // Alone among the hosts: it re-reads its skills every turn, so an
-        // install lands in a conversation that is already open. Verified — a
-        // session that began listing 46 skills picked ours up mid-conversation
-        // with no restart.
+        // Alone among the hosts: re-reads its skills every turn, so an install
+        // lands in a conversation already open.
         needs_new_session: false,
         verified: true,
     },

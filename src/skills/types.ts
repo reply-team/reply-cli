@@ -47,11 +47,8 @@ type Host_def = {
     // Skills directory relative to the project root (flat hosts, and native
     // hosts whose plugin mechanism cannot express a project install).
     project_skills_dir?: string;
-    // Whether the user has to start a new session before the assistant sees
-    // skills this run installed. True for every host that reads them once at
-    // startup; false for one that re-reads them each turn, where telling the
-    // user to restart asks for something the host does not need. Required, so
-    // adding a host is a decision about it rather than an omission.
+    // Whether the user must start a new session before the assistant sees newly
+    // installed skills. Required, so a new host decides it rather than omits it.
     needs_new_session: boolean;
     verified: boolean;
 };
@@ -99,28 +96,22 @@ type Host_outcome = {
     // reports, so no adapter can forget it and a --json consumer can tell a
     // confirmed success from an unconfirmed one.
     verified?: boolean;
-    // Mirrors Host_def.needs_new_session, stamped by the orchestrator for the
-    // same reason as `verified`: the reporter has to know which hosts a
-    // "start a new session" line would actually apply to, and that is registry
-    // data rather than something an adapter computes.
+    // Mirrors Host_def.needs_new_session, stamped by the orchestrator like
+    // `verified`: the reporter needs to know which hosts that line applies to.
     needs_new_session?: boolean;
 };
 
 type Operation = 'install' | 'list' | 'update' | 'remove';
 
-// Packs the journal still records for a host that is no longer in the registry
-// — a retired assistant with our files left on disk. Nothing else can reach
-// them: iteration covers registry hosts only, and `--agent <id>` for a retired
-// id is a usage error, so `remove` cannot take them out. Surfacing them is what
-// keeps "reply skills remove takes them out" honest across a retirement, and it
-// works for the next one without anybody remembering to write a release note.
+// Packs the journal records for a host no longer in the registry: a retirement
+// leaves our files on disk with nothing able to reach them, since iteration
+// covers registry hosts and a retired `--agent` id is a usage error.
 type Orphaned_packs = {
     host: string;
     scope: Scope;
     packs: string[];
     files: number;
-    // One recorded path, so the message can point at a real directory rather
-    // than describing one.
+    // One recorded path, so the message points at a real directory.
     sample?: string;
 };
 

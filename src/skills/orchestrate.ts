@@ -73,13 +73,9 @@ const not_detected = (def: Host_def): Host_outcome=>({
     needs_new_session: def.needs_new_session,
 });
 
-// Journal branches belonging to no host in the current registry. Every other
-// path through this file iterates hosts — detected, or named with --agent — so a
-// retired assistant's packs become unreachable the moment its entry leaves
-// hosts.ts: `list` cannot see them, `remove` cannot delete them, and the id is a
-// usage error. Reading them straight off the journal is what makes a retirement
-// visible to the user who installed before it, without anyone having to remember
-// to write a note for that particular host.
+// Journal branches belonging to no host in the registry. Everything else here
+// iterates hosts, so a retired assistant's packs go unreachable the moment its
+// entry leaves hosts.ts — reading the journal directly is what still finds them.
 const orphaned_packs = (env?: Env): Orphaned_packs[]=>{
     const known = new Set(host_ids());
     const orphans: Orphaned_packs[] = [];
@@ -162,10 +158,8 @@ const run_skills = async(opts: Skills_opts): Promise<Report>=>{
                 hint: `re-run \`reply skills ${opts.operation}\` once the underlying error for ${host.def.label} is resolved`,
             };
         }
-        // Stamped here rather than in each adapter: whether an assistant's
-        // paths have been confirmed, and whether it needs a new session to see
-        // new skills, are both registry data rather than something an adapter
-        // computes, and doing it once means no path can forget either.
+        // Stamped here rather than per adapter: both are registry data, and
+        // doing it once means no path can forget either.
         hosts.push({
             ...outcome,
             verified: host.def.verified,
@@ -194,10 +188,8 @@ const run_skills = async(opts: Skills_opts): Promise<Report>=>{
     // requested pack itself is always the last element.
     const canonical = opts.requested.map(r=>resolve_packs([r], registry).slice(-1)[0].name);
 
-    // Reported on `list` alone: it is the command that answers "what is
-    // installed where", and the one place an unreachable leftover belongs. The
-    // other operations act on hosts, and there is nothing they could do about a
-    // host they no longer know.
+    // `list` alone: it answers "what is installed where". The other operations
+    // act on hosts, and can do nothing about one they no longer know.
     const orphans = opts.operation === 'list' ? orphaned_packs(deps.env) : [];
 
     return {
