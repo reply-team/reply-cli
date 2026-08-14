@@ -1,3 +1,4 @@
+import path from 'path';
 import {describe, it, expect} from 'vitest';
 import {HOSTS, host_by_id, host_ids} from '../../skills/hosts';
 import {UsageError} from '../../utils/errors';
@@ -9,12 +10,13 @@ describe('host registry', ()=>{
 
     it('covers the hosts v1 promises', ()=>{
         expect(host_ids()).toEqual(expect.arrayContaining([
-            'claude-code', 'codex', 'cursor', 'gemini-cli', 'github-copilot', 'windsurf',
+            'claude-code', 'codex', 'cursor', 'github-copilot', 'windsurf',
         ]));
     });
 
     it('marks only the hosts we actually verified', ()=>{
-        expect(HOSTS.filter(h=>h.verified).map(h=>h.id)).toEqual(['claude-code', 'codex', 'cursor', 'windsurf']);
+        expect(HOSTS.filter(h=>h.verified).map(h=>h.id))
+            .toEqual(['claude-code', 'codex', 'antigravity', 'cursor', 'windsurf']);
     });
 
     it('gives every native host a CLI and every flat host a skills directory', ()=>{
@@ -32,6 +34,18 @@ describe('host registry', ()=>{
             // Every host needs a project target: flat hosts use theirs directly,
             // native hosts fall back to it when --project cannot be expressed.
             expect(host.project_skills_dir, host.id).toBeDefined();
+        }
+    });
+    
+    it('never lets one host\'s config directory contain another\'s', ()=>{
+        const dirs = HOSTS.flatMap(h=>h.config_dirs.map(dir=>({id: h.id, dir})));
+        for (const a of dirs)
+        {
+            for (const b of dirs.filter(other=>other.id !== a.id))
+            {
+                expect(a.dir === b.dir || a.dir.startsWith(`${b.dir}${path.sep}`), `${a.id} inside ${b.id}`)
+                    .toBe(false);
+            }
         }
     });
 

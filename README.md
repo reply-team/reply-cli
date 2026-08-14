@@ -272,20 +272,25 @@ receive the skills as files. Add `--json` for a machine-readable report, and
 | Codex | its own plugin CLI (`--project` copies files instead) | managed by the plugin CLI | yes | start a new session |
 | Cursor | copied files | `~/.cursor/skills`, or `.agents/skills` with `--project` | Cursor 3.14.27, cursor-agent 2026.08.04-aaa8809 | a new session (a new chat) |
 | Windsurf (ships as Devin) | copied files | `~/.codeium/windsurf/skills`, or `.windsurf/skills` with `--project` | Devin 3.6.27, devin CLI 3000.3.27 | a new session (the next `devin` run) |
-| Gemini CLI · GitHub Copilot | copied files | each vendor's documented directory | not yet | — |
+| Antigravity | copied files | `~/.gemini/config/skills`, or `.agents/skills` with `--project` | Antigravity 2.0.1 | nothing — it re-reads its skills every turn, including in a conversation already open |
+| GitHub Copilot | copied files | `~/.copilot/skills`, or `.agents/skills` with `--project` | not yet | — |
 
 The project directories overlap in a way the rows above do not show: Windsurf
-also reads `.agents/skills`, which is where `--project` puts things for Cursor
-and Codex. A project-scope install aimed at one of them therefore makes those
-skills visible in the others, and removing them for one changes what the others
-see. Use user scope when you want a host's skills to itself.
+also reads `.agents/skills`, which is where `--project` puts things for Cursor,
+Codex and Antigravity. A project-scope install aimed at one of them therefore
+makes those skills visible in the others, and removing them for one changes what
+the others see. Use user scope when you want a host's skills to itself.
 
 "Not yet" means the skills directory for that assistant comes from its
 documentation and has not been confirmed by a verification run of our own: the
 install works, but we cannot promise the assistant reads from where we put the
-files. The remaining two are marked `(paths not yet verified)`
-in the report and carry `"verified": false` in `--json`. Cursor and Windsurf
-were verified with reply-cli 0.5.1.
+files. GitHub Copilot is marked `(paths not yet verified)` in the report and
+carries `"verified": false` in `--json`. Cursor and Windsurf were verified with
+reply-cli 0.5.1, Antigravity with the release that adds it.
+
+Antigravity is the one host that needs nothing to pick up new skills — it
+re-reads them every turn, so an install lands in a conversation you already have
+open.
 
 Installing skills is not the same as connecting Reply: `reply-adapter` needs a
 Reply.io login (`reply auth login`) to actually do anything.

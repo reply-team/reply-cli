@@ -277,18 +277,23 @@ describe('run_skills', ()=>{
     // finally empties, the guard below fails loudly and someone decides what
     // this should assert, instead of the assertion quietly passing on nothing.
     const unverified = HOSTS.find(h=>!h.verified);
-    // Registry order rather than a fixed list: the report prints hosts in that
-    // order, so deriving it keeps this correct even if an unverified host is
-    // added ahead of the two the fixture always detects.
-    const detected_ids = (id: string): string[]=>
-        HOSTS.filter(h=>['claude-code', 'cursor', id].includes(h.id)).map(h=>h.id);
+    // Derived from which directories exist rather than from a list of ids, in
+    // registry order, because creating one host's config directory can reveal
+    // another whose own directory is an ancestor of it — a fixed list silently
+    // missed the second host and asserted a report the detector would never
+    // produce. Nested config directories are legitimate (Antigravity's is
+    // `.gemini/antigravity`), so containment, not equality, decides.
+    const detected_defs = (made: string[]): typeof HOSTS=>
+        HOSTS.filter(h=>h.config_dirs.some(dir=>
+            made.some(m=>m === dir || m.startsWith(`${dir}${path.sep}`))));
 
     it('carries each host\'s verified flag into the report', async()=>{
         expect(unverified, 'every host is verified — decide what this should assert now').toBeDefined();
+        const made = ['.claude', '.cursor', unverified!.config_dirs[0]];
         fs.mkdirSync(path.join(home, unverified!.config_dirs[0]), {recursive: true});
         const report = await run_skills(opts());
         expect(report.hosts.map(h=>[h.host, h.verified])).toEqual(
-            detected_ids(unverified!.id).map(id=>[id, id !== unverified!.id]),
+            detected_defs(made).map(h=>[h.id, h.verified]),
         );
         expect(human_lines(report).join('\n')).toContain('paths not yet verified');
     });

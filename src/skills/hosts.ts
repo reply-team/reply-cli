@@ -56,6 +56,25 @@ const HOSTS: Host_def[] = [
         verified: true,
     },
     {
+        id: 'antigravity',
+        label: 'Antigravity',
+        kind: 'flat-skills-dir',
+        // .gemini/config is this host's global "customization root" and
+        // .agents its workspace one; skills under either are found with no
+        // manifest and no plugin, as its own bundled agy-customizations skill
+        // documents. Not .gemini/skills one level up, which it does not read.
+        config_dirs: [path.join('.gemini', 'antigravity')],
+        binaries: [],
+        binary_paths: [],
+        user_skills_dir: path.join('.gemini', 'config', 'skills'),
+        // Its workspace customization root, found by walking up from the open
+        // folder to the repository root. Not reported by the host's own
+        // GetAllSkills, which only answers for user scope — a project install is
+        // confirmed by what a session in that repository loads.
+        project_skills_dir: path.join('.agents', 'skills'),
+        verified: true,
+    },
+    {
         id: 'cursor',
         label: 'Cursor',
         kind: 'flat-skills-dir',
@@ -65,17 +84,6 @@ const HOSTS: Host_def[] = [
         user_skills_dir: path.join('.cursor', 'skills'),
         project_skills_dir: path.join('.agents', 'skills'),
         verified: true,
-    },
-    {
-        id: 'gemini-cli',
-        label: 'Gemini CLI',
-        kind: 'flat-skills-dir',
-        config_dirs: ['.gemini'],
-        binaries: [],
-        binary_paths: [],
-        user_skills_dir: path.join('.gemini', 'skills'),
-        project_skills_dir: path.join('.agents', 'skills'),
-        verified: false,
     },
     {
         id: 'github-copilot',
