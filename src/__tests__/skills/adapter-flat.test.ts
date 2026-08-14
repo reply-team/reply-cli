@@ -868,11 +868,14 @@ describe('run_flat differently-cased journaled paths', ()=>{
 
 // The injected-canonicaliser tests above cover how owns_dir uses canonicalisation,
 // but not the default's own behaviour: swapping `fs.realpathSync.native` for
-// `path.resolve` leaves them all green, and only a case-insensitive runner
-// notices. A symlink separates the two portably — realpath follows it, resolve
-// hands the link back — so the implementation is pinned on every platform.
+// `path.resolve` leaves them all green. Two cases separate the pair, because
+// neither runs everywhere — a symlink where the filesystem is case-sensitive, a
+// differently-cased path where it is not.
 describe('canonical', ()=>{
-    it('answers with the path the filesystem really uses, following a symlink', ()=>{
+    // Skipped on Windows, where fs.symlinkSync needs Developer Mode or an
+    // elevated shell and otherwise throws EPERM — the case test below pins the
+    // same default there, since Windows folds case.
+    it.skipIf(process.platform === 'win32')('answers with the path the filesystem really uses, following a symlink', ()=>{
         const real = path.join(root, 'real-skills');
         fs.mkdirSync(real, {recursive: true});
         const link = path.join(root, 'linked-skills');
@@ -880,6 +883,17 @@ describe('canonical', ()=>{
 
         expect(canonical(link)).toBe(fs.realpathSync.native(real));
         expect(canonical(link)).not.toBe(link);
+    });
+
+    // Keeps the default pinned where the symlink case cannot run — Windows
+    // refuses symlinks to an unprivileged account, and folds case.
+    it.skipIf(!CASE_INSENSITIVE_FS)('answers with the spelling on disk, not the one asked for', ()=>{
+        const on_disk = path.join(root, 'Real-Skills');
+        fs.mkdirSync(on_disk, {recursive: true});
+        const asked_for = path.join(root, 'real-skills');
+
+        expect(canonical(asked_for)).toBe(fs.realpathSync.native(on_disk));
+        expect(canonical(asked_for)).not.toBe(path.resolve(asked_for));
     });
 
     it('falls back to a resolved path when the target does not exist', ()=>{

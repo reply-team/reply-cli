@@ -19,6 +19,10 @@ describe('host registry', ()=>{
             .toEqual(['claude-code', 'codex', 'antigravity', 'cursor', 'windsurf']);
     });
 
+    it('marks only the hosts that pick up skills without a new session', ()=>{
+        expect(HOSTS.filter(h=>!h.needs_new_session).map(h=>h.id)).toEqual(['antigravity']);
+    });
+
     it('gives every native host a CLI and every flat host a skills directory', ()=>{
         for (const host of HOSTS)
         {
