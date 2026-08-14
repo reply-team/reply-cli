@@ -2,7 +2,7 @@ import {describe, it, expect, beforeEach, afterEach, vi} from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import {clone_repo, copy_dir, run_flat, skills_target} from '../../skills/adapter-flat';
+import {canonical, clone_repo, copy_dir, run_flat, skills_target} from '../../skills/adapter-flat';
 import {host_by_id} from '../../skills/hosts';
 import {PACKS_FALLBACK, resolve_packs} from '../../skills/packs';
 import {journal_entry, record_pack} from '../../skills/journal';
@@ -28,8 +28,8 @@ const cursor = (): Detected_host=>
 // A second flat host that shares its project-scope directory with cursor
 // (both resolve `.agents/skills`), used to exercise the multi-host sharing
 // path (see 'run_flat shared project directories across hosts' below).
-const gemini = (): Detected_host=>
-    ({def: host_by_id('gemini-cli'), config_dir: path.join(home, '.gemini')});
+const copilot = (): Detected_host=>
+    ({def: host_by_id('github-copilot'), config_dir: path.join(home, '.copilot')});
 
 // A native host reachable by run_flat only under --project (it has no
 // user_skills_dir), used to exercise the "no directory for this scope" path.
@@ -468,9 +468,9 @@ describe('run_flat project-scope entries belong to one repository', ()=>{
 // sibling's journal entry.
 describe('run_flat shared project directories across hosts', ()=>{
     it('does not delete a sibling host\'s install of the same pack from a shared project directory', async()=>{
-        fs.mkdirSync(path.join(home, '.gemini'), {recursive: true});
+        fs.mkdirSync(path.join(home, '.copilot'), {recursive: true});
         await run_flat({...flat_opts('install', core_only), scope: 'project'});
-        await run_flat({...flat_opts('install', core_only), scope: 'project', host: gemini()});
+        await run_flat({...flat_opts('install', core_only), scope: 'project', host: copilot()});
 
         const shared = path.join(root, 'project', '.agents', 'skills', 'ai-sdr-core-skill', 'SKILL.md');
         expect(fs.existsSync(shared)).toBe(true);
@@ -478,12 +478,12 @@ describe('run_flat shared project directories across hosts', ()=>{
         const outcome = await run_flat({...flat_opts('remove', core_only), scope: 'project'});
         expect(outcome.packs).toEqual([{name: 'ai-sdr-core', action: 'removed', version: '0.1.0'}]);
         expect(journal_entry('cursor', 'project', 'ai-sdr-core', env())).toBeUndefined();
-        // gemini-cli's install still claims the shared file, so it survives.
+        // github-copilot's install still claims the shared file, so it survives.
         expect(fs.existsSync(shared)).toBe(true);
-        expect(journal_entry('gemini-cli', 'project', 'ai-sdr-core', env())?.version).toBe('0.1.0');
+        expect(journal_entry('github-copilot', 'project', 'ai-sdr-core', env())?.version).toBe('0.1.0');
 
         const list_outcome = await run_flat({
-            ...flat_opts('list', core_only), scope: 'project', host: gemini(),
+            ...flat_opts('list', core_only), scope: 'project', host: copilot(),
             clone: async()=>{ throw new Error('list must not clone'); },
         });
         expect(list_outcome.packs).toEqual([{name: 'ai-sdr-core', action: 'current', version: '0.1.0'}]);
@@ -498,6 +498,51 @@ describe('run_flat with no skills directory for the scope', ()=>{
         const outcome = await run_flat({...flat_opts('install', core_only), host: codex(), scope: 'user'});
         expect(outcome.status).toBe('skipped');
         expect(outcome.reason).toBe('no-skills-dir');
+    });
+});
+
+// The journal records what we wrote; it is not evidence the files are still
+// there. A directory deleted by hand, moved by a host upgrade, or eaten by a
+// sync tool leaves the entry untouched, and every command used to believe it:
+// `install` reported `current` and copied nothing, exit 0, with `list` agreeing,
+// so the one command a user reaches for to fix a broken install was the one that
+// could never fix it.
+describe('run_flat when the journal outlives the files', ()=>{
+    it('reports the pack as needing repair, and repairs it, rather than calling it current', async()=>{
+        await run_flat(flat_opts('install', core_only));
+        const target = path.join(home, '.cursor', 'skills');
+        fs.rmSync(target, {recursive: true, force: true});
+
+        const listed = await run_flat(flat_opts('list', core_only));
+        expect(listed.packs?.[0].action).toBe('failed');
+        expect(listed.packs?.[0].detail).toContain('run `reply skills install` to repair');
+
+        // And the command that hint names actually fixes it — `installed`, not
+        // `current`: at an unchanged version the files were still missing.
+        const outcome = await run_flat(flat_opts('install', core_only));
+        expect(outcome.packs?.map(p=>p.action)).toEqual(['installed']);
+        expect(fs.existsSync(path.join(target, 'ai-sdr-core-skill', 'SKILL.md'))).toBe(true);
+    });
+
+    // The deadlock. A host's skills directory moving between releases leaves
+    // entries pointing outside the new target root; `remove` refuses to delete
+    // outside it, which is right, but must not keep an entry for files that are
+    // not there — `install` reads that entry as `current`, and the only way out
+    // was editing the journal by hand.
+    it('forgets an entry whose recorded files are outside the target root and already gone', async()=>{
+        const moved_away = path.join(root, 'old-location', 'ai-sdr-core-skill', 'SKILL.md');
+        record_pack('cursor', 'user', 'ai-sdr-core', {
+            version: '0У.1.0', ref: 'main', commit: 'deadbee', scope: 'user',
+            files: [moved_away], complete: true, installed_at: '2026-07-30T00:00:00.000Z',
+        }, env());
+
+        const removed = await run_flat(flat_opts('remove', core_only));
+
+        expect(removed.packs?.map(p=>p.action)).toEqual(['removed']);
+        expect(journal_entry('cursor', 'user', 'ai-sdr-core', env())).toBeUndefined();
+        // And the pack installs again with no hand-editing.
+        const outcome = await run_flat(flat_opts('install', core_only));
+        expect(outcome.packs?.map(p=>p.action)).toEqual(['installed']);
     });
 });
 
@@ -737,5 +782,122 @@ describe('run_flat differently-cased journaled paths', ()=>{
         }]);
         expect(fs.readFileSync(path.join(target, 'ai-sdr-core-skill', 'SKILL.md'), 'utf8'))
             .toBe('old content');
+    });
+
+    // The two above are each skipped on half the platforms, so on any single
+    // runner neither covers the canonicalisation itself: replacing
+    // `fs.realpathSync.native` with `path.resolve` keeps the whole suite green.
+    // Injecting the canonicaliser — the seam detect.ts already uses for `exists`
+    // — puts the filesystem's opinion under the test's control, so what gets
+    // asserted is the logic: ownership recognised through a case difference,
+    // everywhere, and a foreign file still refused.
+    // Stands in for a case-insensitive filesystem by resolving each segment
+    // against what is on disk, case-blind. Lower-casing the whole path instead
+    // names a file that exists nowhere — `SKILL.MD` becomes `skill.md`, not the
+    // `SKILL.md` that is there — which passed on macOS only because the raw
+    // existence check answered first, and failed on Linux.
+    const ignoring_case = (target_path: string): string=>{
+        const [root, ...segments] = target_path.split(path.sep);
+        let resolved = root || path.sep;
+        for (const segment of segments.filter(Boolean))
+        {
+            const listed = fs.existsSync(resolved) && fs.statSync(resolved).isDirectory()
+                ? fs.readdirSync(resolved).find(entry=>entry.toLowerCase() === segment.toLowerCase())
+                : undefined;
+            resolved = path.join(resolved, listed ?? segment);
+        }
+        return resolved;
+    };
+
+    it('recognises our own file through a case difference on any platform', async()=>{
+        const target = seed_differently_cased_entry();
+        // The stub answers with the spelling on disk, so the assertion below is
+        // about the adapter rather than about the runner's filesystem.
+        expect(ignoring_case(path.join(target, 'AI-SDR-CORE-SKILL', 'SKILL.MD')))
+            .toBe(path.join(target, 'ai-sdr-core-skill', 'SKILL.md'));
+
+        const outcome = await run_flat({...flat_opts('update', core_only), canonicalise: ignoring_case});
+
+        expect(outcome.packs).toEqual([{name: 'ai-sdr-core', action: 'current', version: '0.1.0'}]);
+        expect(fs.readFileSync(path.join(target, 'ai-sdr-core-skill', 'SKILL.md'), 'utf8'))
+            .not.toBe('old content');
+    });
+
+    // Pins the branch only a case-sensitive runner reached, on every platform:
+    // the recorded path does not exist as written anywhere, and the canonicaliser
+    // is the only thing that maps it to the file that does. Without it, `install`
+    // and `list` disagree with owns_dir about whether the pack is present, and a
+    // re-copy reports `installed` on Linux and `current` on macOS for the same
+    // inputs — which is exactly how CI caught this.
+    it('counts a recorded file as present when only its canonical form exists', async()=>{
+        const target = path.join(home, '.cursor', 'skills');
+        const real = path.join(target, 'ai-sdr-core-skill', 'SKILL.md');
+        fs.mkdirSync(path.dirname(real), {recursive: true});
+        fs.writeFileSync(real, 'old content');
+        const recorded = path.join(target, 'recorded-under-another-name', 'SKILL.md');
+        record_pack('cursor', 'user', 'ai-sdr-core', {
+            version: '0.1.0', ref: 'main', commit: 'deadbee', scope: 'user',
+            files: [recorded], complete: true, installed_at: '2026-07-30T00:00:00.000Z',
+        }, env());
+
+        const outcome = await run_flat({
+            ...flat_opts('install', core_only),
+            canonicalise: (target_path)=>target_path === recorded ? real : target_path,
+        });
+
+        // Complete, at the target version, and its file is there — so nothing to
+        // do. Judging presence on the raw path alone would call this a repair.
+        expect(outcome.packs).toEqual([{name: 'ai-sdr-core', action: 'current', version: '0.1.0'}]);
+        expect(fs.readFileSync(real, 'utf8')).toBe('old content');
+    });
+
+    it('still refuses a file no journal entry claims, whatever the canonical form', async()=>{
+        const target = path.join(home, '.cursor', 'skills');
+        fs.mkdirSync(path.join(target, 'ai-sdr-core-skill'), {recursive: true});
+        fs.writeFileSync(path.join(target, 'ai-sdr-core-skill', 'SKILL.md'), 'someone else wrote this');
+
+        const outcome = await run_flat({...flat_opts('install', core_only), canonicalise: ignoring_case});
+
+        expect(outcome.packs).toEqual([{
+            name: 'ai-sdr-core', action: 'failed', detail: 'conflicts with an existing skill: ai-sdr-core-skill',
+        }]);
+        expect(fs.readFileSync(path.join(target, 'ai-sdr-core-skill', 'SKILL.md'), 'utf8'))
+            .toBe('someone else wrote this');
+    });
+});
+
+// The injected-canonicaliser tests above cover how owns_dir uses canonicalisation,
+// but not the default's own behaviour: swapping `fs.realpathSync.native` for
+// `path.resolve` leaves them all green. Two cases separate the pair, because
+// neither runs everywhere — a symlink where the filesystem is case-sensitive, a
+// differently-cased path where it is not.
+describe('canonical', ()=>{
+    // Skipped on Windows, where fs.symlinkSync needs Developer Mode or an
+    // elevated shell and otherwise throws EPERM — the case test below pins the
+    // same default there, since Windows folds case.
+    it.skipIf(process.platform === 'win32')('answers with the path the filesystem really uses, following a symlink', ()=>{
+        const real = path.join(root, 'real-skills');
+        fs.mkdirSync(real, {recursive: true});
+        const link = path.join(root, 'linked-skills');
+        fs.symlinkSync(real, link);
+
+        expect(canonical(link)).toBe(fs.realpathSync.native(real));
+        expect(canonical(link)).not.toBe(link);
+    });
+
+    // Keeps the default pinned where the symlink case cannot run — Windows
+    // refuses symlinks to an unprivileged account, and folds case.
+    it.skipIf(!CASE_INSENSITIVE_FS)('answers with the spelling on disk, not the one asked for', ()=>{
+        const on_disk = path.join(root, 'Real-Skills');
+        fs.mkdirSync(on_disk, {recursive: true});
+        const asked_for = path.join(root, 'real-skills');
+
+        expect(canonical(asked_for)).toBe(fs.realpathSync.native(on_disk));
+        expect(canonical(asked_for)).not.toBe(path.resolve(asked_for));
+    });
+
+    it('falls back to a resolved path when the target does not exist', ()=>{
+        const missing = path.join(root, 'nowhere', 'SKILL.md');
+        expect(canonical(missing)).toBe(path.resolve(missing));
     });
 });

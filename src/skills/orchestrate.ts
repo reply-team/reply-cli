@@ -2,11 +2,15 @@ import os from 'os';
 import {run_flat, type Clone_fn} from './adapter-flat';
 import {run_native} from './adapter-native';
 import {default_detect_deps, select_hosts, type Detect_deps} from './detect';
+import {host_ids} from './hosts';
+import {read_journal} from './journal';
 import {DEFAULT_REF, REPO, load_packs, resolve_packs} from './packs';
 import {summarize} from './report';
 import {UsageError} from '../utils/errors';
 import type {Env} from '../config';
-import type {Host_def, Host_outcome, Operation, Pack, Report, Runner, Scope} from './types';
+import type {
+    Host_def, Host_outcome, Operation, Orphaned_packs, Pack, Report, Runner, Scope,
+} from './types';
 
 // The one flow all four commands share: detect hosts, resolve packs in
 // dependency order, run the right adapter per host, collect outcomes. Every
@@ -66,7 +70,40 @@ const not_detected = (def: Host_def): Host_outcome=>({
     host: def.id, label: def.label, kind: def.kind, status: 'skipped', reason: 'not-detected',
     detail: `${def.label} was requested with --agent but is not installed on this machine`,
     verified: def.verified,
+    needs_new_session: def.needs_new_session,
 });
+
+// Journal branches belonging to no host in the registry. Everything else here
+// iterates hosts, so a retired assistant's packs go unreachable the moment its
+// entry leaves hosts.ts — reading the journal directly is what still finds them.
+const orphaned_packs = (env?: Env): Orphaned_packs[]=>{
+    const known = new Set(host_ids());
+    const orphans: Orphaned_packs[] = [];
+    for (const [host, scopes] of Object.entries(read_journal(env).hosts))
+    {
+        if (known.has(host))
+        {
+            continue;
+        }
+        for (const [scope, packs] of Object.entries(scopes))
+        {
+            const entries = Object.entries(packs);
+            if (!entries.length)
+            {
+                continue;
+            }
+            const files = entries.flatMap(([, entry])=>entry.files ?? []);
+            orphans.push({
+                host,
+                scope: scope as Scope,
+                packs: entries.map(([name])=>name),
+                files: files.length,
+                sample: files[0],
+            });
+        }
+    }
+    return orphans;
+};
 
 const run_skills = async(opts: Skills_opts): Promise<Report>=>{
     const deps = opts.deps ?? {};
@@ -121,10 +158,13 @@ const run_skills = async(opts: Skills_opts): Promise<Report>=>{
                 hint: `re-run \`reply skills ${opts.operation}\` once the underlying error for ${host.def.label} is resolved`,
             };
         }
-        // Stamped here rather than in each adapter: whether an assistant's
-        // paths have been confirmed is registry data, not something an
-        // adapter computes, and doing it once means no path can forget it.
-        hosts.push({...outcome, verified: host.def.verified});
+        // Stamped here rather than per adapter: both are registry data, and
+        // doing it once means no path can forget either.
+        hosts.push({
+            ...outcome,
+            verified: host.def.verified,
+            needs_new_session: host.def.needs_new_session,
+        });
     }
     for (const def of missing)
     {
@@ -148,6 +188,10 @@ const run_skills = async(opts: Skills_opts): Promise<Report>=>{
     // requested pack itself is always the last element.
     const canonical = opts.requested.map(r=>resolve_packs([r], registry).slice(-1)[0].name);
 
+    // `list` alone: it answers "what is installed where". The other operations
+    // act on hosts, and can do nothing about one they no longer know.
+    const orphans = opts.operation === 'list' ? orphaned_packs(deps.env) : [];
+
     return {
         action: opts.operation,
         source: commit ? {repo: REPO, ref, commit} : {repo: REPO, ref},
@@ -155,6 +199,7 @@ const run_skills = async(opts: Skills_opts): Promise<Report>=>{
         resolved: packs.map(p=>p.name),
         hosts,
         summary: summarize(hosts, opts.operation),
+        ...(orphans.length ? {orphans} : {}),
     };
 };
 

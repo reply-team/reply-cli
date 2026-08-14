@@ -138,16 +138,16 @@ describe('human_lines', ()=>{
     it('marks a host whose paths are not yet verified, and only that host', ()=>{
         const out = text(report([
             host({verified: true}),
-            host({host: 'gemini-cli', label: 'Gemini CLI', verified: false}),
+            host({host: 'github-copilot', label: 'GitHub Copilot', verified: false}),
         ]));
-        expect(out).toMatch(/Gemini CLI .*paths not yet verified/);
+        expect(out).toMatch(/GitHub Copilot .*paths not yet verified/);
         expect(out.split('\n').filter(l=>l.includes('paths not yet verified'))).toHaveLength(1);
     });
 
     it('says nothing about verification for a host that reported no packs', ()=>{
         const out = text(report([host({
-            host: 'gemini-cli', label: 'Gemini CLI', verified: false, status: 'skipped', packs: undefined,
-            reason: 'not-detected', detail: 'Gemini CLI is not installed on this machine',
+            host: 'github-copilot', label: 'GitHub Copilot', verified: false, status: 'skipped', packs: undefined,
+            reason: 'not-detected', detail: 'GitHub Copilot is not installed on this machine',
         })]));
         expect(out).not.toContain('paths not yet verified');
     });
@@ -176,6 +176,44 @@ describe('human_lines', ()=>{
         })]));
         expect(out).toContain('already current');
         expect(out).toMatch(/new session/i);
+    });
+
+    // The line asks the user to do something, so it must only reach hosts that
+    // need it. Antigravity re-reads its skills every turn, and telling its users
+    // to restart is an instruction the host does not require.
+    it('does not ask for a new session when the only changed host does not need one', ()=>{
+        const out = text(report([host({needs_new_session: false})]));
+        expect(out).not.toMatch(/new session/i);
+    });
+
+    it('names the hosts when a run touched both kinds', ()=>{
+        const out = text(report([
+            host({label: 'Cursor', needs_new_session: true}),
+            host({host: 'antigravity', label: 'Antigravity', needs_new_session: false}),
+        ]));
+        expect(out).toContain('Start a new session in Cursor so the skills load.');
+        expect(out).not.toContain('Antigravity so the skills');
+    });
+
+    it('keeps the unqualified line when every changed host needs a session', ()=>{
+        const out = text(report([
+            host({label: 'Cursor', needs_new_session: true}),
+            host({host: 'codex', label: 'Codex', needs_new_session: true}),
+        ]));
+        expect(out).toContain('Start a new session in each assistant so the skills load.');
+    });
+
+    it('reports packs left behind for a host the registry no longer has', ()=>{
+        const out = text(report([host()], {
+            action: 'list',
+            orphans: [{
+                host: 'gemini-cli', scope: 'user', packs: ['ai-sdr-core', 'reply-adapter'],
+                files: 94, sample: '/home/u/.gemini/skills/sending-guardrails/SKILL.md',
+            }],
+        }));
+        expect(out).toContain("ai-sdr-core, reply-adapter recorded for 'gemini-cli'");
+        expect(out).toContain('94 file(s) left on disk');
+        expect(out).toContain('delete them by hand');
     });
 
     it('marks an outdated pack as an available update on list, not as updated', ()=>{

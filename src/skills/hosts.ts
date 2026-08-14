@@ -38,6 +38,7 @@ const HOSTS: Host_def[] = [
         binary_paths: [],
         cli: claude_cli,
         project_skills_dir: path.join('.claude', 'skills'),
+        needs_new_session: true,
         verified: true,
     },
     {
@@ -53,6 +54,30 @@ const HOSTS: Host_def[] = [
         // Codex's plugin mechanism is user-scoped, so --project falls back to
         // copying into the repository's .agents/skills.
         project_skills_dir: path.join('.agents', 'skills'),
+        needs_new_session: true,
+        verified: true,
+    },
+    {
+        id: 'antigravity',
+        label: 'Antigravity',
+        kind: 'flat-skills-dir',
+        // .gemini/config is this host's global "customization root" and .agents
+        // its workspace one; skills under either need no manifest and no plugin.
+        // Detection keys on .gemini/antigravity, NOT on .gemini — that belonged
+        // to the retired Gemini CLI, so matching it detected that host wherever
+        // this one ran. Written on first launch, so it is there before any
+        // install. Do not point this at the directory the skills go into.
+        config_dirs: [path.join('.gemini', 'antigravity')],
+        binaries: [],
+        binary_paths: [],
+        user_skills_dir: path.join('.gemini', 'config', 'skills'),
+        // Its workspace root, found by walking up to the repository root. The
+        // host's own GetAllSkills answers for user scope only, so a project
+        // install is confirmed by what a session in that repository loads.
+        project_skills_dir: path.join('.agents', 'skills'),
+        // Alone among the hosts: re-reads its skills every turn, so an install
+        // lands in a conversation already open.
+        needs_new_session: false,
         verified: true,
     },
     {
@@ -64,18 +89,8 @@ const HOSTS: Host_def[] = [
         binary_paths: [],
         user_skills_dir: path.join('.cursor', 'skills'),
         project_skills_dir: path.join('.agents', 'skills'),
+        needs_new_session: true,
         verified: true,
-    },
-    {
-        id: 'gemini-cli',
-        label: 'Gemini CLI',
-        kind: 'flat-skills-dir',
-        config_dirs: ['.gemini'],
-        binaries: [],
-        binary_paths: [],
-        user_skills_dir: path.join('.gemini', 'skills'),
-        project_skills_dir: path.join('.agents', 'skills'),
-        verified: false,
     },
     {
         id: 'github-copilot',
@@ -86,6 +101,7 @@ const HOSTS: Host_def[] = [
         binary_paths: [],
         user_skills_dir: path.join('.copilot', 'skills'),
         project_skills_dir: path.join('.agents', 'skills'),
+        needs_new_session: true,
         verified: false,
     },
     {
@@ -100,6 +116,7 @@ const HOSTS: Host_def[] = [
         binary_paths: [],
         user_skills_dir: path.join('.codeium', 'windsurf', 'skills'),
         project_skills_dir: path.join('.windsurf', 'skills'),
+        needs_new_session: true,
         verified: true,
     },
 ];

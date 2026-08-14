@@ -68,10 +68,12 @@ const copy_dir = (from: string, to: string, written: string[]): void=>{
 // it via `..`. Every path handed to delete_files must pass this: the journal
 // is JSON in the user's config directory, and a hand-edited or stale entry
 // must not be able to name a file outside the host's own skills directory.
-// `path.relative` — not string equality — so this agrees with the OS on
-// whether two differently-cased paths are the same file, which matters on
-// Windows: is_within, owns_dir and the protected-files check must all reach
-// the same answer for the same pair of paths.
+// `path.relative` — not string equality — so `..` and redundant separators are
+// resolved before the decision. Note it compares case-insensitively only on
+// Windows: on macOS, whose filesystem ignores case, two spellings of one path
+// come out as different files here, which is why ownership checks canonicalise
+// first (see `canonical`). Deliberately strict for containment: refusing to
+// delete a path we cannot prove is inside the root is the safe direction.
 const is_within = (root: string, target: string): boolean=>{
     const rel = path.relative(root, target);
     return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
@@ -79,6 +81,16 @@ const is_within = (root: string, target: string): boolean=>{
 
 const paths_equal = (a: string, b: string): boolean=>
     path.relative(a, b) === '';
+
+// Whether the files an entry claims are still there. A complete entry at the
+// right version says nothing about the filesystem, so `install` and `list` ask
+// this before reporting a pack installed. Canonical form too, so this agrees
+// with owns_dir about a path recorded in a different spelling.
+const entry_files_present = (
+    entry: Journal_entry,
+    canonicalise: (target: string)=>string = canonical,
+): boolean=>
+    entry.files.every(file=>fs.existsSync(file) || fs.existsSync(canonicalise(file)));
 
 // What delete_files could not do. `outside` are paths the containment check
 // refused — a tampered or stale journal entry naming somewhere else; `failed`
@@ -103,7 +115,10 @@ const delete_files = (files: string[], target_root: string, protected_files: Set
         const resolved = path.resolve(file);
         if (!is_within(resolved_root, resolved))
         {
-            outside.push(resolved);
+            if (fs.existsSync(resolved))
+            {
+                outside.push(resolved);
+            }
             continue;
         }
         // A sibling host still claims this one; not deleting it is the point,
@@ -198,16 +213,31 @@ const claimed_by_others = (
     return claimed;
 };
 
+// The path as the filesystem spells it, so two spellings of one file compare
+// equal — `path.relative` is case-sensitive on POSIX while macOS is not. Only
+// answerable for a path that exists; anything else comes back resolved.
+const canonical = (target: string): string=>{
+    try {
+        return fs.realpathSync.native(target);
+    } catch {
+        return path.resolve(target);
+    }
+};
+
 // True when every file under `dir` is accounted for by files we already know
-// about — our own previous install of this pack, or a sibling host's install
-// of the same pack at a shared directory. Anything else sitting at `dir` is
-// foreign (typically user-authored) and must not be clobbered. Reuses
-// is_within rather than a raw prefix check, so this agrees with delete_files'
-// containment check on a differently-cased path (routine on Windows).
-const owns_dir = (dir: string, known_files: Iterable<string>): boolean=>{
+// about — our own previous install, or a sibling host's at a shared directory.
+// Anything else there is foreign and must not be clobbered. Raw comparison keeps
+// this agreeing with delete_files; canonical recognises our own skill through a
+// case difference, without which an install refuses a file it wrote itself.
+const owns_dir = (
+    dir: string,
+    known_files: Iterable<string>,
+    canonicalise: (target: string)=>string = canonical,
+): boolean=>{
+    const real_dir = canonicalise(dir);
     for (const file of known_files)
     {
-        if (is_within(dir, file))
+        if (is_within(dir, file) || is_within(real_dir, canonicalise(file)))
         {
             return true;
         }
@@ -294,6 +324,9 @@ type Flat_opts = {
     env?: Env;
     dry_run?: boolean;
     clone?: Clone_fn;
+    // Injected like detect.ts's `exists`, so case handling is assertable without
+    // depending on the runner's filesystem. Defaults to asking the OS.
+    canonicalise?: (target: string)=>string;
 };
 
 const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
@@ -304,6 +337,7 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
     const cwd = opts.cwd ?? process.cwd();
     const tmp_root = opts.tmp_root ?? os.tmpdir();
     const dry_run = opts.dry_run === true;
+    const canonicalise = opts.canonicalise ?? canonical;
     const clone = opts.clone ?? clone_repo;
     const id = host.def.id;
     const base: Host_outcome = {
@@ -331,6 +365,11 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
         const entry = journal_entry(id, scope, pack_name, opts.env);
         return entry && belongs_here(entry) ? entry : undefined;
     };
+    
+    const previous_for = (pack_name: string): Journal_entry | undefined=>{
+        const entry = entry_for(pack_name);
+        return entry && entry_files_present(entry, canonicalise) ? entry : undefined;
+    };
     const record_for = (pack_name: string, data: Journal_entry): void=>
         record_pack(id, scope, pack_name, project_root ? {...data, project_root} : data, opts.env);
     const forget_for = (pack_name: string): Journal_entry | undefined=>
@@ -350,8 +389,10 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
             }
             // An incomplete entry never reads as current, regardless of
             // version — it is a copy that did not finish, and needs a repair
-            // install, not a clean bill of health.
-            if (!entry.complete)
+            // install, not a clean bill of health. Files that have since gone
+            // missing are the same answer for the user: the pack is not usable
+            // and `install` is what fixes it.
+            if (!entry.complete || !entry_files_present(entry, canonicalise))
             {
                 outcomes.push({
                     name: pack.name,
@@ -440,7 +481,8 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
         : packs;
     const pending = targets.filter(p=>{
         const entry = entry_for(p.name);
-        return operation === 'update' || !entry || !entry.complete || entry.version !== p.version;
+        return operation === 'update' || !entry || !entry.complete || entry.version !== p.version
+            || !entry_files_present(entry, canonicalise);
     });
     for (const pack of targets)
     {
@@ -457,7 +499,7 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
     {
         for (const pack of pending)
         {
-            outcomes.push(copied_outcome(pack.name, pack.version, entry_for(pack.name)));
+            outcomes.push(copied_outcome(pack.name, pack.version, previous_for(pack.name)));
         }
         return {...base, packs: outcomes};
     }
@@ -501,6 +543,7 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
             }
             const from = path.join(cloned.dir, 'plugins', pack.name, 'skills');
             const previous = entry_for(pack.name);
+            const previously_installed = previous_for(pack.name);
             const elsewhere = others_claim(pack.name);
             const known_files = previous
                 ? [...previous.files.map(f=>path.resolve(f)), ...elsewhere]
@@ -508,7 +551,7 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
             const skill_dirs = fs.readdirSync(from, {withFileTypes: true}).filter(e=>e.isDirectory());
             const collision = skill_dirs.find(skill=>{
                 const dst_dir = path.join(target_root, skill.name);
-                return fs.existsSync(dst_dir) && !owns_dir(dst_dir, known_files);
+                return fs.existsSync(dst_dir) && !owns_dir(dst_dir, known_files, canonicalise);
             });
             if (collision)
             {
@@ -553,7 +596,7 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
                 complete: true,
                 installed_at: new Date().toISOString(),
             });
-            outcomes.push(copied_outcome(pack.name, pack.version, previous, cloned.commit));
+            outcomes.push(copied_outcome(pack.name, pack.version, previously_installed, cloned.commit));
         }
     } catch (error) {
         // outcomes.length is not "something landed" — every entry pushed so
@@ -578,5 +621,5 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
     return {...cloned_base, packs: outcomes, status: status_of(outcomes), hint: blocked_hint(blocked_names)};
 };
 
-export {clone_repo, copy_dir, skills_target, run_flat};
+export {canonical, clone_repo, copy_dir, skills_target, run_flat};
 export type {Clone_fn, Clone_result, Flat_opts};

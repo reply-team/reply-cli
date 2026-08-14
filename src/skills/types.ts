@@ -47,6 +47,9 @@ type Host_def = {
     // Skills directory relative to the project root (flat hosts, and native
     // hosts whose plugin mechanism cannot express a project install).
     project_skills_dir?: string;
+    // Whether the user must start a new session before the assistant sees newly
+    // installed skills. Required, so a new host decides it rather than omits it.
+    needs_new_session: boolean;
     verified: boolean;
 };
 
@@ -93,9 +96,24 @@ type Host_outcome = {
     // reports, so no adapter can forget it and a --json consumer can tell a
     // confirmed success from an unconfirmed one.
     verified?: boolean;
+    // Mirrors Host_def.needs_new_session, stamped by the orchestrator like
+    // `verified`: the reporter needs to know which hosts that line applies to.
+    needs_new_session?: boolean;
 };
 
 type Operation = 'install' | 'list' | 'update' | 'remove';
+
+// Packs the journal records for a host no longer in the registry: a retirement
+// leaves our files on disk with nothing able to reach them, since iteration
+// covers registry hosts and a retired `--agent` id is a usage error.
+type Orphaned_packs = {
+    host: string;
+    scope: Scope;
+    packs: string[];
+    files: number;
+    // One recorded path, so the message points at a real directory.
+    sample?: string;
+};
 
 type Report = {
     action: Operation;
@@ -104,6 +122,7 @@ type Report = {
     resolved: string[];
     hosts: Host_outcome[];
     summary: {installed: number; skipped: number; failed: number};
+    orphans?: Orphaned_packs[];
 };
 
 type Run_result = {code: number; stdout: string; stderr: string};
@@ -113,7 +132,7 @@ type Run_result = {code: number; stdout: string; stderr: string};
 type Runner = (bin: string, args: string[])=>Promise<Run_result>;
 
 export type {
-    Pack, Pack_registry, Scope, Host_kind, Host_cli, Host_def,
+    Pack, Pack_registry, Scope, Host_kind, Host_cli, Host_def, Orphaned_packs,
     Pack_action, Pack_outcome, Host_status, Host_outcome,
     Operation, Report, Run_result, Runner,
 };
