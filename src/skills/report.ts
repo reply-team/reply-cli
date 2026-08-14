@@ -1,9 +1,20 @@
+import {HOSTS} from './hosts';
 import {pc} from '../utils/output';
 import type {Host_outcome, Operation, Pack_action, Report} from './types';
 
 // Turns per-host outcomes into what the user reads and what the process
 // returns. The report names only what was found: an assistant that is not on
 // the machine is never mentioned.
+
+// Widest label in the registry plus one, so a host's `·` lands in the same
+// column no matter which hosts were detected, and even the longest label keeps a
+// space before it. A fixed 12 used to be enough and is not: 'GitHub Copilot' and
+// 'Windsurf (Devin)' both overrun it and ran their text into the separator.
+const LABEL_WIDTH = Math.max(...HOSTS.map(h=>h.label.length)) + 1;
+
+// "a, b or c" — no trailing comma, and safe at one or zero items.
+const or_list = (items: string[]): string=>
+    items.length < 2 ? items[0] ?? '' : `${items.slice(0, -1).join(', ')} or ${items[items.length - 1]}`;
 
 // `list` is a query: a host answering "ok" says nothing about whether any pack
 // is actually there. For every other operation, "installed" is the outcome
@@ -38,7 +49,7 @@ const pack_verb = (report_action: Operation, pack_action: Pack_action): string=>
 
 // Groups a host's packs by what happened, so one host is one line.
 const host_line = (host: Host_outcome, report_action: Operation): string=>{
-    const label = host.label.padEnd(12);
+    const label = host.label.padEnd(LABEL_WIDTH);
     if (host.status === 'skipped')
     {
         return pc.yellow(`⚠ ${label}· skipped — ${host.detail ?? host.reason ?? 'not usable'}`);
@@ -80,7 +91,12 @@ const human_lines = (report: Report): string[]=>{
     if (!report.hosts.length)
     {
         lines.push(pc.yellow('⚠ no supported assistant found on this machine'));
-        lines.push(pc.dim('  Install Claude Code, Codex or Cursor, or pass --agent to name one explicitly.'));
+        // Named from the registry rather than written out, because this line has
+        // gone stale twice: it still said "Claude Code or Codex" after Cursor was
+        // verified, and omitted Windsurf after that. Labels, so someone running
+        // Devin sees the name on their own machine.
+        const installable = or_list(HOSTS.filter(h=>h.verified).map(h=>h.label));
+        lines.push(pc.dim(`  Install ${installable}, or pass --agent to name one explicitly.`));
         return lines;
     }
     lines.push(pc.green(`✓ detected ${report.hosts.map(h=>h.label).join(', ')}`));

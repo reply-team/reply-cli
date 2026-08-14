@@ -1,4 +1,5 @@
 import {describe, it, expect} from 'vitest';
+import {HOSTS} from '../../skills/hosts';
 import {human_lines, exit_code_for, summarize, dependency_note} from '../../skills/report';
 import type {Host_outcome, Report} from '../../skills/types';
 
@@ -71,7 +72,28 @@ describe('human_lines', ()=>{
     });
 
     it('lists the packs per host', ()=>{
-        expect(text(report([host()]))).toContain('Claude Code · ai-sdr-core, reply-adapter installed');
+        // Label then packs, with the gap left loose: the label is padded to the
+        // widest name in the registry so the separators line up, and that width
+        // moves whenever a host is added or renamed. Pinning it made this test
+        // fail for a rename that changed nothing it exists to check.
+        expect(text(report([host()]))).toMatch(/Claude Code +· ai-sdr-core, reply-adapter installed/);
+    });
+    
+    it('puts the separator in the same column whatever the label lengths', ()=>{
+        const by_length = [...HOSTS.map(h=>h.label)].sort((a, b)=>a.length - b.length);
+        const narrowest = by_length[0];
+        const widest = by_length[by_length.length - 1];
+        expect(widest.length, 'every registry label is the same length — this test needs two that differ')
+            .toBeGreaterThan(narrowest.length);
+
+        const lines = text(report([
+            host({host: 'narrow', label: narrowest}),
+            host({host: 'wide', label: widest}),
+        ])).split('\n').filter(line=>line.includes('·'));
+
+        expect(lines).toHaveLength(2);
+        expect(lines[0].indexOf('·')).toBe(lines[1].indexOf('·'));
+        expect(lines[1].indexOf('·')).toBeGreaterThan(lines[1].indexOf(widest) + widest.length);
     });
 
     it('says current rather than installed when nothing changed', ()=>{

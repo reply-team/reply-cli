@@ -90,14 +90,17 @@ const HOSTS: Host_def[] = [
     },
     {
         id: 'windsurf',
-        label: 'Windsurf',
+        // The product ships as Devin, and the label is what the report prints:
+        // naming both is what lets someone running Devin recognise the host and
+        // still find `windsurf` as the --agent value. The id stays untouched.
+        label: 'Windsurf (Devin)',
         kind: 'flat-skills-dir',
         config_dirs: [path.join('.codeium', 'windsurf')],
         binaries: [],
         binary_paths: [],
         user_skills_dir: path.join('.codeium', 'windsurf', 'skills'),
         project_skills_dir: path.join('.windsurf', 'skills'),
-        verified: false,
+        verified: true,
     },
 ];
 
