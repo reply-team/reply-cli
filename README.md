@@ -280,9 +280,11 @@ also reads `.agents/skills`, which is where `--project` puts things for Cursor,
 Codex, Antigravity and GitHub Copilot. A project-scope install aimed at one of
 them therefore makes those skills visible in the others, and removing them for
 one changes what the others see. Use user scope when you want a host's skills to
-itself. GitHub Copilot reaches furthest: it also reads `.claude/skills` and
-`.github/skills` in a repository, and `~/.claude/skills` for user scope, so a
-Claude Code install shows up in it as well.
+itself. GitHub Copilot reads two further repository directories, `.claude/skills`
+and `.github/skills`. This command never writes to either — Claude Code installs
+through its own plugin CLI in both scopes — so that crossover appears only when
+something else fills them: a skill copied there by hand, or the `npx skills`
+channel, which writes `.claude/skills` for a project-scoped Claude Code install.
 
 Every assistant in the table has been verified against the version named. A host
 added later may arrive with its skills directory taken from the vendor's
@@ -293,8 +295,9 @@ Antigravity and GitHub Copilot with the release that adds them.
 
 GitHub Copilot is two products over one directory: the `copilot` CLI and the
 VS Code agent host, which ships `~/.copilot/skills` among the defaults of its
-`chat.agentSkillsLocations` setting. The CLI is what the row above was verified
-against. VS Code scans those directories once per window and does not watch them,
+`chat.agentSkillsLocations` setting — alongside `~/.claude/skills` and
+`~/.agents/skills`, user directories the CLI itself does not read. The CLI is
+what the row above was verified against. VS Code scans those directories once per window and does not watch them,
 so an install made while it is open needs `Developer: Reload Window` rather than
 just a new chat.
 
