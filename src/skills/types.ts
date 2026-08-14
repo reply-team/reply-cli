@@ -47,6 +47,12 @@ type Host_def = {
     // Skills directory relative to the project root (flat hosts, and native
     // hosts whose plugin mechanism cannot express a project install).
     project_skills_dir?: string;
+    // Whether the user has to start a new session before the assistant sees
+    // skills this run installed. True for every host that reads them once at
+    // startup; false for one that re-reads them each turn, where telling the
+    // user to restart asks for something the host does not need. Required, so
+    // adding a host is a decision about it rather than an omission.
+    needs_new_session: boolean;
     verified: boolean;
 };
 
@@ -93,9 +99,30 @@ type Host_outcome = {
     // reports, so no adapter can forget it and a --json consumer can tell a
     // confirmed success from an unconfirmed one.
     verified?: boolean;
+    // Mirrors Host_def.needs_new_session, stamped by the orchestrator for the
+    // same reason as `verified`: the reporter has to know which hosts a
+    // "start a new session" line would actually apply to, and that is registry
+    // data rather than something an adapter computes.
+    needs_new_session?: boolean;
 };
 
 type Operation = 'install' | 'list' | 'update' | 'remove';
+
+// Packs the journal still records for a host that is no longer in the registry
+// — a retired assistant with our files left on disk. Nothing else can reach
+// them: iteration covers registry hosts only, and `--agent <id>` for a retired
+// id is a usage error, so `remove` cannot take them out. Surfacing them is what
+// keeps "reply skills remove takes them out" honest across a retirement, and it
+// works for the next one without anybody remembering to write a release note.
+type Orphaned_packs = {
+    host: string;
+    scope: Scope;
+    packs: string[];
+    files: number;
+    // One recorded path, so the message can point at a real directory rather
+    // than describing one.
+    sample?: string;
+};
 
 type Report = {
     action: Operation;
@@ -104,6 +131,7 @@ type Report = {
     resolved: string[];
     hosts: Host_outcome[];
     summary: {installed: number; skipped: number; failed: number};
+    orphans?: Orphaned_packs[];
 };
 
 type Run_result = {code: number; stdout: string; stderr: string};
@@ -113,7 +141,7 @@ type Run_result = {code: number; stdout: string; stderr: string};
 type Runner = (bin: string, args: string[])=>Promise<Run_result>;
 
 export type {
-    Pack, Pack_registry, Scope, Host_kind, Host_cli, Host_def,
+    Pack, Pack_registry, Scope, Host_kind, Host_cli, Host_def, Orphaned_packs,
     Pack_action, Pack_outcome, Host_status, Host_outcome,
     Operation, Report, Run_result, Runner,
 };

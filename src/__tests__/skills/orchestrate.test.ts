@@ -3,6 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import {HOSTS} from '../../skills/hosts';
+import {record_pack} from '../../skills/journal';
 import {run_skills} from '../../skills/orchestrate';
 import {human_lines} from '../../skills/report';
 import type {Detect_deps} from '../../skills/detect';
@@ -302,6 +303,35 @@ describe('run_skills', ()=>{
         expect(unverified, 'every host is verified — decide what this should assert now').toBeDefined();
         const report = await run_skills(opts({agents: [unverified!.id]}));
         expect(report.hosts[0].verified).toBe(false);
+    });
+
+    // Retiring a host leaves its journal branch behind, and nothing else in this
+    // file can reach it: every other path iterates the registry, and `--agent
+    // <retired id>` is a usage error. Without this, `remove` quietly stops being
+    // able to take those packs out and no command ever says so — which is what
+    // happened when gemini-cli was retired with packs installed under it.
+    it('reports packs recorded for a host the registry no longer has', async()=>{
+        const orphan_file = path.join(home, '.gemini', 'skills', 'ai-sdr-core-skill', 'SKILL.md');
+        record_pack('gemini-cli', 'user', 'ai-sdr-core', {
+            version: '0.3.0', ref: 'main', commit: 'deadbee', scope: 'user',
+            files: [orphan_file], complete: true, installed_at: '2026-07-30T00:00:00.000Z',
+        }, {REPLY_CONFIG_DIR: path.join(root, 'config')});
+
+        const report = await run_skills(opts({operation: 'list'}));
+
+        expect(report.orphans).toEqual([{
+            host: 'gemini-cli', scope: 'user', packs: ['ai-sdr-core'], files: 1, sample: orphan_file,
+        }]);
+        const out = human_lines(report).join('\n');
+        expect(out).toContain('no longer supports');
+        expect(out).toContain('delete them by hand');
+    });
+
+    it('says nothing about orphans when every journal branch is a known host', async()=>{
+        await run_skills(opts({agents: ['cursor']}));
+        const report = await run_skills(opts({operation: 'list'}));
+        expect(report.orphans).toBeUndefined();
+        expect(human_lines(report).join('\n')).not.toContain('no longer supports');
     });
 
     it('reports no commit when the clone failed', async()=>{

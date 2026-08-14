@@ -38,6 +38,7 @@ const HOSTS: Host_def[] = [
         binary_paths: [],
         cli: claude_cli,
         project_skills_dir: path.join('.claude', 'skills'),
+        needs_new_session: true,
         verified: true,
     },
     {
@@ -53,6 +54,7 @@ const HOSTS: Host_def[] = [
         // Codex's plugin mechanism is user-scoped, so --project falls back to
         // copying into the repository's .agents/skills.
         project_skills_dir: path.join('.agents', 'skills'),
+        needs_new_session: true,
         verified: true,
     },
     {
@@ -63,6 +65,15 @@ const HOSTS: Host_def[] = [
         // .agents its workspace one; skills under either are found with no
         // manifest and no plugin, as its own bundled agy-customizations skill
         // documents. Not .gemini/skills one level up, which it does not read.
+        //
+        // Detection keys on .gemini/antigravity and deliberately NOT on .gemini,
+        // which this app also creates: .gemini alone was Google's Gemini CLI's
+        // config directory, so matching it detected that host on every machine
+        // running this one, and a plain install then wrote a full set of skills
+        // into a directory nothing reads. Do not "simplify" this to the root the
+        // skills go into. The app writes .gemini/antigravity/installation_id on
+        // first launch, before anything skills-related, so this is present on a
+        // machine that has the host and has never run `reply skills install`.
         config_dirs: [path.join('.gemini', 'antigravity')],
         binaries: [],
         binary_paths: [],
@@ -72,6 +83,11 @@ const HOSTS: Host_def[] = [
         // GetAllSkills, which only answers for user scope — a project install is
         // confirmed by what a session in that repository loads.
         project_skills_dir: path.join('.agents', 'skills'),
+        // Alone among the hosts: it re-reads its skills every turn, so an
+        // install lands in a conversation that is already open. Verified — a
+        // session that began listing 46 skills picked ours up mid-conversation
+        // with no restart.
+        needs_new_session: false,
         verified: true,
     },
     {
@@ -83,6 +99,7 @@ const HOSTS: Host_def[] = [
         binary_paths: [],
         user_skills_dir: path.join('.cursor', 'skills'),
         project_skills_dir: path.join('.agents', 'skills'),
+        needs_new_session: true,
         verified: true,
     },
     {
@@ -94,6 +111,7 @@ const HOSTS: Host_def[] = [
         binary_paths: [],
         user_skills_dir: path.join('.copilot', 'skills'),
         project_skills_dir: path.join('.agents', 'skills'),
+        needs_new_session: true,
         verified: false,
     },
     {
@@ -108,6 +126,7 @@ const HOSTS: Host_def[] = [
         binary_paths: [],
         user_skills_dir: path.join('.codeium', 'windsurf', 'skills'),
         project_skills_dir: path.join('.windsurf', 'skills'),
+        needs_new_session: true,
         verified: true,
     },
 ];

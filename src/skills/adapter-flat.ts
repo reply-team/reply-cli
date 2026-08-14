@@ -237,11 +237,15 @@ const canonical = (target: string): string=>{
 // delete_files' containment check, and canonical is what recognises our own
 // skill through a case difference — without it, an install reports a conflict
 // against a file its own journal entry claims, and refuses to touch it.
-const owns_dir = (dir: string, known_files: Iterable<string>): boolean=>{
-    const real_dir = canonical(dir);
+const owns_dir = (
+    dir: string,
+    known_files: Iterable<string>,
+    canonicalise: (target: string)=>string = canonical,
+): boolean=>{
+    const real_dir = canonicalise(dir);
     for (const file of known_files)
     {
-        if (is_within(dir, file) || is_within(real_dir, canonical(file)))
+        if (is_within(dir, file) || is_within(real_dir, canonicalise(file)))
         {
             return true;
         }
@@ -328,6 +332,11 @@ type Flat_opts = {
     env?: Env;
     dry_run?: boolean;
     clone?: Clone_fn;
+    // How the filesystem spells a path, injected for the same reason detect.ts
+    // injects `exists`: what needs asserting is that ownership survives a case
+    // difference, and that cannot depend on whether the runner's filesystem
+    // happens to ignore case. Defaults to asking the OS.
+    canonicalise?: (target: string)=>string;
 };
 
 const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
@@ -338,6 +347,7 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
     const cwd = opts.cwd ?? process.cwd();
     const tmp_root = opts.tmp_root ?? os.tmpdir();
     const dry_run = opts.dry_run === true;
+    const canonicalise = opts.canonicalise ?? canonical;
     const clone = opts.clone ?? clone_repo;
     const id = host.def.id;
     const base: Host_outcome = {
@@ -551,7 +561,7 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
             const skill_dirs = fs.readdirSync(from, {withFileTypes: true}).filter(e=>e.isDirectory());
             const collision = skill_dirs.find(skill=>{
                 const dst_dir = path.join(target_root, skill.name);
-                return fs.existsSync(dst_dir) && !owns_dir(dst_dir, known_files);
+                return fs.existsSync(dst_dir) && !owns_dir(dst_dir, known_files, canonicalise);
             });
             if (collision)
             {
@@ -621,5 +631,5 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
     return {...cloned_base, packs: outcomes, status: status_of(outcomes), hint: blocked_hint(blocked_names)};
 };
 
-export {clone_repo, copy_dir, skills_target, run_flat};
+export {canonical, clone_repo, copy_dir, skills_target, run_flat};
 export type {Clone_fn, Clone_result, Flat_opts};

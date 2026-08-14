@@ -77,12 +77,12 @@ const host_line = (host: Host_outcome, report_action: Operation): string=>{
     return `${mark} ${label}· ${parts.join('; ')}${note}`;
 };
 
-// Whether this run put anything new in front of the assistant, and so whether
-// the user has to start a new session. The action labels alone cannot answer
-// it: an unchanged version reports `current` in every adapter, which is right,
-// but a flat host re-copying a newer commit at that same version did rewrite
-// the files. `refreshed` carries exactly that, so both facts are consulted.
-const changed = (report: Report): boolean=>report.hosts.some(h=>
+// Hosts this run put something new in front of. The action labels alone cannot
+// answer it: an unchanged version reports `current` in every adapter, which is
+// right, but a flat host re-copying a newer commit at that same version did
+// rewrite the files. `refreshed` carries exactly that, so both facts are
+// consulted.
+const changed_hosts = (report: Report): Host_outcome[]=>report.hosts.filter(h=>
     (h.packs ?? []).some(p=>
         p.action === 'installed' || p.action === 'upgraded' || p.refreshed === true));
 
@@ -119,9 +119,25 @@ const human_lines = (report: Report): string[]=>{
             lines.push(pc.dim(`  ${pack.name}: ${pack.detail}`));
         }
     }
-    if (changed(report) && report.action !== 'list')
+    // Only the hosts that actually need it. Asking someone to restart an
+    // assistant that re-reads its skills every turn tells them to do something
+    // the host does not require, and naming the hosts is the honest form when a
+    // run touched both kinds. `needs_new_session` is registry data the
+    // orchestrator stamps, so this never has to know which host is which.
+    const restart = changed_hosts(report).filter(h=>h.needs_new_session !== false);
+    if (restart.length && report.action !== 'list')
     {
-        lines.push(pc.dim('Start a new session in each assistant so the skills load.'));
+        lines.push(pc.dim(restart.length === changed_hosts(report).length
+            ? 'Start a new session in each assistant so the skills load.'
+            : `Start a new session in ${or_list(restart.map(h=>h.label))} so the skills load.`));
+    }
+    for (const orphan of report.orphans ?? [])
+    {
+        lines.push(pc.yellow(`⚠ ${orphan.packs.join(', ')} recorded for '${orphan.host}'`
+            + ', an assistant this version no longer supports'));
+        lines.push(pc.dim(`  ${orphan.files} file(s) left on disk`
+            + `${orphan.sample ? `, starting with ${orphan.sample}` : ''}`
+            + ' — delete them by hand; no --agent value reaches them now'));
     }
     return lines;
 };

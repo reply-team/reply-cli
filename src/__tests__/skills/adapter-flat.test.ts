@@ -2,7 +2,7 @@ import {describe, it, expect, beforeEach, afterEach, vi} from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import {clone_repo, copy_dir, run_flat, skills_target} from '../../skills/adapter-flat';
+import {canonical, clone_repo, copy_dir, run_flat, skills_target} from '../../skills/adapter-flat';
 import {host_by_id} from '../../skills/hosts';
 import {PACKS_FALLBACK, resolve_packs} from '../../skills/packs';
 import {journal_entry, record_pack} from '../../skills/journal';
@@ -782,5 +782,60 @@ describe('run_flat differently-cased journaled paths', ()=>{
         }]);
         expect(fs.readFileSync(path.join(target, 'ai-sdr-core-skill', 'SKILL.md'), 'utf8'))
             .toBe('old content');
+    });
+
+    // The two above are each skipped on half the platforms, so on any single
+    // runner neither covers the canonicalisation itself: replacing
+    // `fs.realpathSync.native` with `path.resolve` keeps the whole suite green.
+    // Injecting the canonicaliser — the seam detect.ts already uses for `exists`
+    // — puts the filesystem's opinion under the test's control, so what gets
+    // asserted is the logic: ownership recognised through a case difference,
+    // everywhere, and a foreign file still refused.
+    const lower_casing = (target: string): string=>target.toLowerCase();
+
+    it('recognises our own file through a case difference on any platform', async()=>{
+        const target = seed_differently_cased_entry();
+
+        const outcome = await run_flat({...flat_opts('update', core_only), canonicalise: lower_casing});
+
+        expect(outcome.packs).toEqual([{name: 'ai-sdr-core', action: 'current', version: '0.1.0'}]);
+        expect(fs.readFileSync(path.join(target, 'ai-sdr-core-skill', 'SKILL.md'), 'utf8'))
+            .not.toBe('old content');
+    });
+
+    it('still refuses a file no journal entry claims, whatever the canonical form', async()=>{
+        const target = path.join(home, '.cursor', 'skills');
+        fs.mkdirSync(path.join(target, 'ai-sdr-core-skill'), {recursive: true});
+        fs.writeFileSync(path.join(target, 'ai-sdr-core-skill', 'SKILL.md'), 'someone else wrote this');
+
+        const outcome = await run_flat({...flat_opts('install', core_only), canonicalise: lower_casing});
+
+        expect(outcome.packs).toEqual([{
+            name: 'ai-sdr-core', action: 'failed', detail: 'conflicts with an existing skill: ai-sdr-core-skill',
+        }]);
+        expect(fs.readFileSync(path.join(target, 'ai-sdr-core-skill', 'SKILL.md'), 'utf8'))
+            .toBe('someone else wrote this');
+    });
+});
+
+// The injected-canonicaliser tests above cover how owns_dir uses canonicalisation,
+// but not the default's own behaviour: swapping `fs.realpathSync.native` for
+// `path.resolve` leaves them all green, and only a case-insensitive runner
+// notices. A symlink separates the two portably — realpath follows it, resolve
+// hands the link back — so the implementation is pinned on every platform.
+describe('canonical', ()=>{
+    it('answers with the path the filesystem really uses, following a symlink', ()=>{
+        const real = path.join(root, 'real-skills');
+        fs.mkdirSync(real, {recursive: true});
+        const link = path.join(root, 'linked-skills');
+        fs.symlinkSync(real, link);
+
+        expect(canonical(link)).toBe(fs.realpathSync.native(real));
+        expect(canonical(link)).not.toBe(link);
+    });
+
+    it('falls back to a resolved path when the target does not exist', ()=>{
+        const missing = path.join(root, 'nowhere', 'SKILL.md');
+        expect(canonical(missing)).toBe(path.resolve(missing));
     });
 });

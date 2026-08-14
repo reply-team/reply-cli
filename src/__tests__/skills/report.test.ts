@@ -160,6 +160,44 @@ describe('human_lines', ()=>{
         expect(out).toMatch(/new session/i);
     });
 
+    // The line asks the user to do something, so it must only reach hosts that
+    // need it. Antigravity re-reads its skills every turn, and telling its users
+    // to restart is an instruction the host does not require.
+    it('does not ask for a new session when the only changed host does not need one', ()=>{
+        const out = text(report([host({needs_new_session: false})]));
+        expect(out).not.toMatch(/new session/i);
+    });
+
+    it('names the hosts when a run touched both kinds', ()=>{
+        const out = text(report([
+            host({label: 'Cursor', needs_new_session: true}),
+            host({host: 'antigravity', label: 'Antigravity', needs_new_session: false}),
+        ]));
+        expect(out).toContain('Start a new session in Cursor so the skills load.');
+        expect(out).not.toContain('Antigravity so the skills');
+    });
+
+    it('keeps the unqualified line when every changed host needs a session', ()=>{
+        const out = text(report([
+            host({label: 'Cursor', needs_new_session: true}),
+            host({host: 'codex', label: 'Codex', needs_new_session: true}),
+        ]));
+        expect(out).toContain('Start a new session in each assistant so the skills load.');
+    });
+
+    it('reports packs left behind for a host the registry no longer has', ()=>{
+        const out = text(report([host()], {
+            action: 'list',
+            orphans: [{
+                host: 'gemini-cli', scope: 'user', packs: ['ai-sdr-core', 'reply-adapter'],
+                files: 94, sample: '/home/u/.gemini/skills/sending-guardrails/SKILL.md',
+            }],
+        }));
+        expect(out).toContain("ai-sdr-core, reply-adapter recorded for 'gemini-cli'");
+        expect(out).toContain('94 file(s) left on disk');
+        expect(out).toContain('delete them by hand');
+    });
+
     it('marks an outdated pack as an available update on list, not as updated', ()=>{
         const out = text(report([host({
             packs: [{name: 'ai-sdr-core', action: 'upgraded', version: '0.2.0', from: '0.1.0'}],
