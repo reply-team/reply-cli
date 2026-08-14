@@ -273,20 +273,30 @@ receive the skills as files. Add `--json` for a machine-readable report, and
 | Cursor | copied files | `~/.cursor/skills`, or `.agents/skills` with `--project` | Cursor 3.14.27, cursor-agent 2026.08.04-aaa8809 | a new session (a new chat) |
 | Windsurf (ships as Devin) | copied files | `~/.codeium/windsurf/skills`, or `.windsurf/skills` with `--project` | Devin 3.6.27, devin CLI 3000.3.27 | a new session (the next `devin` run) |
 | Antigravity | copied files | `~/.gemini/config/skills`, or `.agents/skills` with `--project` | Antigravity 2.0.1 | nothing — it re-reads its skills every turn, including in a conversation already open |
-| GitHub Copilot | copied files | `~/.copilot/skills`, or `.agents/skills` with `--project` | not yet | — |
+| GitHub Copilot | copied files | `~/.copilot/skills`, or `.agents/skills` with `--project` | Copilot CLI 1.0.80 | a new session, or `/skills reload` in the open one |
 
 The project directories overlap in a way the rows above do not show: Windsurf
 also reads `.agents/skills`, which is where `--project` puts things for Cursor,
-Codex and Antigravity. A project-scope install aimed at one of them therefore
-makes those skills visible in the others, and removing them for one changes what
-the others see. Use user scope when you want a host's skills to itself.
+Codex, Antigravity and GitHub Copilot. A project-scope install aimed at one of
+them therefore makes those skills visible in the others, and removing them for
+one changes what the others see. Use user scope when you want a host's skills to
+itself. GitHub Copilot reaches furthest: it also reads `.claude/skills` and
+`.github/skills` in a repository, and `~/.claude/skills` for user scope, so a
+Claude Code install shows up in it as well.
 
-"Not yet" means the skills directory for that assistant comes from its
-documentation and has not been confirmed by a verification run of our own: the
-install works, but we cannot promise the assistant reads from where we put the
-files. GitHub Copilot is marked `(paths not yet verified)` in the report and
-carries `"verified": false` in `--json`. Cursor and Windsurf were verified with
-reply-cli 0.5.1, Antigravity with the release that adds it.
+Every assistant in the table has been verified against the version named. A host
+added later may arrive with its skills directory taken from the vendor's
+documentation alone; until someone confirms it by installing and using a skill,
+the report marks that host `(paths not yet verified)` and `--json` carries
+`"verified": false`. Cursor and Windsurf were verified with reply-cli 0.5.1,
+Antigravity and GitHub Copilot with the release that adds them.
+
+GitHub Copilot is two products over one directory: the `copilot` CLI and the
+VS Code agent host, which ships `~/.copilot/skills` among the defaults of its
+`chat.agentSkillsLocations` setting. The CLI is what the row above was verified
+against. VS Code scans those directories once per window and does not watch them,
+so an install made while it is open needs `Developer: Reload Window` rather than
+just a new chat.
 
 Antigravity is the one host that needs nothing to pick up new skills — it
 re-reads them every turn, so an install lands in a conversation you already have
