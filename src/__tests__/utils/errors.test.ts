@@ -1,5 +1,5 @@
 import {describe, it, expect} from 'vitest';
-import {CliError, UsageError, RuntimeError, Api_error, format_hint} from '../../utils/errors';
+import {CliError, UsageError, RuntimeError, Api_error, Operation_error, Unknown_outcome_error, format_hint} from '../../utils/errors';
 
 describe('utils/errors', ()=>{
     describe('UsageError', ()=>{
@@ -85,6 +85,43 @@ describe('utils/errors', ()=>{
 
         it('leaves an empty hint alone rather than emitting a bare prefix', ()=>{
             expect(format_hint('')).toBe('  Hint: ');
+        });
+    });
+
+    describe('Operation_error', ()=>{
+        it('has exit code 1, is a CliError, and puts every operation field into to_json', ()=>{
+            const e = new Operation_error('contact.opted_out', 'Contact 456 is opted out.', {
+                status: 200, ids: {sequence_id: 123, contact_id: 456}, details: {expected: 1},
+            });
+            expect(e.exit_code).toBe(1);
+            expect(e).toBeInstanceOf(CliError);
+            expect(e.to_json()).toEqual({error: {
+                status: 200, code: 'contact.opted_out', title: 'Contact 456 is opted out.',
+                ids: {sequence_id: 123, contact_id: 456}, details: {expected: 1},
+            }});
+        });
+
+        it('its message, which is what prints without --json, carries the code and Reply\'s detail', ()=>{
+            const e = new Operation_error('reply.refused', 'Reply refused the call.', {detail: 'Email is not valid'});
+            expect(e.message).toContain('Reply refused the call.');
+            expect(e.message).toContain('Code: reply.refused');
+            expect(e.message).toContain('Detail: Email is not valid');
+            expect(e.to_json().error.title).toBe('Reply refused the call.');
+        });
+
+        it('carries Reply\'s own code and a retry_after', ()=>{
+            const e = new Operation_error('rate_limited', 'Later.', {status: 429, reply_code: 'x.y', retry_after: 40});
+            expect(e.to_json().error).toMatchObject({reply_code: 'x.y', retry_after: 40, status: 429});
+        });
+    });
+
+    describe('Unknown_outcome_error', ()=>{
+        it('has exit code 3 and the outcome.unknown code', ()=>{
+            const e = new Unknown_outcome_error('No answer came back.', {status: 502});
+            expect(e.exit_code).toBe(3);
+            expect(e.code).toBe('outcome.unknown');
+            expect(e).toBeInstanceOf(Operation_error);
+            expect(e.to_json()).toEqual({error: {status: 502, code: 'outcome.unknown', title: 'No answer came back.'}});
         });
     });
 });

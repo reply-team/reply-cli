@@ -7,6 +7,7 @@ import {team_command} from './commands/team';
 import {api_command} from './commands/api';
 import {skills_command} from './commands/skills';
 import {install_command} from './commands/install';
+import {sequence_command, contact_list_command, contact_command, inbox_command} from './operations/commands';
 import {update_notice} from './selfupdate/notice';
 import {CliError, format_hint} from './utils/errors';
 import {info, set_quiet} from './utils/output';
@@ -26,7 +27,7 @@ const build_program = (): Command=>{
     const PREFIX = PROGRAM_NAME.toUpperCase();
     program
         .name(PROGRAM_NAME)
-        .description('Command-line interface for Reply.io — authentication and identity (v1).')
+        .description('Command-line interface for Reply.io.')
         .version(cli_version(), '-v, --version')
         .option('-k, --api-key <key>', 'API key (overrides env var and stored credential)')
         .option('-p, --profile <name>', 'Named backend profile (default: prod)')
@@ -43,12 +44,18 @@ const build_program = (): Command=>{
     // silenced for the whole invocation.
     program.hook('preAction', ()=>{set_quiet(program.opts().quiet === true);});
 
-    program.addCommand(auth_command);
-    program.addCommand(profile_command);
-    program.addCommand(team_command);
-    program.addCommand(api_command);
-    program.addCommand(skills_command);
-    program.addCommand(install_command);
+    const WORK = 'Work with your Reply account:';
+    const SETUP = 'Setup:';
+    for (const c of [sequence_command, contact_list_command, contact_command, inbox_command, api_command])
+    {
+        program.addCommand(c.helpGroup(WORK));
+    }
+    for (const c of [auth_command, profile_command, team_command, skills_command, install_command])
+    {
+        program.addCommand(c.helpGroup(SETUP));
+    }
+    // Named explicitly so it takes the Setup group; the implicit one would sit in a group of its own.
+    program.commandsGroup(SETUP).helpCommand('help [command]', 'display help for command');
 
     program.addHelpText('after', `
 Credential precedence:
@@ -77,6 +84,13 @@ Team & acting user (headers):
     ${PROGRAM_NAME} team current           # pinned + effective team
     ${PROGRAM_NAME} team use <id>          # pin a team on the current profile
     ${PROGRAM_NAME} team clear             # remove the pin
+
+Work commands (JSON out; exit 0 done, 1 failed, 2 usage, 3 outcome unknown):
+    ${PROGRAM_NAME} sequence add-contact 123 --email ann@acme.com --first-name Ann
+    ${PROGRAM_NAME} sequence start 123 --expect-contacts 40
+    ${PROGRAM_NAME} contact opt-out --contact-id 456
+    ${PROGRAM_NAME} inbox list --contact-id 456
+  Each command's --help lists its flags, its result and its error codes.
 
 Raw API (agent/CI escape hatch) — docs: https://docs.reply.io/api-reference/introduction
   Use the path as in the docs (starts with /v3); the query string goes in the path.

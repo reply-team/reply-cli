@@ -176,6 +176,47 @@ reply team clear           # remove the pin
 If a call needs a team and you're in more than one, the API answers with a
 `TEAM_REQUIRED` error listing your teams — run `reply team use <id>` to pin one.
 
+## Working with your Reply account
+
+First-class commands for the operations an agent or an automation performs most. Every command
+prints JSON (indented; compact with `--json`) and says what happened in a stable `status`.
+
+| Command | Does |
+|---|---|
+| `reply sequence get <id>` | the sequence as Reply holds it |
+| `reply sequence contacts <id> [--limit] [--offset]` | one page of its contacts, plus the total |
+| `reply sequence stats <id> (--preset … \| --from … --to …)` | its email and LinkedIn counts over a window |
+| `reply sequence add-contact <id> <contact> [--start-step N] [--ignore-step-delay]` | put a contact in → `added` / `already_in_sequence` |
+| `reply sequence remove-contact <id> <contact>` | take a contact out → `removed` / `not_in_sequence` |
+| `reply sequence pause <id>` | → `paused` |
+| `reply sequence start <id> [--expect-contacts N]` | → `started` / `already_active` |
+| `reply contact-list add-contact <list-id> <contact> [--refuse-opted-out]` | → `added` |
+| `reply contact opt-out <contact>` | → `opted_out` |
+| `reply inbox list (--contact-id \| --sequence-id) [--source] [--since]` | one page of threads |
+| `reply inbox get <thread-id>` | a thread and one page of its messages |
+
+`<contact>` is exactly one of `--contact-id <id>`, `--email <address>` (with `--first-name`,
+`--last-name`, `--company`, `--title`), or `--contact <json>|@file|-` with the same fields as JSON.
+`-` reads stdin, which keeps personal data out of the argument list. Reply requires a first name to
+add or match a contact by email; without one it refuses the contact.
+
+**Errors.** With `--json`, a failure is one line on stderr:
+`{"error":{"code":"contact.opted_out","title":…,"status":…,"reply_code":…,"ids":{…}}}`. `ids` is
+whatever the command learned before failing, for example the id of a contact it created before
+Reply refused the add. Each command's `--help` lists its error codes.
+
+**Exit codes.** `0` done · `1` failed, and the main effect did not happen · `2` usage error, nothing
+sent · `3` **outcome unknown**: a write may have happened and no answer came back. Re-running the
+same command is safe: each one checks or relies on Reply's own state rather than repeating an effect
+blindly.
+
+**Retries.** Reads are retried on errors. A write is retried only when it can't have reached Reply:
+the connection was never made, or a `429` asked to wait 3 seconds or less. A longer `429` comes back
+as `rate_limited` with `retry_after`.
+
+`--idempotency-key` is accepted on every write and reserved: it will make a repeated call exact once
+the Reply API supports idempotency keys, and has no effect today.
+
 ## Raw API access
 
 `reply api` is a raw, authenticated passthrough to any v3 endpoint — the
@@ -202,6 +243,11 @@ It prints `{ "code": <status>, "data": <body> }` and exits non-zero on HTTP
 `>= 400`. On a team/user-resolution conflict it adds a short fix-it hint on
 stderr. Add `--verbose` for a full request/response trace on stderr with
 credentials redacted; stdout stays the plain JSON, so pipes keep working.
+
+A write through `reply api` (POST, PUT, PATCH, DELETE) is never resent on a 5xx or on a
+connection that broke after sending. That last case exits 3: the write may have happened. A `429`
+is waited out only when `Retry-After` asks for 3 seconds or less; a longer one is printed as the
+`429` it is.
 
 ### Windows: Git Bash rewrites the path
 

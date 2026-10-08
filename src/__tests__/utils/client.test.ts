@@ -4,7 +4,7 @@ const mock_fetch = vi.fn();
 vi.stubGlobal('fetch', mock_fetch);
 
 import {create_client, get} from '../../utils/client';
-import {Api_error, RuntimeError} from '../../utils/errors';
+import {Api_error, RuntimeError, Unknown_outcome_error} from '../../utils/errors';
 
 const BASE = 'https://api.dev.reply.io/v3';
 
@@ -69,7 +69,8 @@ describe('utils/client', ()=>{
 
     it('gives up after max retries on persistent 503', async()=>{
         instant_timers();
-        mock_fetch.mockResolvedValue(err_res(503));
+        // A fresh Response per call, as fetch gives: every body is now read, and a body reads once.
+        mock_fetch.mockImplementation(async()=>err_res(503));
         const err = await get(BASE, 'tok', '/x').catch(e=>e);
         expect(err).toBeInstanceOf(Api_error);
         expect(err.status).toBe(503);
@@ -182,5 +183,142 @@ describe('utils/client', ()=>{
         await get(BASE, 'tok', '/x');
         const [, init] = mock_fetch.mock.calls[0];
         expect(init.headers['User-Agent']).toMatch(/^reply-cli\/\d+\.\d+\.\d+/);
+    });
+
+    describe('retry policy: reads vs writes', ()=>{
+        const net_error = (code?: string)=>Object.assign(new TypeError('fetch failed'),
+            code ? {cause: Object.assign(new Error(code), {code})} : {});
+
+        it('a POST is not resent on a 503: the answer comes back as it is', async()=>{
+            instant_timers();
+            mock_fetch.mockResolvedValue(err_res(503));
+            const {request_raw} = await import('../../utils/client');
+            expect((await request_raw(BASE, 'tok', 'POST', '/x', {a: 1})).status).toBe(503);
+            expect(mock_fetch).toHaveBeenCalledTimes(1);
+        });
+
+        it('a POST whose connection broke after sending is an unknown outcome (exit 3), not resent', async()=>{
+            instant_timers();
+            mock_fetch.mockRejectedValue(net_error('ECONNRESET'));
+            const {request_raw} = await import('../../utils/client');
+            const err = await request_raw(BASE, 'tok', 'POST', '/x', {a: 1}).catch(e=>e);
+            expect(err).toBeInstanceOf(Unknown_outcome_error);
+            expect(err.exit_code).toBe(3);
+            expect(mock_fetch).toHaveBeenCalledTimes(1);
+        });
+
+        it('a POST that never connected is retried, and succeeds', async()=>{
+            instant_timers();
+            mock_fetch.mockRejectedValueOnce(net_error('ECONNREFUSED')).mockResolvedValueOnce(json_res({ok: true}));
+            const {request_raw} = await import('../../utils/client');
+            expect((await request_raw(BASE, 'tok', 'POST', '/x', {a: 1})).status).toBe(200);
+            expect(mock_fetch).toHaveBeenCalledTimes(2);
+        });
+
+        it('a POST that never connects is a network failure after 3 retries', async()=>{
+            instant_timers();
+            mock_fetch.mockRejectedValue(net_error('ENOTFOUND'));
+            const {request_raw} = await import('../../utils/client');
+            const err = await request_raw(BASE, 'tok', 'POST', '/x', {a: 1}).catch(e=>e);
+            expect(err).toBeInstanceOf(RuntimeError);
+            expect(err.code).toBe('network');
+            expect(mock_fetch).toHaveBeenCalledTimes(4);
+        });
+
+        it('a POST marked as a read is retried on a 503', async()=>{
+            instant_timers();
+            mock_fetch.mockResolvedValueOnce(err_res(503)).mockResolvedValueOnce(json_res({ok: true}));
+            const {request_raw} = await import('../../utils/client');
+            expect((await request_raw(BASE, 'tok', 'POST', '/x', {}, {kind: 'read'})).status).toBe(200);
+            expect(mock_fetch).toHaveBeenCalledTimes(2);
+        });
+
+        it('a 429 with Retry-After of 3 s or less is waited out, for a write too', async()=>{
+            instant_timers();
+            mock_fetch.mockResolvedValueOnce(err_res(429, '', {'Retry-After': '2'})).mockResolvedValueOnce(json_res({ok: true}));
+            const {request_raw} = await import('../../utils/client');
+            expect((await request_raw(BASE, 'tok', 'POST', '/x', {a: 1})).status).toBe(200);
+            expect(mock_fetch).toHaveBeenCalledTimes(2);
+        });
+
+        it('a 429 with Retry-After over 3 s comes back at once', async()=>{
+            instant_timers();
+            mock_fetch.mockResolvedValue(err_res(429, '', {'Retry-After': '30'}));
+            const {request_raw} = await import('../../utils/client');
+            const r = await request_raw(BASE, 'tok', 'GET', '/x');
+            expect(r.status).toBe(429);
+            expect(r.response_headers['retry-after']).toBe('30');
+            expect(mock_fetch).toHaveBeenCalledTimes(1);
+        });
+
+        it('a 429 whose Retry-After is an HTTP date a minute away comes back at once', async()=>{
+            instant_timers();
+            const later = new Date(Date.now() + 60_000).toUTCString();
+            mock_fetch.mockResolvedValue(err_res(429, '', {'Retry-After': later}));
+            const {request_raw} = await import('../../utils/client');
+            expect((await request_raw(BASE, 'tok', 'GET', '/x')).status).toBe(429);
+            expect(mock_fetch).toHaveBeenCalledTimes(1);
+        });
+
+        it('a 429 with no Retry-After is retried with backoff', async()=>{
+            instant_timers();
+            mock_fetch.mockResolvedValueOnce(err_res(429)).mockResolvedValueOnce(json_res({ok: true}));
+            const {request_raw} = await import('../../utils/client');
+            expect((await request_raw(BASE, 'tok', 'GET', '/x')).status).toBe(200);
+            expect(mock_fetch).toHaveBeenCalledTimes(2);
+        });
+
+        const broken_body = ()=>new Response(new ReadableStream({
+            start(c){ c.error(new TypeError('terminated')); },
+        }), {status: 200});
+
+        it('a POST whose answer breaks off mid-body is an unknown outcome (exit 3), not resent', async()=>{
+            instant_timers();
+            mock_fetch.mockResolvedValue(broken_body());
+            const {request_raw} = await import('../../utils/client');
+            const err = await request_raw(BASE, 'tok', 'POST', '/x', {a: 1}).catch(e=>e);
+            expect(err).toBeInstanceOf(Unknown_outcome_error);
+            expect(mock_fetch).toHaveBeenCalledTimes(1);
+        });
+
+        it('a GET whose answer breaks off mid-body is asked again', async()=>{
+            instant_timers();
+            mock_fetch.mockResolvedValueOnce(broken_body()).mockResolvedValueOnce(json_res({ok: true}));
+            const {request_raw} = await import('../../utils/client');
+            expect((await request_raw(BASE, 'tok', 'GET', '/x')).status).toBe(200);
+            expect(mock_fetch).toHaveBeenCalledTimes(2);
+        });
+
+        it('parse_retry_after reads seconds and HTTP dates, and nothing else', async()=>{
+            const {parse_retry_after} = await import('../../utils/client');
+            expect(parse_retry_after('7')).toBe(7);
+            expect(parse_retry_after(null)).toBeNull();
+            expect(parse_retry_after('soon')).toBeNull();
+            expect(parse_retry_after(new Date(Date.now() - 5_000).toUTCString())).toBe(0);
+            expect(parse_retry_after('1.5')).toBeNull();
+            expect(parse_retry_after('-5')).toBeNull();
+        });
+
+        it('a write that failed TLS or found no route never left: it is retried, then a network failure', async()=>{
+            instant_timers();
+            for (const code of ['CERT_HAS_EXPIRED', 'ERR_TLS_CERT_ALTNAME_INVALID', 'EHOSTUNREACH', 'ENETUNREACH'])
+            {
+                mock_fetch.mockReset();
+                mock_fetch.mockRejectedValue(net_error(code));
+                const {request_raw} = await import('../../utils/client');
+                const err = await request_raw(BASE, 'tok', 'POST', '/x', {a: 1}).catch(e=>e);
+                expect(err).toBeInstanceOf(RuntimeError);
+                expect(err.detail).toContain(code);
+                expect(mock_fetch).toHaveBeenCalledTimes(4);
+            }
+        });
+
+        it('an unknown outcome names the underlying cause in its detail', async()=>{
+            mock_fetch.mockRejectedValue(net_error('ECONNRESET'));
+            const {request_raw} = await import('../../utils/client');
+            const err = await request_raw(BASE, 'tok', 'POST', '/x', {a: 1}).catch(e=>e);
+            expect(err).toBeInstanceOf(Unknown_outcome_error);
+            expect(err.detail).toContain('ECONNRESET');
+        });
     });
 });
