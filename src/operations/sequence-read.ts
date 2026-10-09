@@ -98,8 +98,10 @@ const handle_sequence_contacts = async(
     print_result({items: page.items, has_more: page.has_more, total: await count_contacts(s, id)}, g);
 };
 
-// Reply answers a span that doesn't end after it starts with a 500, which would read as Reply
-// being down and be asked again, so it is refused here.
+// INTERIM (API gap): POST /v3/sequences/{id}/stats answers a span that doesn't end after it starts
+// with a 500, not a validation problem, so it reads as Reply being down and is asked again.
+// Needed: a 400 validation problem for such a span.
+// Workaround: refuse the span as a usage error before sending.
 const stats_span = (raw_from: string, raw_to: string): {from: string; to: string}=>{
     const from = parse_iso(raw_from, '--from');
     const to = parse_iso(raw_to, '--to');

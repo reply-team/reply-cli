@@ -47,9 +47,11 @@ const handle_inbox_list = async(opts: Inbox_list_opts, ctx: Cli_context, g: Op_g
     print_result({items: page.items, has_more: page.has_more}, g);
 };
 
-// Reply's thread carries its whole history inline, every body included and with no limit, so it is
-// dropped: the paged messages are the history. The thread has no subject of its own; its subject is
-// the one the latest email message carries.
+// INTERIM (API gap): GET /v3/inbox/threads/{id} carries the thread's whole history inline, every
+// body included and with no limit, and the thread has no subject of its own.
+// Needed: a thread without its history inline, and a subject field.
+// Workaround: drop the history (the paged messages are the history) and take the subject from the
+// latest email message.
 const thread_header = (thread: Record<string, unknown>): Record<string, unknown>=>{
     const {messages, ...header} = thread;
     const history = Array.isArray(messages) ? messages.filter(is_object) : [];
