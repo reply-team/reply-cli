@@ -1,6 +1,8 @@
 // Error taxonomy driving the CLI's exit-code contract:
-//   0 ok · 1 API-or-runtime failure · 2 usage error.
+//   0 ok · 1 API-or-runtime failure · 2 usage error · 3 outcome unknown (a write may have happened).
 // On --json, the top-level handler prints `error.to_json()` as a single line.
+
+type Ids = Record<string, number | null>;
 
 type Error_json = {
     status?: number;
@@ -8,6 +10,10 @@ type Error_json = {
     title?: string;
     detail?: string;
     hint?: string;
+    reply_code?: string;
+    ids?: Ids;
+    retry_after?: number;
+    details?: Record<string, unknown>;
 };
 
 const compact = (obj: Error_json): Error_json=>{
@@ -28,6 +34,10 @@ abstract class CliError extends Error {
     title?: string;
     detail?: string;
     hint?: string;
+    reply_code?: string;
+    ids?: Ids;
+    retry_after?: number;
+    details?: Record<string, unknown>;
 
     to_json(): {error: Error_json}
     {
@@ -37,6 +47,10 @@ abstract class CliError extends Error {
             title: this.title,
             detail: this.detail,
             hint: this.hint,
+            reply_code: this.reply_code,
+            ids: this.ids,
+            retry_after: this.retry_after,
+            details: this.details,
         })};
     }
 }
@@ -116,6 +130,50 @@ class Api_error extends CliError {
     }
 }
 
+type Operation_error_opts = {
+    status?: number;
+    reply_code?: string;
+    detail?: string;
+    hint?: string;
+    ids?: Ids;
+    retry_after?: number;
+    details?: Record<string, unknown>;
+};
+
+// A Reply operation that ended without doing its main effect, on an answer that was definite.
+class Operation_error extends CliError {
+    readonly exit_code: number = 1;
+    status?: number;
+
+    constructor(code: string, title: string, opts: Operation_error_opts = {})
+    {
+        // The message is what prints without --json, so it carries the code and Reply's words too.
+        super([title, ...(opts.detail ? [`  Detail: ${opts.detail}`] : []), `  Code: ${code}`].join('\n'));
+        this.name = 'Operation_error';
+        this.code = code;
+        this.title = title;
+        this.status = opts.status;
+        this.reply_code = opts.reply_code;
+        this.detail = opts.detail;
+        this.hint = opts.hint;
+        this.ids = opts.ids;
+        this.retry_after = opts.retry_after;
+        this.details = opts.details;
+    }
+}
+
+// A write that may or may not have taken effect at Reply: it may have arrived, and no definite
+// answer came back. It has an exit code of its own, so a caller never has to parse stderr to know.
+class Unknown_outcome_error extends Operation_error {
+    readonly exit_code: number = 3;
+
+    constructor(title: string, opts: Operation_error_opts = {})
+    {
+        super('outcome.unknown', title, opts);
+        this.name = 'Unknown_outcome_error';
+    }
+}
+
 // Render a hint for the terminal. Api_error bakes its hint into the message, but
 // UsageError and RuntimeError carry it as a field — and the top-level handler used
 // to print only `message`, so 47 hints across the CLI were written and never seen,
@@ -127,5 +185,5 @@ const format_hint = (hint: string): string=>hint
     .map((line, i)=>(i === 0 ? `  Hint: ${line}` : `  ${line}`))
     .join('\n');
 
-export {CliError, UsageError, RuntimeError, Api_error, format_hint};
-export type {Error_json, Api_error_body};
+export {CliError, UsageError, RuntimeError, Api_error, Operation_error, Unknown_outcome_error, format_hint};
+export type {Error_json, Api_error_body, Ids, Operation_error_opts};

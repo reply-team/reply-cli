@@ -7,7 +7,7 @@ const mock_fetch = vi.fn();
 vi.stubGlobal('fetch', mock_fetch);
 
 import {handle_api, read_body_arg, assert_api_path} from '../../commands/api';
-import {UsageError} from '../../utils/errors';
+import {UsageError, Unknown_outcome_error} from '../../utils/errors';
 import type {Cli_context} from '../../context';
 import type {CredentialStore, Api_key_record} from '../../credentials/types';
 
@@ -121,6 +121,22 @@ describe('handle_api', ()=>{
         expect(err).toMatch(/multiple teams/i);
         expect(err).toContain('1045');
         expect(process.exitCode).toBe(1);
+    });
+
+    it('does not resend a POST that got a 503: prints it once and exits 1', async()=>{
+        mock_fetch.mockResolvedValue(res({title: 'Bad gateway'}, 503));
+        const {out} = await capture(()=>handle_api('/v3/contacts', {body: '{"email":"a@b.co"}'}, ctx(), {}));
+        expect(JSON.parse(out).code).toBe(503);
+        expect(process.exitCode).toBe(1);
+        expect(mock_fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('a POST whose connection broke after sending is an unknown outcome (exit 3)', async()=>{
+        mock_fetch.mockRejectedValue(Object.assign(new TypeError('fetch failed'),
+            {cause: Object.assign(new Error('ECONNRESET'), {code: 'ECONNRESET'})}));
+        await expect(handle_api('/v3/contacts', {body: '{"email":"a@b.co"}'}, ctx(), {}))
+            .rejects.toBeInstanceOf(Unknown_outcome_error);
+        expect(mock_fetch).toHaveBeenCalledTimes(1);
     });
 });
 

@@ -1,10 +1,10 @@
-import fs from 'fs';
 import {Command} from 'commander';
 import {build_context, type Cli_context} from '../context';
 import {request_raw, type Raw_response} from '../utils/client';
 import {team_error_guidance} from '../teams';
 import {authed} from './authed';
 import {UsageError} from '../utils/errors';
+import {read_json_arg, read_all_stdin} from '../utils/json-arg';
 import {print, warn, REDACTED, type Print_opts} from '../utils/output';
 
 type Global_opts = {
@@ -52,46 +52,10 @@ const print_opts = (g: Global_opts): Print_opts=>({json: g.json, pretty: g.prett
 
 const ALLOWED_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
 
-const read_all_stdin = (): string=>{
-    try {
-        return fs.readFileSync(0, 'utf8');
-    } catch {
-        return '';
-    }
-};
-
 // Parse the --body argument: inline JSON, @<file>, or '-' for stdin. Injectable
 // stdin reader keeps it unit-testable.
-const read_body_arg = (raw: string | undefined, read_stdin: () => string = read_all_stdin): unknown=>{
-    if (raw === undefined)
-    {
-        return undefined;
-    }
-    let text: string;
-    if (raw === '-')
-    {
-        text = read_stdin();
-    }
-    else if (raw.startsWith('@'))
-    {
-        try {
-            text = fs.readFileSync(raw.slice(1), 'utf8');
-        } catch (e) {
-            throw new UsageError(`Could not read body file '${raw.slice(1)}'.`, {
-                code: 'usage.api', hint: (e as Error).message,
-            });
-        }
-    }
-    else
-    {
-        text = raw;
-    }
-    try {
-        return JSON.parse(text);
-    } catch {
-        throw new UsageError('--body must be valid JSON (inline, @file, or - for stdin).', {code: 'usage.api'});
-    }
-};
+const read_body_arg = (raw: string | undefined, read_stdin: () => string = read_all_stdin): unknown=>
+    raw === undefined ? undefined : read_json_arg(raw, {flag: '--body', what: 'body', code: 'usage.api', read_stdin});
 
 const resolve_method = (flag: string | undefined, has_body: boolean): string=>{
     if (flag === undefined)
