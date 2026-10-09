@@ -55,6 +55,7 @@ const handle_sequence_start = async(
     const ids: Ids = {sequence_id: id};
     try {
         let contacts: number | null = null;
+        let previous_status: string | null = null;
         if (expected !== undefined)
         {
             // The approval guard: start only if the sequence still holds the number of people that
@@ -65,10 +66,13 @@ const handle_sequence_start = async(
             {
                 throw sequence_archived(id);
             }
+            // Reply's start answers the sequence as it is afterwards, so only this read can say
+            // whether the start was a first start or a resume.
+            previous_status = typeof sequence.status === 'string' ? sequence.status : null;
             if (sequence.status === 'active')
             {
                 // Nothing left to guard: the count is reported where Reply gives it, and not needed.
-                print_result({status: 'already_active', sequence_id: id, contacts: await count_contacts(s, id)}, g);
+                print_result({status: 'already_active', sequence_id: id, previous_status, contacts: await count_contacts(s, id)}, g);
                 return;
             }
             const count = await require_count(s, id);
@@ -87,7 +91,7 @@ const handle_sequence_start = async(
             throw action_refusal(id, a, 'sequence.not_startable', 'Reply will not start this sequence.');
         }
         expect_object(a, 'write');
-        print_result({status: 'started', sequence_id: id, contacts}, g);
+        print_result({status: 'started', sequence_id: id, previous_status, contacts}, g);
     } catch (e) {
         throw with_ids(e, ids);
     }

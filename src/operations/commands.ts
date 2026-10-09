@@ -123,7 +123,8 @@ sequence_command.command('start')
     .description('Start (or resume) the sequence: step 1 goes to everyone in it')
     .addHelpText('after', help([ex('sequence start 123'), ex('sequence start 123 --expect-contacts 40')],
         ['sequence.not_found', 'sequence.archived', 'sequence.not_startable', 'sequence.busy', 'sequence.contact_count_changed'], true,
-        'Result: {"status":"started"|"already_active","sequence_id","contacts"} (already_active and contacts only with --expect-contacts)\n'))
+        'Result: {"status":"started"|"already_active","sequence_id","previous_status","contacts"}. already_active, contacts and\n'
+            + 'previous_status come only with --expect-contacts; previous_status is the sequence\'s state before the start: new, paused or active.\n'))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
         await handle_sequence_start(cmd.args[0], cmd.opts(), ctx, g);
