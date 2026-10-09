@@ -14,13 +14,13 @@ describe('read_contact_input', ()=>{
     });
 
     it('takes --email with name flags, trimmed, empty ones dropped', ()=>{
-        expect(read_contact_input({email: '  Ann@Acme.com ', firstName: 'Ann', lastName: ' ', company: 'Acme'}))
-            .toEqual({kind: 'person', person: {email: 'Ann@Acme.com', first_name: 'Ann', company: 'Acme'}});
+        expect(read_contact_input({email: '  Ann@Example.com ', firstName: 'Ann', lastName: ' ', company: 'Acme'}))
+            .toEqual({kind: 'person', person: {email: 'Ann@Example.com', first_name: 'Ann', company: 'Acme'}});
     });
 
     it('takes --contact JSON from stdin with the same field names', ()=>{
-        const ref = read_contact_input({contact: '-'}, ()=>'{"email":"ann@acme.com","first_name":"Ann","title":"CTO"}');
-        expect(ref).toEqual({kind: 'person', person: {email: 'ann@acme.com', first_name: 'Ann', title: 'CTO'}});
+        const ref = read_contact_input({contact: '-'}, ()=>'{"email":"ann@example.com","first_name":"Ann","title":"CTO"}');
+        expect(ref).toEqual({kind: 'person', person: {email: 'ann@example.com', first_name: 'Ann', title: 'CTO'}});
     });
 
     it('refuses no contact, and more than one form', ()=>{
@@ -34,7 +34,7 @@ describe('read_contact_input', ()=>{
     });
 
     it('refuses a --contact that is not an object, has unknown fields, or non-string values', ()=>{
-        for (const stdin of ['null', '[]', '"ann@acme.com"', '{"email":"a@b.co","phone":"1"}', '{"email":42}', ''])
+        for (const stdin of ['null', '[]', '"ann@example.com"', '{"email":"a@b.co","phone":"1"}', '{"email":42}', ''])
         {
             expect(usage(()=>read_contact_input({contact: '-'}, ()=>stdin)).code).toBe('usage.contact');
         }

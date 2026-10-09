@@ -34,20 +34,30 @@ describe('inbox list', ()=>{
 });
 
 describe('inbox get', ()=>{
-    it('prints Reply\'s thread as it is, inline history included, and the asked-for page of messages', async()=>{
+    it('prints the thread without its inline history, with the latest email subject, and the asked-for page', async()=>{
         answer(
-            json({id: 9, channel: 'email', messages: [{subject: 'Hi', body: 'whole history'}]}),
+            json({id: 9, channel: 'email', isRead: false, messages: [
+                {channel: 'email', subject: 'Hi', body: 'first'},
+                {channel: 'email', subject: 'Re: Hi', body: 'second'},
+                {channel: 'linkedIn', body: 'third'},
+            ]}),
             json({items: [{messageId: 'm1'}], hasMore: true}),
         );
         const {out} = await capture(()=>handle_inbox_get('9', {}, ctx(), {json: true}));
         expect(JSON.parse(out)).toEqual({
-            thread: {id: 9, channel: 'email', messages: [{subject: 'Hi', body: 'whole history'}]},
+            thread: {id: 9, channel: 'email', isRead: false, subject: 'Re: Hi'},
             messages: {items: [{messageId: 'm1'}], has_more: true},
         });
         expect(sent().map(r=>r.url)).toEqual([
             'https://api/v3/inbox/threads/9',
             'https://api/v3/inbox/threads/9/messages?top=20&skip=0',
         ]);
+    });
+
+    it('a thread without email messages has a null subject', async()=>{
+        answer(json({id: 9, channel: 'linkedIn', messages: [{channel: 'linkedIn', body: 'hello'}]}), json({items: [], hasMore: false}));
+        const {out} = await capture(()=>handle_inbox_get('9', {}, ctx(), {json: true}));
+        expect(JSON.parse(out).thread).toEqual({id: 9, channel: 'linkedIn', subject: null});
     });
 
     it('a 404 is inbox.thread_not_found', async()=>{

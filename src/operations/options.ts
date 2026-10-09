@@ -76,24 +76,7 @@ const parse_choice = <T extends string>(raw: string | undefined, label: string, 
     return raw as T;
 };
 
-// Reserved for Reply's idempotency keys. It is validated now, so a caller's key already has the
-// shape the API will take, and otherwise unused until the API supports it.
-const parse_idempotency_key = (raw: string | undefined): string | undefined=>{
-    if (raw === undefined)
-    {
-        return undefined;
-    }
-    if (!/^[\x21-\x7e]{1,255}$/.test(raw))
-    {
-        throw new UsageError('--idempotency-key must be 1 to 255 printable characters without spaces.', {code: 'usage.idempotency_key'});
-    }
-    return raw;
-};
-
-const IDEMPOTENCY_KEY_HELP = 'Reserved: will make a repeated call exact once the Reply API supports idempotency keys; currently has no effect';
-
 export {
-    read_op_globals, parse_id, parse_int_in, parse_iso, parse_choice, parse_idempotency_key,
-    LARGEST_REPLY_ID, IDEMPOTENCY_KEY_HELP,
+    read_op_globals, parse_id, parse_int_in, parse_iso, parse_choice, LARGEST_REPLY_ID,
 };
 export type {Op_globals};

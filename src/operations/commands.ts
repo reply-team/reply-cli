@@ -1,7 +1,7 @@
 import {Command} from 'commander';
 import {PROGRAM_NAME} from '../config';
 import {build_context} from '../context';
-import {read_op_globals, IDEMPOTENCY_KEY_HELP} from './options';
+import {read_op_globals} from './options';
 import {add_contact_options, CONTACT_HELP} from './contact-input';
 import {handle_sequence_get, handle_sequence_contacts, handle_sequence_stats} from './sequence-read';
 import {handle_sequence_add_contact, handle_sequence_remove_contact} from './sequence-membership';
@@ -11,7 +11,9 @@ import {handle_contact_list_add_contact} from './contact-list';
 import {handle_contact_opt_out} from './contact';
 
 const P = PROGRAM_NAME;
-const COMMON_ERRORS = ['access.denied', 'access.feature_unavailable', 'rate_limited', 'reply.unavailable', 'reply.refused'];
+const COMMON_ERRORS = [
+    'access.denied', 'access.feature_unavailable', 'rate_limited', 'reply.unavailable', 'reply.refused', 'reply.invalid_request',
+];
 
 const errors_help = (codes: string[], write: boolean): string=>
     '\nErrors (with --json, one line on stderr: {"error":{"code":…,"ids":…}}):\n'
@@ -20,7 +22,15 @@ const errors_help = (codes: string[], write: boolean): string=>
     + ' · 3 outcome unknown (a write may have happened; re-running is safe)';
 
 const help = (examples: string[], codes: string[], write: boolean, extra = ''): string=>
-    `\nExamples:\n${examples.map(e=>`  ${P} ${e}`).join('\n')}\n${extra}${errors_help(codes, write)}`;
+    `\nExamples:\n${examples.map(e=>`  ${e}`).join('\n')}\n${extra ? `\n${extra}` : ''}${errors_help(codes, write)}`;
+
+const ex = (command: string): string=>`${P} ${command}`;
+
+// The contact on stdin: the form that keeps personal data off the argument list, so it leads.
+const piped = (command: string, contact = '{"email":"ann@example.com","first_name":"Ann"}'): string=>
+    `echo '${contact}' | ${P} ${command} --contact -`;
+
+const ALWAYS_IMPORTED = 'A contact given by email is always imported, so Reply needs a first name, even for one it already holds.\n';
 
 const run = (fn: (cmd: Command) => Promise<void>)=>async function(this: Command): Promise<void>
 {
@@ -37,7 +47,7 @@ const sequence_command = new Command('sequence').description('Read a sequence, p
 sequence_command.command('get')
     .argument('<sequence-id>', 'Sequence id')
     .description('The sequence as Reply holds it: settings, steps, state')
-    .addHelpText('after', help(['sequence get 123'], ['sequence.not_found'], false))
+    .addHelpText('after', help([ex('sequence get 123')], ['sequence.not_found'], false))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
         await handle_sequence_get(cmd.args[0], ctx, g);
@@ -48,7 +58,7 @@ sequence_command.command('contacts')
     .option('--limit <n>', 'Contacts per page, 1-1000 (default 100)')
     .option('--offset <n>', 'Contacts to skip (default 0)')
     .description('One page of the contacts in the sequence, newest first, plus the total')
-    .addHelpText('after', help(['sequence contacts 123 --limit 50'], ['sequence.not_found'], false))
+    .addHelpText('after', help([ex('sequence contacts 123 --limit 50')], ['sequence.not_found'], false))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
         await handle_sequence_contacts(cmd.args[0], cmd.opts(), ctx, g);
@@ -60,7 +70,7 @@ sequence_command.command('stats')
     .option('--from <iso>', 'Window start (with --to)')
     .option('--to <iso>', 'Window end (with --from)')
     .description('Reply\'s email and LinkedIn counts for the sequence over one window')
-    .addHelpText('after', help(['sequence stats 123 --preset last-month', 'sequence stats 123 --from 2026-09-01 --to 2026-10-01'],
+    .addHelpText('after', help([ex('sequence stats 123 --preset last-month'), ex('sequence stats 123 --from 2026-09-01 --to 2026-10-01')],
         ['sequence.not_found'], false))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
@@ -71,15 +81,15 @@ add_contact_options(sequence_command.command('add-contact')
     .argument('<sequence-id>', 'Sequence id'))
     .option('--start-step <n>', 'Start at this step of the sequence (1 = first; the steps must form one chain)')
     .option('--ignore-step-delay', 'Skip the delay of the step the contact starts at (Reply still sends within the sequence\'s schedule)')
-    .option('--idempotency-key <key>', IDEMPOTENCY_KEY_HELP)
     .description('Put a contact into the sequence, creating the contact if Reply has nobody under the email')
     .addHelpText('after', help(
-        ['sequence add-contact 123 --email ann@acme.com --first-name Ann', 'sequence add-contact 123 --contact-id 456 --start-step 2',
-            'sequence add-contact 123 --contact -   # JSON on stdin'],
+        [piped('sequence add-contact 123'), ex('sequence add-contact 123 --email ann@example.com --first-name Ann'),
+            ex('sequence add-contact 123 --contact-id 456 --start-step 2')],
         ['sequence.not_found', 'sequence.archived', 'sequence.has_no_steps', 'sequence.step_not_found', 'contact.not_found',
             'contact.opted_out', 'contact.invalid_email', 'account.contact_limit_reached'],
         true,
-        'Result: {"status":"added"|"already_in_sequence","sequence_id","contact_id","contact_created","sequence_active"}\n' + CONTACT_HELP + '\n'))
+        'Result: {"status":"added"|"already_in_sequence","sequence_id","contact_id","contact_created","sequence_active"}\n'
+            + CONTACT_HELP + ALWAYS_IMPORTED))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
         await handle_sequence_add_contact(cmd.args[0], cmd.opts(), ctx, g);
@@ -87,11 +97,11 @@ add_contact_options(sequence_command.command('add-contact')
 
 add_contact_options(sequence_command.command('remove-contact')
     .argument('<sequence-id>', 'Sequence id'))
-    .option('--idempotency-key <key>', IDEMPOTENCY_KEY_HELP)
     .description('Take a contact out of the sequence; their history stays. Never creates a contact')
-    .addHelpText('after', help(['sequence remove-contact 123 --contact-id 456', 'sequence remove-contact 123 --email ann@acme.com'],
+    .addHelpText('after', help([piped('sequence remove-contact 123', '{"email":"ann@example.com"}'), ex('sequence remove-contact 123 --contact-id 456')],
         ['sequence.not_found', 'contact.not_unique', 'contact.lookup_incomplete'], true,
-        'Result: {"status":"removed"|"not_in_sequence","sequence_id","contact_id"}\n' + CONTACT_HELP + '\n'))
+        'Result: {"status":"removed"|"not_in_sequence","sequence_id","contact_id"}\n'
+            + CONTACT_HELP + 'A contact given by email is only looked up, never imported, so no first name is needed.\n'))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
         await handle_sequence_remove_contact(cmd.args[0], cmd.opts(), ctx, g);
@@ -99,21 +109,19 @@ add_contact_options(sequence_command.command('remove-contact')
 
 sequence_command.command('pause')
     .argument('<sequence-id>', 'Sequence id')
-    .option('--idempotency-key <key>', IDEMPOTENCY_KEY_HELP)
-    .description('Pause the sequence (a paused one stays paused)')
-    .addHelpText('after', help(['sequence pause 123'], ['sequence.not_found', 'sequence.archived', 'sequence.not_pausable', 'sequence.busy'], true,
+    .description('Pause the sequence (a paused one stays paused; one never started is refused)')
+    .addHelpText('after', help([ex('sequence pause 123')], ['sequence.not_found', 'sequence.archived', 'sequence.not_pausable', 'sequence.busy'], true,
         'Result: {"status":"paused","sequence_id"}\n'))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
-        await handle_sequence_pause(cmd.args[0], cmd.opts(), ctx, g);
+        await handle_sequence_pause(cmd.args[0], ctx, g);
     }));
 
 sequence_command.command('start')
     .argument('<sequence-id>', 'Sequence id')
     .option('--expect-contacts <n>', 'Start only if the sequence holds exactly this many contacts')
-    .option('--idempotency-key <key>', IDEMPOTENCY_KEY_HELP)
     .description('Start (or resume) the sequence: step 1 goes to everyone in it')
-    .addHelpText('after', help(['sequence start 123', 'sequence start 123 --expect-contacts 40'],
+    .addHelpText('after', help([ex('sequence start 123'), ex('sequence start 123 --expect-contacts 40')],
         ['sequence.not_found', 'sequence.archived', 'sequence.not_startable', 'sequence.busy', 'sequence.contact_count_changed'], true,
         'Result: {"status":"started"|"already_active","sequence_id","contacts"} (already_active and contacts only with --expect-contacts)\n'))
     .action(run(async(cmd)=>{
@@ -126,11 +134,10 @@ const contact_list_command = new Command('contact-list').description('Put contac
 add_contact_options(contact_list_command.command('add-contact')
     .argument('<list-id>', 'Contact list id'))
     .option('--refuse-opted-out', 'Refuse a contact Reply holds as opted out (a list may otherwise hold them)')
-    .option('--idempotency-key <key>', IDEMPOTENCY_KEY_HELP)
     .description('Put a contact on the list, creating the contact if Reply has nobody under the email')
-    .addHelpText('after', help(['contact-list add-contact 77 --email ann@acme.com --first-name Ann', 'contact-list add-contact 77 --contact-id 456 --refuse-opted-out'],
+    .addHelpText('after', help([piped('contact-list add-contact 77'), ex('contact-list add-contact 77 --contact-id 456 --refuse-opted-out')],
         ['contact-list.not_found', 'contact.not_found', 'contact.opted_out', 'contact.invalid_email', 'account.contact_limit_reached'], true,
-        'Result: {"status":"added","list_id","contact_id","contact_created"}\n' + CONTACT_HELP + '\n'))
+        'Result: {"status":"added","list_id","contact_id","contact_created"}\n' + CONTACT_HELP + ALWAYS_IMPORTED))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
         await handle_contact_list_add_contact(cmd.args[0], cmd.opts(), ctx, g);
@@ -139,11 +146,11 @@ add_contact_options(contact_list_command.command('add-contact')
 const contact_command = new Command('contact').description('Act on a contact');
 
 add_contact_options(contact_command.command('opt-out'))
-    .option('--idempotency-key <key>', IDEMPOTENCY_KEY_HELP)
     .description('Mark the contact as opted out at Reply, creating them only if Reply has nobody under the email')
-    .addHelpText('after', help(['contact opt-out --email ann@acme.com', 'contact opt-out --contact-id 456'],
+    .addHelpText('after', help([piped('contact opt-out'), ex('contact opt-out --contact-id 456')],
         ['contact.not_found', 'contact.not_unique', 'contact.lookup_incomplete', 'contact.invalid_email', 'account.contact_limit_reached'], true,
-        'Result: {"status":"opted_out","contact_id","contact_created"}\n' + CONTACT_HELP + '\n'))
+        'Result: {"status":"opted_out","contact_id","contact_created"}\n' + CONTACT_HELP
+            + 'A contact given by email is imported only when Reply holds nobody under the address; only then does Reply need a first name.\n'))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
         await handle_contact_opt_out(cmd.opts(), ctx, g);
@@ -159,7 +166,7 @@ inbox_command.command('list')
     .option('--limit <n>', 'Threads per page, 1-100 (default 20)')
     .option('--offset <n>', 'Threads to skip (default 0)')
     .description('One page of inbox threads, by contact or by sequence')
-    .addHelpText('after', help(['inbox list --contact-id 456', 'inbox list --sequence-id 123 --source unread --since 2026-10-01T00:00:00Z'], [], false))
+    .addHelpText('after', help([ex('inbox list --contact-id 456'), ex('inbox list --sequence-id 123 --source unread --since 2026-10-01T00:00:00Z')], [], false))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
         await handle_inbox_list(cmd.opts(), ctx, g);
@@ -170,7 +177,9 @@ inbox_command.command('get')
     .option('--limit <n>', 'Messages per page, 1-20 (default 20)')
     .option('--offset <n>', 'Messages to skip (default 0)')
     .description('One inbox thread and one page of its messages, oldest first')
-    .addHelpText('after', help(['inbox get 9876', 'inbox get 9876 --offset 20'], ['inbox.thread_not_found'], false))
+    .addHelpText('after', help([ex('inbox get 9876'), ex('inbox get 9876 --offset 20')], ['inbox.thread_not_found'], false,
+        'Result: {"thread","messages":{"items","has_more"}}. The thread is Reply\'s without its inline history, which has no limit;\n'
+        + 'its "subject" is the latest email message\'s (null when there is none).\n'))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
         await handle_inbox_get(cmd.args[0], cmd.opts(), ctx, g);

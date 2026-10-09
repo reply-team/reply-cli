@@ -1,12 +1,12 @@
 import {Operation_error, type Ids} from '../utils/errors';
 import {call_reply, expect_object, item_failure, refusal, open_session, type Op_session} from './call';
-import {parse_idempotency_key, type Op_globals} from './options';
+import type {Op_globals} from './options';
 import {read_contact_input, type Contact_flags} from './contact-input';
 import {ensure_contact, find_contact} from './contacts';
 import {print_result, with_ids} from './result';
 import type {Cli_context} from '../context';
 
-type Opt_out_opts = Contact_flags & {idempotencyKey?: string};
+type Opt_out_opts = Contact_flags;
 
 // Sets the flag; there is no read before it, because Reply answers a contact who is already opted
 // out with the same success.
@@ -31,7 +31,6 @@ const set_opted_out = async(s: Op_session, contact_id: number): Promise<void>=>{
 
 const handle_contact_opt_out = async(opts: Opt_out_opts, ctx: Cli_context, g: Op_globals, read_stdin?: () => string): Promise<void>=>{
     const contact = read_contact_input(opts, read_stdin);
-    parse_idempotency_key(opts.idempotencyKey);
     const s = await open_session(ctx, g);
     const ids: Ids = {};
     try {

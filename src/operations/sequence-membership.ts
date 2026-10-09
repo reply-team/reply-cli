@@ -4,14 +4,14 @@ import {
     open_session, type Answer, type Item_failure, type Op_session,
 } from './call';
 import type {Call_kind} from '../utils/client';
-import {parse_id, parse_int_in, parse_idempotency_key, type Op_globals} from './options';
+import {parse_id, parse_int_in, type Op_globals} from './options';
 import {read_contact_input, type Contact_flags} from './contact-input';
 import {ensure_contact, find_contact, read_opted_out} from './contacts';
 import {read_sequence, sequence_not_found, sequence_archived} from './sequence-read';
 import {print_result, with_ids} from './result';
 import type {Cli_context} from '../context';
 
-type Add_contact_opts = Contact_flags & {startStep?: string; ignoreStepDelay?: boolean; idempotencyKey?: string};
+type Add_contact_opts = Contact_flags & {startStep?: string; ignoreStepDelay?: boolean};
 
 const step_not_found = (position: number, why: string): Operation_error=>
     new Operation_error('sequence.step_not_found', `There is no step ${position} to start at: ${why}.`, {status: 200});
@@ -63,6 +63,25 @@ const resolve_step_position = (sequence: Record<string, unknown>, position: numb
     throw step_not_found(position, 'its steps lead back into one another');
 };
 
+const NOT_TAKING_PART = ['sequencecontact.notinsequence', 'contact.notfound'];
+const SEQUENCE_MISSING = ['sequence.notfound', 'sequencecontact.sequencenotfound'];
+
+// A 404 on a call that names both the sequence and the contact. Only the codes that mean the
+// person takes no part are read that way: a missing sequence, or a code this version doesn't know,
+// ends the command rather than being taken for "not in it".
+const require_not_taking_part = (sequence_id: number, a: Answer, kind: Call_kind): void=>{
+    const code = reply_code_of(a)?.toLowerCase();
+    if (code !== undefined && NOT_TAKING_PART.includes(code))
+    {
+        return;
+    }
+    if (code !== undefined && SEQUENCE_MISSING.includes(code))
+    {
+        throw sequence_not_found(sequence_id, a);
+    }
+    throw refusal(a, kind);
+};
+
 // INTERIM (API gap): POST /v3/sequences/{id}/contact-links/bulk never says that a contact is
 // already in the sequence. For one who is, it acts as a forward-only move: a start step ahead of
 // theirs answers "added" and moves them there, skipping the steps between; the same or an earlier
@@ -74,6 +93,7 @@ const participation_before_add = async(s: Op_session, sequence_id: number, conta
     const a = await call_reply(s, 'GET', `/v3/sequences/${sequence_id}/contacts/${contact_id}`, 'read');
     if (a.status === 404)
     {
+        require_not_taking_part(sequence_id, a, 'read');
         return false;
     }
     if (a.status !== 200)
@@ -152,7 +172,6 @@ const handle_sequence_add_contact = async(
     const sequence_id = parse_id(id_arg, 'Sequence id');
     const contact = read_contact_input(opts, read_stdin);
     const start_step = opts.startStep === undefined ? undefined : parse_int_in(opts.startStep, '--start-step', 1, 10000, 1);
-    parse_idempotency_key(opts.idempotencyKey);
     const s = await open_session(ctx, g);
     const ids: Ids = {sequence_id};
     try {
@@ -180,26 +199,7 @@ const handle_sequence_add_contact = async(
     }
 };
 
-type Remove_contact_opts = Contact_flags & {idempotencyKey?: string};
-
-const NOT_TAKING_PART = ['sequencecontact.notinsequence', 'contact.notfound'];
-const SEQUENCE_MISSING = ['sequence.notfound', 'sequencecontact.sequencenotfound'];
-
-// A 404 on a call that names both the sequence and the contact. Only the codes that mean the
-// person takes no part are read that way: a missing sequence, or a code this version doesn't know,
-// ends the command rather than being taken for a completed stop.
-const require_not_taking_part = (sequence_id: number, a: Answer, kind: Call_kind): void=>{
-    const code = reply_code_of(a)?.toLowerCase();
-    if (code !== undefined && NOT_TAKING_PART.includes(code))
-    {
-        return;
-    }
-    if (code !== undefined && SEQUENCE_MISSING.includes(code))
-    {
-        throw sequence_not_found(sequence_id, a);
-    }
-    throw refusal(a, kind);
-};
+type Remove_contact_opts = Contact_flags;
 
 // INTERIM (API gap): GET /v3/sequences/{id}/contacts/{contact_id} and the DELETE answer one and
 // the same 404, sequenceContact.notInSequence, whether the sequence doesn't exist, the contact
@@ -256,7 +256,6 @@ const handle_sequence_remove_contact = async(
 ): Promise<void>=>{
     const sequence_id = parse_id(id_arg, 'Sequence id');
     const contact = read_contact_input(opts, read_stdin);
-    parse_idempotency_key(opts.idempotencyKey);
     const s = await open_session(ctx, g);
     const ids: Ids = {sequence_id};
     try {

@@ -7,14 +7,14 @@ beforeEach(()=>{ mock_fetch.mockReset(); });
 describe('sequence pause', ()=>{
     it('pauses with one call', async()=>{
         answer(json({id: 123, status: 'paused'}));
-        const {out} = await capture(()=>handle_sequence_pause('123', {}, ctx(), {json: true}));
+        const {out} = await capture(()=>handle_sequence_pause('123', ctx(), {json: true}));
         expect(JSON.parse(out)).toEqual({status: 'paused', sequence_id: 123});
         expect(sent()).toEqual([{method: 'POST', url: 'https://api/v3/sequences/123/pause', body: undefined}]);
     });
 
     it('a 200 whose body is not a sequence is outcome.unknown, never a false "paused"', async()=>{
         answer(json('<html>gateway</html>', 200));
-        await expect(handle_sequence_pause('123', {}, ctx(), {})).rejects.toMatchObject({code: 'outcome.unknown', exit_code: 3});
+        await expect(handle_sequence_pause('123', ctx(), {})).rejects.toMatchObject({code: 'outcome.unknown', exit_code: 3});
     });
 
     it('maps Reply\'s refusals', async()=>{
@@ -29,7 +29,7 @@ describe('sequence pause', ()=>{
         {
             mock_fetch.mockReset();
             answer(res);
-            await expect(handle_sequence_pause('123', {}, ctx(), {})).rejects.toMatchObject({code, ids: {sequence_id: 123}});
+            await expect(handle_sequence_pause('123', ctx(), {})).rejects.toMatchObject({code, ids: {sequence_id: 123}});
         }
     });
 });

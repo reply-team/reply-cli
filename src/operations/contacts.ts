@@ -1,6 +1,6 @@
 import {Operation_error} from '../utils/errors';
 import {
-    call_reply, expect_object, read_page, is_object, is_reply_id, reply_code_of, detail_of, refusal, unreadable,
+    call_reply, expect_object, read_page, is_object, is_reply_id, reply_code_of, detail_of, invalid_fields, refusal, unreadable,
     type Answer, type Op_session,
 } from './call';
 import type {Contact_ref, Person} from './contact-input';
@@ -31,11 +31,8 @@ const import_item = (p: Person): Record<string, string>=>{
     return item;
 };
 
-// v3's validation problem lists what it refused in `errors[]`, each with a JSON pointer.
 const names_email = (a: Answer): boolean=>
-    is_object(a.data) && Array.isArray(a.data.errors) && a.data.errors.some(entry=>
-        is_object(entry) && typeof entry.pointer === 'string'
-        && entry.pointer.split('/').pop()?.toLowerCase() === 'email');
+    invalid_fields(a)?.some(field=>field.toLowerCase() === 'email') === true;
 
 // v3's import matches an existing contact by email or creates one, and says which, in one call; on
 // a match it fills only the contact's empty fields. Reply requires a first name here, even for an
@@ -76,7 +73,7 @@ const import_contact = async(s: Op_session, person: Person): Promise<Ensured>=>{
             detail: typeof item.error === 'string' ? item.error : undefined,
         });
     }
-    return {id: item.id, created: item.status === 'created' || item.status === 'restored'};
+    return {id: item.id, created: item.status === 'created'};
 };
 
 const ensure_contact = async(s: Op_session, ref: Contact_ref): Promise<Ensured>=>
@@ -84,7 +81,7 @@ const ensure_contact = async(s: Op_session, ref: Contact_ref): Promise<Ensured>=
 
 // INTERIM (API gap): POST /v3/contacts/filter has no exact-email filter. Its `rules` take a
 // property/condition vocabulary that v3 publishes nowhere, and its `searchTerm` matches by
-// containment, so "ann@acme.com" also finds "joann@acme.com".
+// containment, so "ann@example.com" also finds "joann@example.com".
 // Needed: an exact email lookup, or a documented `rules` vocabulary.
 // Workaround: page through the searchTerm matches (5 pages of 100) and compare addresses exactly,
 // ignoring case. Refuse rather than guess when two match or the end isn't reached.

@@ -1,6 +1,6 @@
 import {Operation_error, type Ids} from '../utils/errors';
 import {call_reply, expect_object, refusal, reply_code_of, detail_of, open_session, type Answer} from './call';
-import {parse_id, parse_int_in, parse_idempotency_key, type Op_globals} from './options';
+import {parse_id, parse_int_in, type Op_globals} from './options';
 import {read_sequence, count_contacts, require_count, sequence_not_found, sequence_archived} from './sequence-read';
 import {print_result, with_ids} from './result';
 import type {Cli_context} from '../context';
@@ -29,9 +29,8 @@ const action_refusal = (id: number, a: Answer, refused_code: string, refused_tit
     return refusal(a, 'write');
 };
 
-const handle_sequence_pause = async(id_arg: string, opts: {idempotencyKey?: string}, ctx: Cli_context, g: Op_globals): Promise<void>=>{
+const handle_sequence_pause = async(id_arg: string, ctx: Cli_context, g: Op_globals): Promise<void>=>{
     const id = parse_id(id_arg, 'Sequence id');
-    parse_idempotency_key(opts.idempotencyKey);
     const s = await open_session(ctx, g);
     try {
         // No read first: Reply answers an already-paused sequence with a 200 and changes nothing.
@@ -48,11 +47,10 @@ const handle_sequence_pause = async(id_arg: string, opts: {idempotencyKey?: stri
 };
 
 const handle_sequence_start = async(
-    id_arg: string, opts: {expectContacts?: string; idempotencyKey?: string}, ctx: Cli_context, g: Op_globals,
+    id_arg: string, opts: {expectContacts?: string}, ctx: Cli_context, g: Op_globals,
 ): Promise<void>=>{
     const id = parse_id(id_arg, 'Sequence id');
     const expected = opts.expectContacts === undefined ? undefined : parse_int_in(opts.expectContacts, '--expect-contacts', 0, 10000000, 0);
-    parse_idempotency_key(opts.idempotencyKey);
     const s = await open_session(ctx, g);
     const ids: Ids = {sequence_id: id};
     try {

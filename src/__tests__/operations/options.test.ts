@@ -1,5 +1,5 @@
 import {describe, it, expect} from 'vitest';
-import {parse_id, parse_int_in, parse_iso, parse_choice, parse_idempotency_key} from '../../operations/options';
+import {parse_id, parse_int_in, parse_iso, parse_choice} from '../../operations/options';
 import {UsageError} from '../../utils/errors';
 
 const usage_code = (fn: () => unknown): string | undefined=>{
@@ -18,8 +18,8 @@ describe('operations/options', ()=>{
     });
 
     it('parse_id never echoes something that looks like an email address', ()=>{
-        try { parse_id('ann@acme.com', '--contact-id'); } catch (e) {
-            expect(JSON.stringify((e as UsageError).to_json())).not.toContain('ann@acme.com');
+        try { parse_id('ann@example.com', '--contact-id'); } catch (e) {
+            expect(JSON.stringify((e as UsageError).to_json())).not.toContain('ann@example.com');
             return;
         }
         throw new Error('expected a UsageError');
@@ -55,14 +55,5 @@ describe('operations/options', ()=>{
         expect(parse_choice('sent', '--source', ['inbox', 'sent'] as const)).toBe('sent');
         expect(parse_choice(undefined, '--source', ['inbox'] as const)).toBeUndefined();
         expect(usage_code(()=>parse_choice('all', '--source', ['inbox', 'sent'] as const))).toBe('usage.choice');
-    });
-
-    it('parse_idempotency_key takes 1-255 printable characters without spaces', ()=>{
-        expect(parse_idempotency_key('wi_01HX:enroll')).toBe('wi_01HX:enroll');
-        expect(parse_idempotency_key(undefined)).toBeUndefined();
-        for (const bad of ['', 'has space', 'x'.repeat(256), 'tab\there'])
-        {
-            expect(usage_code(()=>parse_idempotency_key(bad))).toBe('usage.idempotency_key');
-        }
     });
 });

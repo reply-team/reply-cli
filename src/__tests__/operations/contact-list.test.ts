@@ -9,7 +9,7 @@ beforeEach(()=>{ mock_fetch.mockReset(); });
 describe('contact-list add-contact', ()=>{
     it('imports and adds; someone already on the list is a plain success', async()=>{
         answer(json({items: [{id: 456, status: 'created'}]}), json({}));
-        const {out} = await run({email: 'ann@acme.com'});
+        const {out} = await run({email: 'ann@example.com'});
         expect(JSON.parse(out)).toEqual({status: 'added', list_id: 77, contact_id: 456, contact_created: true});
         expect(sent()[1]).toEqual({method: 'POST', url: 'https://api/v3/contact-lists/77/add-contacts', body: {contactIds: [456]}});
     });

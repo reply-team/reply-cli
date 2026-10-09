@@ -3,7 +3,7 @@ import {mock_fetch, json, ctx, sent, answer} from './helpers';
 import {open_session} from '../../operations/call';
 import {ensure_contact, find_contact, read_opted_out} from '../../operations/contacts';
 
-const ann = {kind: 'person' as const, person: {email: 'ann@acme.com', first_name: 'Ann'}};
+const ann = {kind: 'person' as const, person: {email: 'ann@example.com', first_name: 'Ann'}};
 
 beforeEach(()=>{ mock_fetch.mockReset(); });
 
@@ -19,7 +19,7 @@ describe('ensure_contact', ()=>{
         const s = await open_session(ctx(), {});
         expect(await ensure_contact(s, ann)).toEqual({id: 456, created: true});
         expect(sent()).toEqual([{method: 'POST', url: 'https://api/v3/contacts/import',
-            body: {items: [{email: 'ann@acme.com', firstName: 'Ann'}]}}]);
+            body: {items: [{email: 'ann@example.com', firstName: 'Ann'}]}}]);
     });
 
     it('a matched contact is not created', async()=>{
@@ -68,38 +68,38 @@ describe('ensure_contact', ()=>{
 describe('find_contact', ()=>{
     it('finds the one exact match among containment matches, across pages, whatever the case', async()=>{
         answer(
-            json({items: [{id: 1, email: 'joann@acme.com'}], hasMore: true}),
-            json({items: [{id: 456, email: 'ANN@ACME.COM'}], hasMore: false}),
+            json({items: [{id: 1, email: 'joann@example.com'}], hasMore: true}),
+            json({items: [{id: 456, email: 'ANN@EXAMPLE.COM'}], hasMore: false}),
         );
         const s = await open_session(ctx(), {});
-        expect(await find_contact(s, {kind: 'person', person: {email: 'ann@acme.com'}})).toBe(456);
+        expect(await find_contact(s, {kind: 'person', person: {email: 'ann@example.com'}})).toBe(456);
         expect(sent().map(r=>r.url)).toEqual([
             'https://api/v3/contacts/filter?top=100&skip=0',
             'https://api/v3/contacts/filter?top=100&skip=100',
         ]);
-        expect(sent()[0].body).toEqual({searchTerm: 'ann@acme.com'});
+        expect(sent()[0].body).toEqual({searchTerm: 'ann@example.com'});
     });
 
     it('answers null when Reply holds nobody under the address', async()=>{
         answer(json({items: [], hasMore: false}));
         const s = await open_session(ctx(), {});
-        expect(await find_contact(s, {kind: 'person', person: {email: 'ann@acme.com'}})).toBeNull();
+        expect(await find_contact(s, {kind: 'person', person: {email: 'ann@example.com'}})).toBeNull();
     });
 
     it('refuses two exact matches as contact.not_unique', async()=>{
-        answer(json({items: [{id: 1, email: 'ann@acme.com'}, {id: 2, email: 'Ann@acme.com'}], hasMore: false}));
+        answer(json({items: [{id: 1, email: 'ann@example.com'}, {id: 2, email: 'Ann@example.com'}], hasMore: false}));
         const s = await open_session(ctx(), {});
-        await expect(find_contact(s, {kind: 'person', person: {email: 'ann@acme.com'}}))
+        await expect(find_contact(s, {kind: 'person', person: {email: 'ann@example.com'}}))
             .rejects.toMatchObject({code: 'contact.not_unique'});
     });
 
     it('refuses an unfinished lookup as contact.lookup_incomplete', async()=>{
         for (let i = 0; i < 5; i++)
         {
-            answer(json({items: [{id: i + 10, email: `x${i}ann@acme.com`}], hasMore: true}));
+            answer(json({items: [{id: i + 10, email: `x${i}ann@example.com`}], hasMore: true}));
         }
         const s = await open_session(ctx(), {});
-        await expect(find_contact(s, {kind: 'person', person: {email: 'ann@acme.com'}}))
+        await expect(find_contact(s, {kind: 'person', person: {email: 'ann@example.com'}}))
             .rejects.toMatchObject({code: 'contact.lookup_incomplete'});
         expect(mock_fetch).toHaveBeenCalledTimes(5);
     });

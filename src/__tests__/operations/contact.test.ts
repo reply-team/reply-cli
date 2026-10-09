@@ -8,8 +8,8 @@ beforeEach(()=>{ mock_fetch.mockReset(); });
 
 describe('contact opt-out', ()=>{
     it('finds the contact by email and sets the flag, with no read before', async()=>{
-        answer(json({items: [{id: 456, email: 'ann@acme.com'}], hasMore: false}), json({}));
-        const {out} = await run({email: 'ann@acme.com'});
+        answer(json({items: [{id: 456, email: 'ann@example.com'}], hasMore: false}), json({}));
+        const {out} = await run({email: 'ann@example.com'});
         expect(JSON.parse(out)).toEqual({status: 'opted_out', contact_id: 456, contact_created: false});
         expect(sent()[1]).toEqual({method: 'POST', url: 'https://api/v3/contacts/set-opted-out',
             body: {contactIds: [456], isOptedOut: true}});
@@ -17,7 +17,7 @@ describe('contact opt-out', ()=>{
 
     it('creates the contact only when Reply holds nobody under the address', async()=>{
         answer(json({items: [], hasMore: false}), json({items: [{id: 457, status: 'created'}]}), json({}));
-        const {out} = await run({email: 'new@acme.com'});
+        const {out} = await run({email: 'new@example.com'});
         expect(JSON.parse(out)).toEqual({status: 'opted_out', contact_id: 457, contact_created: true});
     });
 

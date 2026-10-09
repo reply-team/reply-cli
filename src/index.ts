@@ -86,7 +86,7 @@ Team & acting user (headers):
     ${PROGRAM_NAME} team clear             # remove the pin
 
 Work commands (JSON out; exit 0 done, 1 failed, 2 usage, 3 outcome unknown):
-    ${PROGRAM_NAME} sequence add-contact 123 --email ann@acme.com --first-name Ann
+    echo '{"email":"ann@example.com","first_name":"Ann"}' | ${PROGRAM_NAME} sequence add-contact 123 --contact -
     ${PROGRAM_NAME} sequence start 123 --expect-contacts 40
     ${PROGRAM_NAME} contact opt-out --contact-id 456
     ${PROGRAM_NAME} inbox list --contact-id 456

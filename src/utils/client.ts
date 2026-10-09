@@ -21,7 +21,15 @@ const MAX_WAIT_SECONDS = 3;
 const NEVER_SENT_CODES = [
     'ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'EHOSTUNREACH', 'ENETUNREACH', 'UND_ERR_CONNECT_TIMEOUT', 'ERR_INVALID_URL',
 ];
-const TLS_FAILURE = /^ERR_(TLS|SSL)_|CERT|SELF_SIGNED|UNABLE_TO_/;
+// Only handshake and certificate failures: other TLS errors, a bad record MAC say, can come after
+// the request was written, so they count as possibly sent.
+const TLS_HANDSHAKE_CODES = [
+    'ERR_TLS_CERT_ALTNAME_INVALID', 'ERR_TLS_HANDSHAKE_TIMEOUT', 'ERR_SSL_WRONG_VERSION_NUMBER',
+    'CERT_HAS_EXPIRED', 'CERT_NOT_YET_VALID', 'CERT_REVOKED', 'CERT_UNTRUSTED', 'CERT_REJECTED',
+    'CERT_SIGNATURE_FAILURE', 'CERT_CHAIN_TOO_LONG', 'DEPTH_ZERO_SELF_SIGNED_CERT', 'SELF_SIGNED_CERT_IN_CHAIN',
+    'UNABLE_TO_GET_ISSUER_CERT', 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+    'UNABLE_TO_DECRYPT_CERT_SIGNATURE', 'UNABLE_TO_DECODE_ISSUER_PUBLIC_KEY', 'INVALID_CA', 'HOSTNAME_MISMATCH',
+];
 
 type Request_opts = {
     headers?: Record<string, string>;   // extra request headers (e.g. X-TEAM-ID)
@@ -77,7 +85,7 @@ const cause_of = (e: unknown): {code?: unknown; message?: unknown} | undefined=>
 
 const never_sent = (e: unknown): boolean=>{
     const code = cause_of(e)?.code;
-    return typeof code === 'string' && (NEVER_SENT_CODES.includes(code) || TLS_FAILURE.test(code));
+    return typeof code === 'string' && (NEVER_SENT_CODES.includes(code) || TLS_HANDSHAKE_CODES.includes(code));
 };
 
 // "fetch failed" alone says nothing; the system error under it is what someone can act on.

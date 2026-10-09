@@ -98,6 +98,18 @@ const handle_sequence_contacts = async(
     print_result({items: page.items, has_more: page.has_more, total: await count_contacts(s, id)}, g);
 };
 
+// Reply answers a span that doesn't end after it starts with a 500, which would read as Reply
+// being down and be asked again, so it is refused here.
+const stats_span = (raw_from: string, raw_to: string): {from: string; to: string}=>{
+    const from = parse_iso(raw_from, '--from');
+    const to = parse_iso(raw_to, '--to');
+    if (Date.parse(from) >= Date.parse(to))
+    {
+        throw new UsageError('--to must be later than --from.', {code: 'usage.stats'});
+    }
+    return {from, to};
+};
+
 const handle_sequence_stats = async(
     id_arg: string, opts: {preset?: string; from?: string; to?: string}, ctx: Cli_context, g: Op_globals,
 ): Promise<void>=>{
@@ -112,7 +124,7 @@ const handle_sequence_stats = async(
     }
     const filters = preset !== undefined
         ? {dateRangePreset: PRESETS[preset]}
-        : {from: parse_iso(opts.from as string, '--from'), to: parse_iso(opts.to as string, '--to')};
+        : stats_span(opts.from as string, opts.to as string);
     const s = await open_session(ctx, g);
     // A POST that changes nothing: the window travels in the body.
     const a = await call_reply(s, 'POST', `/v3/sequences/${id}/stats`, 'read', {filters});

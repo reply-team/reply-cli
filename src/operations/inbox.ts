@@ -1,5 +1,5 @@
 import {Operation_error, UsageError} from '../utils/errors';
-import {call_reply, expect_object, read_page, refusal, reply_code_of, open_session, type Answer} from './call';
+import {call_reply, expect_object, read_page, refusal, reply_code_of, is_object, open_session, type Answer} from './call';
 import {parse_id, parse_int_in, parse_iso, parse_choice, type Op_globals} from './options';
 import {print_result} from './result';
 import type {Cli_context} from '../context';
@@ -47,6 +47,16 @@ const handle_inbox_list = async(opts: Inbox_list_opts, ctx: Cli_context, g: Op_g
     print_result({items: page.items, has_more: page.has_more}, g);
 };
 
+// Reply's thread carries its whole history inline, every body included and with no limit, so it is
+// dropped: the paged messages are the history. The thread has no subject of its own; its subject is
+// the one the latest email message carries.
+const thread_header = (thread: Record<string, unknown>): Record<string, unknown>=>{
+    const {messages, ...header} = thread;
+    const history = Array.isArray(messages) ? messages.filter(is_object) : [];
+    const latest_email = history.filter(m=>m.channel === 'email').pop();
+    return {...header, subject: typeof latest_email?.subject === 'string' ? latest_email.subject : null};
+};
+
 const handle_inbox_get = async(
     thread_arg: string, opts: {limit?: string; offset?: string}, ctx: Cli_context, g: Op_globals,
 ): Promise<void>=>{
@@ -73,7 +83,7 @@ const handle_inbox_get = async(
     {
         throw refusal(m, 'read');
     }
-    print_result({thread, messages: read_page(m)}, g);
+    print_result({thread: thread_header(thread), messages: read_page(m)}, g);
 };
 
 export {handle_inbox_list, handle_inbox_get, SOURCES};

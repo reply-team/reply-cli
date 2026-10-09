@@ -313,6 +313,19 @@ describe('utils/client', ()=>{
             }
         });
 
+        it('a write whose TLS broke after the handshake may have been sent: unknown outcome, not resent', async()=>{
+            instant_timers();
+            for (const code of ['ERR_SSL_DECRYPTION_FAILED_OR_BAD_RECORD_MAC', 'ERR_SSL_BAD_DECRYPT', 'ERR_SSL_SSLV3_ALERT_BAD_RECORD_MAC'])
+            {
+                mock_fetch.mockReset();
+                mock_fetch.mockRejectedValue(net_error(code));
+                const {request_raw} = await import('../../utils/client');
+                const err = await request_raw(BASE, 'tok', 'POST', '/x', {a: 1}).catch(e=>e);
+                expect(err).toBeInstanceOf(Unknown_outcome_error);
+                expect(mock_fetch).toHaveBeenCalledTimes(1);
+            }
+        });
+
         it('an unknown outcome names the underlying cause in its detail', async()=>{
             mock_fetch.mockRejectedValue(net_error('ECONNRESET'));
             const {request_raw} = await import('../../utils/client');

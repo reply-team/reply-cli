@@ -22,7 +22,7 @@ const ONE_WAY_HINT = 'Use exactly one of --contact-id, --email (with its name fl
 const add_contact_options = (cmd: Command): Command=>cmd
     .option('--contact-id <id>', 'The contact by its Reply id')
     .option('--email <address>', 'The contact by email; with --first-name, --last-name, --company, --title')
-    .option('--first-name <name>', 'First name (with --email; Reply requires one to add or match a contact by email)')
+    .option('--first-name <name>', 'First name (with --email; Reply refuses to import a contact without one)')
     .option('--last-name <name>', 'Last name (with --email)')
     .option('--company <name>', 'Company (with --email)')
     .option('--title <title>', 'Job title (with --email)')
@@ -30,11 +30,12 @@ const add_contact_options = (cmd: Command): Command=>cmd
 
 const CONTACT_HELP = `
 A contact is given exactly one way:
+  --contact <json>|@file|-           {email, first_name, last_name, company, title}; '-' reads
+                                     stdin, which keeps personal data out of the argument list
+  --email <address> [--first-name <name>] [--last-name <name>] [--company <name>] [--title <title>]
   --contact-id <id>                  a contact Reply already holds
-  --email <address> --first-name <name> [--last-name <name>] [--company <name>] [--title <title>]
-                                     (Reply requires the first name to add or match by email)
-  --contact <json>|@file|-           the same fields as JSON; '-' reads stdin, which keeps
-                                     personal data out of the argument list`;
+
+`;
 
 const clean = (v: unknown): string | undefined=>{
     const text = typeof v === 'string' ? v.trim() : '';

@@ -17,15 +17,6 @@ describe('operations/commands', ()=>{
         expect(inbox_command.commands.map(c=>c.name())).toEqual(['list', 'get']);
     });
 
-    it('every write takes --idempotency-key', ()=>{
-        for (const c of [sub(sequence_command, 'add-contact'), sub(sequence_command, 'remove-contact'),
-            sub(sequence_command, 'pause'), sub(sequence_command, 'start'),
-            sub(contact_list_command, 'add-contact'), sub(contact_command, 'opt-out')])
-        {
-            expect(flags(c)).toContain('--idempotency-key');
-        }
-    });
-
     it('the commands about a person take the contact flags', ()=>{
         for (const c of [sub(sequence_command, 'add-contact'), sub(sequence_command, 'remove-contact'),
             sub(contact_list_command, 'add-contact'), sub(contact_command, 'opt-out')])

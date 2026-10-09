@@ -39,7 +39,7 @@ describe('sequence remove-contact', ()=>{
 
     it('finds the contact by email, and never creates one', async()=>{
         answer(json({items: [], hasMore: false}));
-        const {out} = await run({email: 'ann@acme.com'});
+        const {out} = await run({email: 'ann@example.com'});
         expect(JSON.parse(out)).toEqual({status: 'not_in_sequence', sequence_id: 123, contact_id: null});
         expect(sent().map(r=>r.url)).toEqual(['https://api/v3/contacts/filter?top=100&skip=0']);
     });

@@ -193,17 +193,26 @@ prints JSON (indented; compact with `--json`) and says what happened in a stable
 | `reply contact-list add-contact <list-id> <contact> [--refuse-opted-out]` | → `added` |
 | `reply contact opt-out <contact>` | → `opted_out` |
 | `reply inbox list (--contact-id \| --sequence-id) [--source] [--since]` | one page of threads |
-| `reply inbox get <thread-id>` | a thread and one page of its messages |
+| `reply inbox get <thread-id>` | a thread with its subject, and one page of its messages |
 
-`<contact>` is exactly one of `--contact-id <id>`, `--email <address>` (with `--first-name`,
-`--last-name`, `--company`, `--title`), or `--contact <json>|@file|-` with the same fields as JSON.
-`-` reads stdin, which keeps personal data out of the argument list. Reply requires a first name to
-add or match a contact by email; without one it refuses the contact.
+`<contact>` is exactly one of `--contact <json>|@file|-`, `--email <address>` (with `--first-name`,
+`--last-name`, `--company`, `--title`), or `--contact-id <id>`. The JSON takes the same fields
+(`email`, `first_name`, …), and `-` reads it from stdin, which keeps personal data out of the
+argument list:
+
+```sh
+echo '{"email":"ann@example.com","first_name":"Ann"}' | reply sequence add-contact 123 --contact -
+```
+
+The two `add-contact` commands always import a contact given by email, and Reply refuses an import
+without a first name, even for a contact it already holds. `contact opt-out` imports only someone
+Reply doesn't hold yet; `sequence remove-contact` never imports.
 
 **Errors.** With `--json`, a failure is one line on stderr:
 `{"error":{"code":"contact.opted_out","title":…,"status":…,"reply_code":…,"ids":{…}}}`. `ids` is
 whatever the command learned before failing, for example the id of a contact it created before
-Reply refused the add. Each command's `--help` lists its error codes.
+Reply refused the add. `reply.invalid_request` means Reply didn't accept a field as given;
+`details.fields` names the fields, never their values. Each command's `--help` lists its error codes.
 
 **Exit codes.** `0` done · `1` failed, and the main effect did not happen · `2` usage error, nothing
 sent · `3` **outcome unknown**: a write may have happened and no answer came back. Re-running the
@@ -213,9 +222,6 @@ blindly.
 **Retries.** Reads are retried on errors. A write is retried only when it can't have reached Reply:
 the connection was never made, or a `429` asked to wait 3 seconds or less. A longer `429` comes back
 as `rate_limited` with `retry_after`.
-
-`--idempotency-key` is accepted on every write and reserved: it will make a repeated call exact once
-the Reply API supports idempotency keys, and has no effect today.
 
 ## Raw API access
 
@@ -245,9 +251,10 @@ stderr. Add `--verbose` for a full request/response trace on stderr with
 credentials redacted; stdout stays the plain JSON, so pipes keep working.
 
 A write through `reply api` (POST, PUT, PATCH, DELETE) is never resent on a 5xx or on a
-connection that broke after sending. That last case exits 3: the write may have happened. A `429`
-is waited out only when `Retry-After` asks for 3 seconds or less; a longer one is printed as the
-`429` it is.
+connection that broke after sending. That last case exits 3: the write may have happened. `reply api`
+goes by the method alone, so this includes a POST that only reads, such as the `…/filter` calls; run
+it again yourself if it failed. A `429` is waited out only when `Retry-After` asks for 3 seconds or
+less; a longer one is printed as the `429` it is.
 
 ### Windows: Git Bash rewrites the path
 

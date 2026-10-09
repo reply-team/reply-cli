@@ -66,6 +66,21 @@ describe('operations/call', ()=>{
             .toMatchObject({code: 'reply.refused', status: 400, reply_code: 'x.bad', detail: 'nope'});
     });
 
+    it('refusal tells a validation problem from a business refusal, naming the fields but never their values', ()=>{
+        const problem = {
+            title: 'Validation failed', detail: 'The request body contains validation errors.',
+            errors: [
+                {pointer: '/items/0/firstName', detail: 'too long'},
+                {pointer: '/items/0/company', detail: 'too long'},
+                {pointer: '/items/1/firstName', detail: 'too long'},
+            ],
+        };
+        expect(refusal(a(400, problem), 'write')).toMatchObject({
+            code: 'reply.invalid_request', status: 400, exit_code: 1, details: {fields: ['firstName', 'company']},
+        });
+        expect(refusal(a(400, {code: 'x.bad', errors: []}), 'write').code).toBe('reply.refused');
+    });
+
     it('refusal never calls a 2xx a definite failure: on a write it is outcome.unknown', ()=>{
         expect(refusal(a(204, null), 'write')).toMatchObject({code: 'outcome.unknown', exit_code: 3});
         expect(refusal(a(202, null), 'read')).toMatchObject({code: 'reply.unavailable', exit_code: 1});

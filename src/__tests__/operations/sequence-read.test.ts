@@ -74,6 +74,14 @@ describe('sequence stats', ()=>{
         expect(mock_fetch).not.toHaveBeenCalled();
     });
 
+    it('refuses a span that doesn\'t end after it starts, before any call', async()=>{
+        for (const opts of [{from: '2026-10-02', to: '2026-10-01'}, {from: '2026-10-01T12:00:00Z', to: '2026-10-01T14:00:00+02:00'}])
+        {
+            await expect(handle_sequence_stats('123', opts, ctx(), {})).rejects.toMatchObject({code: 'usage.stats'});
+        }
+        expect(mock_fetch).not.toHaveBeenCalled();
+    });
+
     it('is a read: a 503 is asked again', async()=>{
         instant_timers();
         answer(json('', 503), json({emailOverview: {}}));

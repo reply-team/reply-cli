@@ -89,6 +89,19 @@ const item_failure = (dict: unknown, id: number): Item_failure | undefined=>{
     };
 };
 
+// v3 answers a request it can't accept as given with `errors[]`, each entry naming a field by a
+// JSON pointer, and no `code`. Only the field names are kept: the values may be personal data.
+const invalid_fields = (a: Answer): string[] | undefined=>{
+    if (!is_object(a.data) || !Array.isArray(a.data.errors))
+    {
+        return undefined;
+    }
+    const names = a.data.errors
+        .map(entry=>(is_object(entry) && typeof entry.pointer === 'string' ? entry.pointer.split('/').pop() : undefined))
+        .filter((name): name is string=>Boolean(name));
+    return [...new Set(names)];
+};
+
 // The answers every operation reads the same way. Each command reads its own statuses and codes
 // first and falls back to this.
 const refusal = (a: Answer, kind: Call_kind): Operation_error=>{
@@ -127,11 +140,16 @@ const refusal = (a: Answer, kind: Call_kind): Operation_error=>{
             ? new Unknown_outcome_error('Reply failed while handling the write; it may or may not have taken effect.', base)
             : new Operation_error('reply.unavailable', 'Reply failed to answer.', base);
     }
+    const fields = a.status === 400 && reply_code === undefined ? invalid_fields(a) : undefined;
+    if (fields !== undefined)
+    {
+        return new Operation_error('reply.invalid_request', 'Reply did not accept the request as given.', {...base, details: {fields}});
+    }
     return new Operation_error('reply.refused', 'Reply refused the call.', base);
 };
 
 export {
     open_session, call_reply, is_object, is_reply_id, reply_code_of, detail_of,
-    unreadable, expect_object, read_page, item_failure, refusal,
+    unreadable, expect_object, read_page, item_failure, invalid_fields, refusal,
 };
 export type {Op_session, Answer, Item_failure};

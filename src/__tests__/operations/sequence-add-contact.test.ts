@@ -13,7 +13,7 @@ beforeEach(()=>{ mock_fetch.mockReset(); });
 describe('sequence add-contact', ()=>{
     it('a new contact: read the sequence, import, add; nothing read in between', async()=>{
         answer(json(SEQ), json({items: [{id: 456, status: 'created'}]}), json({added: [456], notProcessed: {}}));
-        const {out} = await run({email: 'ann@acme.com', firstName: 'Ann'});
+        const {out} = await run({email: 'ann@example.com', firstName: 'Ann'});
         expect(JSON.parse(out)).toEqual({status: 'added', sequence_id: 123, contact_id: 456, contact_created: true, sequence_active: true});
         expect(sent().map(r=>`${r.method} ${r.url}`)).toEqual([
             'GET https://api/v3/sequences/123',
@@ -25,7 +25,14 @@ describe('sequence add-contact', ()=>{
 
     it('an existing contact already in the sequence: nothing is written', async()=>{
         answer(json(SEQ), json({items: [{id: 456, status: 'updated'}]}), json({contactId: 456, statusInSequence: 'active'}));
-        const {out} = await run({email: 'ann@acme.com'});
+        const {out} = await run({email: 'ann@example.com'});
+        expect(JSON.parse(out)).toMatchObject({status: 'already_in_sequence', contact_id: 456, contact_created: false});
+        expect(sent().map(r=>r.url)).not.toContain('https://api/v3/sequences/123/contact-links/bulk');
+    });
+
+    it('a contact the import restored is read like any existing one before the add', async()=>{
+        answer(json(SEQ), json({items: [{id: 456, status: 'restored'}]}), json({contactId: 456, statusInSequence: 'active'}));
+        const {out} = await run({email: 'ann@example.com', firstName: 'Ann'});
         expect(JSON.parse(out)).toMatchObject({status: 'already_in_sequence', contact_id: 456, contact_created: false});
         expect(sent().map(r=>r.url)).not.toContain('https://api/v3/sequences/123/contact-links/bulk');
     });
@@ -37,6 +44,18 @@ describe('sequence add-contact', ()=>{
         expect(sent()[2].body).toMatchObject({ignoreStepDelay: true});
     });
 
+    it('a 404 on the participation read that doesn\'t say "not in the sequence" writes nothing', async()=>{
+        answer(json(SEQ), json('', 404));
+        await expect(run({contactId: '456'})).rejects.toMatchObject({code: 'reply.refused', status: 404, ids: {sequence_id: 123, contact_id: 456}});
+        expect(mock_fetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('a sequence the participation read can\'t see is sequence.not_found, and nothing is written', async()=>{
+        answer(json(SEQ), json({code: 'sequenceContact.sequenceNotFound'}, 404));
+        await expect(run({contactId: '456'})).rejects.toMatchObject({code: 'sequence.not_found'});
+        expect(mock_fetch).toHaveBeenCalledTimes(2);
+    });
+
     it('a paused sequence: added, and sequence_active is false', async()=>{
         answer(json({...SEQ, status: 'paused'}), json({code: 'sequenceContact.notInSequence'}, 404), json({added: [456]}));
         const {out} = await run({contactId: '456'});
@@ -45,7 +64,7 @@ describe('sequence add-contact', ()=>{
 
     it('an archived sequence is refused before anything is written', async()=>{
         answer(json({...SEQ, isArchived: true}));
-        await expect(run({email: 'ann@acme.com'})).rejects.toMatchObject({code: 'sequence.archived', ids: {sequence_id: 123}});
+        await expect(run({email: 'ann@example.com'})).rejects.toMatchObject({code: 'sequence.archived', ids: {sequence_id: 123}});
         expect(mock_fetch).toHaveBeenCalledTimes(1);
     });
 
@@ -55,7 +74,7 @@ describe('sequence add-contact', ()=>{
             json({added: [], notProcessed: {'456': {error: 'invalidInput', errorDetails: 'Contact could not be added to sequence'}}}),
             json({contactId: 456, isOptedOut: true}),
         );
-        await expect(run({email: 'ann@acme.com'})).rejects.toMatchObject({
+        await expect(run({email: 'ann@example.com'})).rejects.toMatchObject({
             code: 'contact.opted_out', exit_code: 1, ids: {sequence_id: 123, contact_id: 456},
         });
     });
@@ -66,7 +85,7 @@ describe('sequence add-contact', ()=>{
             json({added: [], notProcessed: {'456': {error: 'invalidInput', errorDetails: 'Contact could not be added to sequence'}}}),
             json({contactId: 456, isOptedOut: false}),
         );
-        await expect(run({email: 'ann@acme.com'})).rejects.toMatchObject({
+        await expect(run({email: 'ann@example.com'})).rejects.toMatchObject({
             code: 'reply.refused', reply_code: 'invalidInput', detail: 'Contact could not be added to sequence',
         });
     });
@@ -79,26 +98,26 @@ describe('sequence add-contact', ()=>{
 
     it('a --start-step the chain can\'t answer is refused before the contact is touched', async()=>{
         answer(json(SEQ));
-        await expect(run({email: 'ann@acme.com', startStep: '3'})).rejects.toMatchObject({code: 'sequence.step_not_found'});
+        await expect(run({email: 'ann@example.com', startStep: '3'})).rejects.toMatchObject({code: 'sequence.step_not_found'});
         expect(mock_fetch).toHaveBeenCalledTimes(1);
     });
 
     it('a 503 on the add is outcome.unknown (exit 3), with the contact id', async()=>{
         answer(json(SEQ), json({items: [{id: 456, status: 'created'}]}), json('', 503));
-        await expect(run({email: 'ann@acme.com'})).rejects.toMatchObject({
+        await expect(run({email: 'ann@example.com'})).rejects.toMatchObject({
             code: 'outcome.unknown', exit_code: 3, ids: {sequence_id: 123, contact_id: 456},
         });
     });
 
     it('a 200 whose body is not an object is outcome.unknown, not a crash', async()=>{
         answer(json(SEQ), json({items: [{id: 456, status: 'created'}]}), json('<html>gateway</html>', 200));
-        await expect(run({email: 'ann@acme.com'})).rejects.toMatchObject({code: 'outcome.unknown', exit_code: 3});
+        await expect(run({email: 'ann@example.com'})).rejects.toMatchObject({code: 'outcome.unknown', exit_code: 3});
     });
 
     it('no steps in the sequence is sequence.has_no_steps', async()=>{
         answer(json({...SEQ, steps: []}), json({items: [{id: 456, status: 'created'}]}),
             json({code: 'sequenceContact.noStepsInSequence'}, 400));
-        await expect(run({email: 'ann@acme.com'})).rejects.toMatchObject({code: 'sequence.has_no_steps'});
+        await expect(run({email: 'ann@example.com'})).rejects.toMatchObject({code: 'sequence.has_no_steps'});
     });
 });
 

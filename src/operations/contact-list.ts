@@ -1,12 +1,12 @@
 import {Operation_error, type Ids} from '../utils/errors';
 import {call_reply, expect_object, item_failure, refusal, reply_code_of, open_session, type Op_session} from './call';
-import {parse_id, parse_idempotency_key, type Op_globals} from './options';
+import {parse_id, type Op_globals} from './options';
 import {read_contact_input, type Contact_flags} from './contact-input';
 import {ensure_contact, read_opted_out} from './contacts';
 import {print_result, with_ids} from './result';
 import type {Cli_context} from '../context';
 
-type List_add_opts = Contact_flags & {refuseOptedOut?: boolean; idempotencyKey?: string};
+type List_add_opts = Contact_flags & {refuseOptedOut?: boolean};
 
 const add_to_list = async(s: Op_session, list_id: number, contact_id: number): Promise<void>=>{
     const a = await call_reply(s, 'POST', `/v3/contact-lists/${list_id}/add-contacts`, 'write', {contactIds: [contact_id]});
@@ -36,7 +36,6 @@ const handle_contact_list_add_contact = async(
 ): Promise<void>=>{
     const list_id = parse_id(list_arg, 'List id');
     const contact = read_contact_input(opts, read_stdin);
-    parse_idempotency_key(opts.idempotencyKey);
     const s = await open_session(ctx, g);
     const ids: Ids = {list_id};
     try {
