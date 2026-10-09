@@ -38,19 +38,31 @@ describe('sequence start', ()=>{
     it('without --expect-contacts: one call, started', async()=>{
         answer(json({id: 123, status: 'active'}));
         const {out} = await capture(()=>handle_sequence_start('123', {}, ctx(), {json: true}));
-        expect(JSON.parse(out)).toEqual({status: 'started', sequence_id: 123, contacts: null});
+        expect(JSON.parse(out)).toEqual({status: 'started', sequence_id: 123, previous_status: null, contacts: null});
         expect(mock_fetch).toHaveBeenCalledTimes(1);
     });
 
     it('with --expect-contacts matching: read, count, start', async()=>{
         answer(json({id: 123, status: 'paused', isArchived: false}), json({count: 12}), json({id: 123, status: 'active'}));
         const {out} = await capture(()=>handle_sequence_start('123', {expectContacts: '12'}, ctx(), {json: true}));
-        expect(JSON.parse(out)).toEqual({status: 'started', sequence_id: 123, contacts: 12});
+        expect(JSON.parse(out)).toEqual({status: 'started', sequence_id: 123, previous_status: 'paused', contacts: 12});
         expect(sent().map(r=>`${r.method} ${r.url}`)).toEqual([
             'GET https://api/v3/sequences/123',
             'GET https://api/v3/sequences/123/contacts/count',
             'POST https://api/v3/sequences/123/start',
         ]);
+    });
+
+    it('with --expect-contacts, a first start reports that the sequence was new', async()=>{
+        answer(json({id: 123, status: 'new', isArchived: false}), json({count: 3}), json({id: 123, status: 'active'}));
+        const {out} = await capture(()=>handle_sequence_start('123', {expectContacts: '3'}, ctx(), {json: true}));
+        expect(JSON.parse(out)).toEqual({status: 'started', sequence_id: 123, previous_status: 'new', contacts: 3});
+    });
+
+    it('a sequence read without a status reports previous_status null', async()=>{
+        answer(json({id: 123, isArchived: false}), json({count: 3}), json({id: 123, status: 'active'}));
+        const {out} = await capture(()=>handle_sequence_start('123', {expectContacts: '3'}, ctx(), {json: true}));
+        expect(JSON.parse(out)).toEqual({status: 'started', sequence_id: 123, previous_status: null, contacts: 3});
     });
 
     it('a count that moved refuses, and starts nothing', async()=>{
@@ -64,7 +76,7 @@ describe('sequence start', ()=>{
     it('already active with --expect-contacts: already_active, no count check, no start', async()=>{
         answer(json({id: 123, status: 'active', isArchived: false}), json({count: 99}));
         const {out} = await capture(()=>handle_sequence_start('123', {expectContacts: '12'}, ctx(), {json: true}));
-        expect(JSON.parse(out)).toEqual({status: 'already_active', sequence_id: 123, contacts: 99});
+        expect(JSON.parse(out)).toEqual({status: 'already_active', sequence_id: 123, previous_status: 'active', contacts: 99});
         expect(sent().map(r=>r.method)).toEqual(['GET', 'GET']);
     });
 
@@ -76,7 +88,7 @@ describe('sequence start', ()=>{
     it('already active: already_active even when the count can\'t be read', async()=>{
         answer(json({id: 123, status: 'active', isArchived: false}), json({code: 'sequenceContact.forbidden'}, 403));
         const {out} = await capture(()=>handle_sequence_start('123', {expectContacts: '12'}, ctx(), {json: true}));
-        expect(JSON.parse(out)).toEqual({status: 'already_active', sequence_id: 123, contacts: null});
+        expect(JSON.parse(out)).toEqual({status: 'already_active', sequence_id: 123, previous_status: 'active', contacts: null});
     });
 
     it('a count the guard needs but Reply rate-limits is rate_limited with retry_after, and nothing starts', async()=>{
