@@ -195,12 +195,25 @@ describe('contact delete', ()=>{
         await expect(handle_contact_delete('456', ctx(), {})).rejects.toMatchObject({code: 'contact.not_found', exit_code: 1, ids: {contact_id: 456}});
     });
 
-    it('a 503 is outcome.unknown (exit 3), sent once, and the hint says a re-run answers contact.not_found if it was deleted', async()=>{
-        answer(json('', 503));
-        const e = await handle_contact_delete('456', ctx(), {}).catch(x=>x);
-        expect(e).toMatchObject({code: 'outcome.unknown', exit_code: 3, ids: {contact_id: 456}});
-        expect(e.hint).toContain('contact.not_found');
-        expect(mock_fetch).toHaveBeenCalledTimes(1);
+    it('a 503 or a lost answer is outcome.unknown (exit 3), sent once, and the hint says a re-run answers contact.not_found '
+        + 'if it was deleted', async()=>{
+        const lost = Object.assign(new TypeError('fetch failed'), {cause: Object.assign(new Error('ECONNRESET'), {code: 'ECONNRESET'})});
+        for (const outcome of ['503', 'lost'])
+        {
+            mock_fetch.mockReset();
+            if (outcome === 'lost')
+            {
+                mock_fetch.mockRejectedValueOnce(lost);
+            }
+            else
+            {
+                answer(json('', 503));
+            }
+            const e = await handle_contact_delete('456', ctx(), {}).catch(x=>x);
+            expect(e, outcome).toMatchObject({code: 'outcome.unknown', exit_code: 3, ids: {contact_id: 456}});
+            expect(e.hint, outcome).toContain('contact.not_found');
+            expect(mock_fetch, outcome).toHaveBeenCalledTimes(1);
+        }
     });
 
     it('an id that is not a Reply id is usage.id, with no call', async()=>{
