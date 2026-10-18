@@ -159,13 +159,14 @@ const find_contact_by_address = async(s: Op_session, person: Person): Promise<nu
 const find_contact = async(s: Op_session, ref: Contact_ref): Promise<number | null>=>
     ref.kind === 'id' ? ref.id : find_contact_by_address(s, ref.person);
 
+const contact_not_found = (contact_id: number, a: Answer): Operation_error=>
+    new Operation_error('contact.not_found', `This account has no contact ${contact_id}.`, {status: a.status, reply_code: reply_code_of(a)});
+
 const read_opted_out = async(s: Op_session, contact_id: number): Promise<boolean>=>{
     const a = await call_reply(s, 'GET', `/v3/contacts/${contact_id}/statuses`, 'read');
     if (a.status === 404)
     {
-        throw new Operation_error('contact.not_found', `This account has no contact ${contact_id}.`, {
-            status: 404, reply_code: reply_code_of(a),
-        });
+        throw contact_not_found(contact_id, a);
     }
     if (a.status !== 200)
     {
@@ -179,5 +180,5 @@ const read_opted_out = async(s: Op_session, contact_id: number): Promise<boolean
     return body.isOptedOut;
 };
 
-export {ensure_contact, find_contact, find_contact_by_address, read_opted_out};
+export {ensure_contact, find_contact, find_contact_by_address, read_opted_out, contact_not_found};
 export type {Ensured};

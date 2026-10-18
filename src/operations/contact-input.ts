@@ -146,5 +146,5 @@ const read_contact_input = (f: Contact_flags, read_stdin?: () => string): Contac
     })};
 };
 
-export {read_contact_input, add_contact_options, CONTACT_HELP, linkedin_key, is_email};
+export {read_contact_input, add_contact_options, person_of, CONTACT_HELP, linkedin_key, is_email};
 export type {Person, Contact_ref, Contact_flags};

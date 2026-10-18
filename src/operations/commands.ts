@@ -12,6 +12,7 @@ import {
 import {handle_inbox_reply} from './inbox-reply';
 import {handle_contact_list_add_contact} from './contact-list';
 import {handle_contact_opt_out} from './contact';
+import {handle_contact_find, handle_contact_get} from './contact-record';
 
 const P = PROGRAM_NAME;
 const COMMON_ERRORS = [
@@ -151,10 +152,35 @@ add_contact_options(contact_list_command.command('add-contact')
         await handle_contact_list_add_contact(cmd.args[0], cmd.opts(), ctx, g);
     }));
 
-const contact_command = new Command('contact').description('Act on a contact');
+const contact_command = new Command('contact').description('Find a contact, read it, or opt it out');
+
+contact_command.command('find')
+    .option('--contact <stdin>', 'Only -: {email} or {linkedin_url} as JSON on stdin')
+    .description('The id of the contact Reply holds under an email or a LinkedIn URL. Never creates a contact')
+    .addHelpText('after', help(
+        [`echo '{"email":"ann@example.com"}' | ${P} contact find --contact -`,
+            `echo '{"linkedin_url":"https://www.linkedin.com/in/ann-example"}' | ${P} contact find --contact -`],
+        ['contact.not_unique'], false,
+        'Result: {"contact_id"}: null when Reply holds nobody under the address.\n'
+            + 'The address is read from stdin only, so it never sits in the argument list. An email matches ignoring case; a\n'
+            + 'LinkedIn URL matches when it differs only in the case of the scheme or host, a default port, one trailing slash or\n'
+            + 'a fragment. contact.not_unique means Reply holds more than one contact under the address.\n'))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_contact_find(cmd.opts(), ctx, g);
+    }));
+
+contact_command.command('get')
+    .argument('<contact-id>', 'Contact id')
+    .description('The contact as Reply holds it: fields, owner, opt-out, custom fields')
+    .addHelpText('after', help([ex('contact get 456')], ['contact.not_found'], false))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_contact_get(cmd.args[0], ctx, g);
+    }));
 
 add_contact_options(contact_command.command('opt-out'))
-    .description('Mark the contact as opted out at Reply, creating them only if Reply has nobody under the email')
+    .description('Mark the contact as opted out at Reply, creating them only if Reply has nobody under the address')
     .addHelpText('after', help([piped('contact opt-out'), ex('contact opt-out --contact-id 456')],
         ['contact.not_found', 'contact.not_unique', 'contact.invalid_email', 'contact.invalid_linkedin_url', 'account.contact_limit_reached'], true,
         'Result: {"status":"opted_out","contact_id","contact_created"}\n' + CONTACT_HELP

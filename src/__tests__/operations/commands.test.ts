@@ -20,7 +20,7 @@ describe('operations/commands', ()=>{
     it('names the commands in Reply\'s words', ()=>{
         expect(sequence_command.commands.map(c=>c.name())).toEqual(['get', 'contacts', 'stats', 'add-contact', 'remove-contact', 'pause', 'start']);
         expect(contact_list_command.commands.map(c=>c.name())).toEqual(['add-contact']);
-        expect(contact_command.commands.map(c=>c.name())).toEqual(['opt-out']);
+        expect(contact_command.commands.map(c=>c.name())).toEqual(['find', 'get', 'opt-out']);
         expect(inbox_command.commands.map(c=>c.name())).toEqual(['list', 'get', 'reply', 'categories', 'categorize', 'mark-read', 'mark-unread']);
     });
 
@@ -59,6 +59,16 @@ describe('operations/commands', ()=>{
         {
             expect(flags(sub(inbox_command, name)), name).toEqual([]);
         }
+        expect(flags(sub(contact_command, 'get'))).toEqual([]);
+    });
+
+    it('contact find takes the address only through --contact -, and never creates a contact', ()=>{
+        const find = sub(contact_command, 'find');
+        expect(flags(find)).toEqual(['--contact']);
+        const text = help_of(find);
+        expect(text, text).toContain('--contact -');
+        expect(text.replace(/\s+/g, ' '), text).toContain('Never creates a contact');
+        expect(text, text).toContain('contact.not_unique');
     });
 
     it('inbox reply takes its text only through --message, and says a repeat may send it twice', ()=>{
