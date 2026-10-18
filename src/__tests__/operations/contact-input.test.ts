@@ -1,6 +1,6 @@
 import {describe, it, expect} from 'vitest';
 import {Command} from 'commander';
-import {read_contact_input, add_contact_options} from '../../operations/contact-input';
+import {read_contact_input, add_contact_options, linkedin_key} from '../../operations/contact-input';
 import {UsageError} from '../../utils/errors';
 
 const usage = (fn: () => unknown): UsageError=>{
@@ -68,6 +68,20 @@ describe('read_contact_input', ()=>{
             expect(e.code, bad).toBe('usage.contact');
             expect(`${e.message} ${e.hint ?? ''}`, bad).not.toContain('marta-example');
         }
+    });
+
+    it('keys a LinkedIn URL by its lowercased slug: on linkedin.com and its subdomains the path\'s case does not count, '
+        + 'elsewhere it does; the scheme\'s and host\'s case, a default port, one trailing slash and a fragment never count; '
+        + 'www and the query do', ()=>{
+        expect(linkedin_key('HTTPS://WWW.LinkedIn.COM:443/in/Marta-Example/#about')).toBe('https://www.linkedin.com/in/marta-example');
+        expect(linkedin_key('https://uk.linkedin.com/in/Marta-Example')).toBe('https://uk.linkedin.com/in/marta-example');
+        expect(linkedin_key('https://www.linkedin.com/in/Marta-Example?trk=AbC')).toBe('https://www.linkedin.com/in/marta-example?trk=AbC');
+        expect(linkedin_key('https://www.linkedin.com/in/marta-example//')).toBe('https://www.linkedin.com/in/marta-example/');
+        expect(linkedin_key('https://linkedin.com/in/marta-example')).not.toBe(linkedin_key('https://www.linkedin.com/in/marta-example'));
+        expect(linkedin_key('http://www.linkedin.com/in/marta-example')).not.toBe(linkedin_key('https://www.linkedin.com/in/marta-example'));
+        expect(linkedin_key('https://www.example.com/in/Marta-Example/')).toBe('https://www.example.com/in/Marta-Example');
+        expect(linkedin_key('https://notlinkedin.com/in/Marta-Example')).toBe('https://notlinkedin.com/in/Marta-Example');
+        expect(linkedin_key('linkedin.com/in/marta-example')).toBeNull();
     });
 
     it('refuses a bad --contact-id as a usage.id error', ()=>{

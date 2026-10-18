@@ -39,6 +39,7 @@ describe('operations/commands', ()=>{
         {
             const text = help_of(c);
             expect(text, text).toContain('linkedin_url');
+            expect(text, text).toContain('lowercased slug');
             expect(text, text).not.toContain('lookup_incomplete');
         }
         for (const c of [sub(sequence_command, 'add-contact'), sub(contact_list_command, 'add-contact'), sub(contact_command, 'opt-out')])
@@ -93,6 +94,7 @@ describe('operations/commands', ()=>{
         expect(text, text).toContain('--contact -');
         expect(text.replace(/\s+/g, ' '), text).toContain('Never creates a contact');
         expect(text, text).toContain('contact.not_unique');
+        expect(text.replace(/\s+/g, ' '), text).toContain('matched by its lowercased slug');
     });
 
     it('inbox reply takes its text only through --message, and says a repeat may send it twice', ()=>{

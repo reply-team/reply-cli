@@ -116,6 +116,12 @@ describe('contact update', ()=>{
         ]);
     });
 
+    it('writes a LinkedIn URL in the form it is looked up by: its lowercased slug', async()=>{
+        answer(json({id: 456}));
+        await update('-', {linkedin_url: 'https://www.linkedin.com/in/Marta-Example/'});
+        expect(sent()[0].body).toEqual({linkedInUrl: 'https://www.linkedin.com/in/marta-example'});
+    });
+
     it('without custom fields there is no read before the PATCH', async()=>{
         answer(json({id: 456}));
         const {out} = await update('-', {company: 'Acme', last_name: null});

@@ -36,7 +36,8 @@ A contact is given exactly one way:
                                      keeps personal data out of the argument list
   --email <address> [--first-name <name>] [--last-name <name>] [--company <name>] [--title <title>]
   --contact-id <id>                  a contact Reply already holds
-Reply is asked about a contact by its email; one with only a LinkedIn URL, by that.
+Reply is asked about a contact by its email; one with only a LinkedIn URL, by that. A LinkedIn URL is
+matched by its lowercased slug, and an import writes it in that form.
 
 `;
 
@@ -47,11 +48,14 @@ const clean = (v: unknown): string | undefined=>{
 
 const is_email = (text: string): boolean=>/^[^\s@]+@[^\s@]+$/.test(text);
 
-// The key a LinkedIn profile URL is compared by, or null when the text is not an absolute http(s)
-// URL. Two URLs that differ only in the case of the scheme or the host, a default port, one
-// trailing slash or a fragment are the same profile; the path keeps its case, and www and the query
-// count. The rule is deliberately no looser than the key a do-not-contact list is kept by: matching
-// a path whose case differs could bind a contact under a spelling someone holds as stopped.
+const is_linkedin_host = (host: string): boolean=>host === 'linkedin.com' || host.endsWith('.linkedin.com');
+
+// The form a profile URL is compared and written in, or null when the text is not an absolute
+// http(s) URL. On linkedin.com and its subdomains a URL names a person by its slug whatever its case,
+// so the path is lowercased there; on any other host it keeps its case. The case of the scheme and
+// the host, a default port, one trailing slash and a fragment never count; www and the query do. It
+// is the key a do-not-contact list keeps a LinkedIn URL by, so a lookup binds exactly the person
+// such a list names.
 const linkedin_key = (text: string): string | null=>{
     let url: URL;
     try {
@@ -63,7 +67,8 @@ const linkedin_key = (text: string): string | null=>{
     {
         return null;
     }
-    const path = url.pathname.endsWith('/') ? url.pathname.slice(0, -1) : url.pathname;
+    const trimmed = url.pathname.endsWith('/') ? url.pathname.slice(0, -1) : url.pathname;
+    const path = is_linkedin_host(url.hostname) ? trimmed.toLowerCase() : trimmed;
     return `${url.protocol}//${url.host}${path}${url.search}`;
 };
 

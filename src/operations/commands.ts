@@ -191,9 +191,10 @@ contact_command.command('find')
             `echo '{"linkedin_url":"https://www.linkedin.com/in/ann-example"}' | ${P} contact find --contact -`],
         ['contact.not_unique'], false,
         'Result: {"contact_id"}: null when Reply holds nobody under the address.\n'
-            + 'The address is read from stdin only, so it never sits in the argument list. An email matches ignoring case; a\n'
-            + 'LinkedIn URL matches when it differs only in the case of the scheme or host, a default port, one trailing slash or\n'
-            + 'a fragment. contact.not_unique means Reply holds more than one contact under the address.\n'))
+            + 'The address is read from stdin only, so it never sits in the argument list. An email matches ignoring case. A\n'
+            + 'LinkedIn URL is matched by its lowercased slug: on linkedin.com the path\'s case does not count, nor the scheme\'s or\n'
+            + 'host\'s, a default port, one trailing slash or a fragment, while www and the query do; Reply is asked for it in that\n'
+            + 'form first, then as given. contact.not_unique means Reply holds more than one contact under the address.\n'))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
         await handle_contact_find(cmd.opts(), ctx, g);
@@ -218,9 +219,9 @@ contact_command.command('update')
         ['contact.not_found', 'contact.field_not_found'], true,
         'Result: {"status":"updated","contact_id"}\n'
             + 'Fields: {first_name, last_name, company, title, linkedin_url, custom_fields: [{name, value}]}; a field left out stays as\n'
-            + 'it is, and null clears one. They are read from stdin only, so no value ever sits in the argument list. A custom field\n'
-            + 'is named as the account names it (ignoring case); a name the account has none of is contact.field_not_found, and then\n'
-            + 'nothing is changed.\n'))
+            + 'it is, and null clears one. They are read from stdin only, so no value ever sits in the argument list. A LinkedIn URL\n'
+            + 'is written by its lowercased slug, the form contacts are looked up by. A custom field is named as the account names\n'
+            + 'it (ignoring case); a name the account has none of is contact.field_not_found, and then nothing is changed.\n'))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
         await handle_contact_update(cmd.args[0], cmd.opts(), ctx, g);

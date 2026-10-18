@@ -219,8 +219,10 @@ The two `add-contact` commands always import the contact, and Reply refuses an i
 first name, even for a contact it already holds. `contact opt-out` imports only someone Reply
 doesn't hold yet; `sequence remove-contact` never imports. A contact is looked up, and an import
 matched, by its email; one with only a LinkedIn URL, by that. The lookup is Reply's exact one: an
-email matches ignoring case, and a LinkedIn URL when it differs only in the case of the scheme or
-host, a default port, one trailing slash or a fragment.
+email matches ignoring case, and a LinkedIn URL is matched by its lowercased slug — on linkedin.com
+the path's case does not count, nor the scheme's or host's, a default port, one trailing slash or a
+fragment, while `www` and the query do. Reply is asked for a LinkedIn URL in that form first, then as
+given, and an import or `contact update` writes it in that form.
 
 The commands that carry a person's or a sequence's text in a field of their own read it from stdin
 only, and refuse it on the argument list: `contact find --contact -` (`{email}` or

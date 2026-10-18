@@ -117,10 +117,15 @@ const read_contact_update = (source: string | undefined, read_stdin?: () => stri
         {
             continue;
         }
-        const value = field_value(raw[field], field);
-        if (field === 'linkedin_url' && value !== null && linkedin_key(value) === null)
+        let value = field_value(raw[field], field);
+        if (field === 'linkedin_url' && value !== null)
         {
-            throw new UsageError('linkedin_url must be an absolute http or https URL.', {code: FIELDS_CODE});
+            // Written in the form it is looked up by: its lowercased slug.
+            value = linkedin_key(value);
+            if (value === null)
+            {
+                throw new UsageError('linkedin_url must be an absolute http or https URL.', {code: FIELDS_CODE});
+            }
         }
         patch[UPDATE_FIELDS[field]] = value;
     }

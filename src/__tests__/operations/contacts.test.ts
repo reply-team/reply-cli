@@ -64,6 +64,14 @@ describe('ensure_contact', ()=>{
         await expect(ensure_contact(s, ann)).rejects.toMatchObject({code: 'outcome.unknown', exit_code: 3});
     });
 
+    it('a LinkedIn URL is imported in the form it is looked up by: its lowercased slug', async()=>{
+        answer(json({items: [{id: 458, status: 'created'}]}));
+        const s = await open_session(ctx(), {});
+        await ensure_contact(s, {kind: 'person', person: {linkedin_url: 'HTTPS://WWW.LinkedIn.com/in/Marta-Example/', first_name: 'Marta'}});
+        expect(sent()[0].body).toEqual({items: [{linkedInUrl: 'https://www.linkedin.com/in/marta-example', firstName: 'Marta'}],
+            options: {keys: {linkedInUrl: true}}});
+    });
+
     it('a contact with no email is imported keyed by its LinkedIn URL', async()=>{
         const url = 'https://www.linkedin.com/in/marta-example';
         answer(json({items: [{id: 458, status: 'created'}]}));
@@ -141,22 +149,48 @@ describe('find_contact', ()=>{
         expect(sent().map(r=>r.url)).toEqual([`https://api/v3/contacts?linkedIn=${encodeURIComponent(url)}&top=100&skip=0`]);
     });
 
-    it('matches a LinkedIn URL under the do-not-contact key: scheme and host ignore case, a default port, a trailing slash and a '
-        + 'fragment do not count, and the path\'s case, www and the query do', async()=>{
+    it('asks for a LinkedIn URL by its lowercased slug first, then as given, and counts only entries with the same slug', async()=>{
         const asked = 'https://www.linkedin.com/in/Marta-Example/';
-        answer(json({items: [
-            {id: 2, linkedInUrl: 'https://www.linkedin.com/in/marta-example'},
-            {id: 3, linkedInUrl: 'https://linkedin.com/in/Marta-Example'},
-            {id: 4, linkedInUrl: 'http://www.linkedin.com/in/Marta-Example'},
-            {id: 5, linkedInUrl: 'https://www.linkedin.com/in/Marta-Example?trk=x'},
-            {id: 6, linkedInUrl: 'not a url'},
-            {id: 456, linkedInUrl: 'HTTPS://WWW.LinkedIn.COM:443/in/Marta-Example#about'},
-        ], hasMore: false}));
+        const normal = 'https://www.linkedin.com/in/marta-example';
+        answer(
+            json({items: [
+                {id: 456, linkedInUrl: normal},
+                {id: 3, linkedInUrl: 'https://linkedin.com/in/marta-example'},
+                {id: 4, linkedInUrl: 'http://www.linkedin.com/in/marta-example'},
+                {id: 5, linkedInUrl: 'https://www.linkedin.com/in/marta-example?trk=x'},
+                {id: 6, linkedInUrl: 'not a url'},
+            ], hasMore: false}),
+            json({items: [{id: 456, linkedInUrl: 'HTTPS://WWW.LinkedIn.COM:443/in/Marta-Example#about'}], hasMore: false}),
+        );
         const s = await open_session(ctx(), {});
         expect(await find_contact(s, {kind: 'person', person: {linkedin_url: asked}})).toBe(456);
-        mock_fetch.mockReset();
-        answer(json({items: [{id: 2, linkedInUrl: 'https://www.linkedin.com/in/marta-example'}], hasMore: false}));
-        expect(await find_contact(s, {kind: 'person', person: {linkedin_url: asked}})).toBeNull();
+        expect(sent().map(r=>r.url)).toEqual([
+            `https://api/v3/contacts?linkedIn=${encodeURIComponent(normal)}&top=100&skip=0`,
+            `https://api/v3/contacts?linkedIn=${encodeURIComponent(asked)}&top=100&skip=0`,
+        ]);
+    });
+
+    it('finds a contact Reply holds under the slug as given when the lowercased one finds nobody', async()=>{
+        answer(json({items: [], hasMore: false}), json({items: [{id: 456, linkedInUrl: 'https://www.linkedin.com/in/Marta-Example'}], hasMore: false}));
+        const s = await open_session(ctx(), {});
+        expect(await find_contact(s, {kind: 'person', person: {linkedin_url: 'https://www.linkedin.com/in/Marta-Example'}})).toBe(456);
+    });
+
+    it('one slug held as two contacts under two spellings is contact.not_unique', async()=>{
+        answer(
+            json({items: [{id: 1, linkedInUrl: 'https://www.linkedin.com/in/marta-example'}], hasMore: false}),
+            json({items: [{id: 2, linkedInUrl: 'https://www.linkedin.com/in/Marta-Example'}], hasMore: false}),
+        );
+        const s = await open_session(ctx(), {});
+        await expect(find_contact(s, {kind: 'person', person: {linkedin_url: 'https://www.linkedin.com/in/Marta-Example'}}))
+            .rejects.toMatchObject({code: 'contact.not_unique'});
+    });
+
+    it('a LinkedIn URL already in its normal form is asked for once', async()=>{
+        answer(json({items: [], hasMore: false}));
+        const s = await open_session(ctx(), {});
+        expect(await find_contact(s, {kind: 'person', person: {linkedin_url: 'https://www.linkedin.com/in/marta-example'}})).toBeNull();
+        expect(mock_fetch).toHaveBeenCalledTimes(1);
     });
 
     it('ten pages without an end is not an exact lookup\'s answer: reply.unavailable', async()=>{

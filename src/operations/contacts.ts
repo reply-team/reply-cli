@@ -18,7 +18,8 @@ const import_item = (p: Person): Record<string, string>=>{
     }
     if (p.linkedin_url !== undefined)
     {
-        item.linkedInUrl = p.linkedin_url;
+        // Written in the form it is looked up by.
+        item.linkedInUrl = linkedin_key(p.linkedin_url) ?? p.linkedin_url;
     }
     if (p.first_name !== undefined)
     {
@@ -100,33 +101,41 @@ const import_contact = async(s: Op_session, person: Person): Promise<Ensured>=>{
 const ensure_contact = async(s: Op_session, ref: Contact_ref): Promise<Ensured>=>
     ref.kind === 'id' ? {id: ref.id, created: false} : import_contact(s, ref.person);
 
-type Lookup = {param: 'email' | 'linkedIn'; value: string; holds: (entry: Record<string, unknown>) => boolean};
+type Lookup = {param: 'email' | 'linkedIn'; values: string[]; holds: (entry: Record<string, unknown>) => boolean};
 
 // What a person is looked up by: the email when there is one, else the LinkedIn URL. An entry
 // counts only when it carries the same address: an email equal ignoring case, a LinkedIn URL equal
 // under linkedin_key.
+// INTERIM (API gap): the document does not say whether the exact lookup by LinkedIn URL ignores case.
+// Needed: a lookup that matches a LinkedIn URL by its slug whatever its case, or a word that it does.
+// Workaround: ask with the URL in the form it is written in (its lowercased slug) first, then as
+// given, and count the matches of both together, so one slug held under two spellings is refused
+// rather than half seen.
 const lookup_of = (p: Person): Lookup=>{
     if (p.email !== undefined)
     {
         const wanted = p.email.toLowerCase();
-        return {param: 'email', value: p.email, holds: entry=>typeof entry.email === 'string' && entry.email.toLowerCase() === wanted};
+        return {param: 'email', values: [p.email], holds: entry=>typeof entry.email === 'string' && entry.email.toLowerCase() === wanted};
     }
-    const url = p.linkedin_url as string;
-    const wanted = linkedin_key(url);
-    return {param: 'linkedIn', value: url, holds: entry=>typeof entry.linkedInUrl === 'string' && linkedin_key(entry.linkedInUrl) === wanted};
+    const given = p.linkedin_url as string;
+    const wanted = linkedin_key(given) as string;
+    return {
+        param: 'linkedIn', values: wanted === given ? [wanted] : [wanted, given],
+        holds: entry=>typeof entry.linkedInUrl === 'string' && linkedin_key(entry.linkedInUrl) === wanted,
+    };
 };
 
-// GET /v3/contacts looks a contact up by exact email or LinkedIn URL. The answer is read to its end,
-// and only entries carrying the asked address count. Two contacts under one address is refused
-// rather than guessed between. An exact lookup never runs to pages of entries without an end, so
-// ten such pages are an answer that can't be read, not a reason to guess.
-const find_contact_by_address = async(s: Op_session, person: Person): Promise<number | null>=>{
-    const lookup = lookup_of(person);
-    let found: number | null = null;
+// GET /v3/contacts looks a contact up by exact email or LinkedIn URL. Each answer is read to its end,
+// and only entries carrying the asked address count; the contact found so far, if any, is carried in.
+// Two contacts under one address is refused rather than guessed between. An exact lookup never runs
+// to pages of entries without an end, so ten such pages are an answer that can't be read, not a
+// reason to guess.
+const read_lookup = async(s: Op_session, lookup: Lookup, value: string, found_before: number | null): Promise<number | null>=>{
+    let found = found_before;
     for (let page = 0; page < LOOKUP_PAGES; page++)
     {
         const a = await call_reply(s, 'GET',
-            `/v3/contacts?${lookup.param}=${encodeURIComponent(lookup.value)}&top=${LOOKUP_PAGE}&skip=${page * LOOKUP_PAGE}`, 'read');
+            `/v3/contacts?${lookup.param}=${encodeURIComponent(value)}&top=${LOOKUP_PAGE}&skip=${page * LOOKUP_PAGE}`, 'read');
         if (a.status !== 200)
         {
             throw refusal(a, 'read');
@@ -154,6 +163,16 @@ const find_contact_by_address = async(s: Op_session, person: Person): Promise<nu
         }
     }
     throw new Operation_error('reply.unavailable', 'Reply answered the exact lookup with more pages than one address can fill.', {status: 200});
+};
+
+const find_contact_by_address = async(s: Op_session, person: Person): Promise<number | null>=>{
+    const lookup = lookup_of(person);
+    let found: number | null = null;
+    for (const value of lookup.values)
+    {
+        found = await read_lookup(s, lookup, value, found);
+    }
+    return found;
 };
 
 const find_contact = async(s: Op_session, ref: Contact_ref): Promise<number | null>=>
