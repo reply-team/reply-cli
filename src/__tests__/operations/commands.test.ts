@@ -41,6 +41,8 @@ describe('operations/commands', ()=>{
             expect(text, text).toContain('linkedin_url');
             expect(text.replace(/\s+/g, ' '), text).toContain('stores it by that slug');
             expect(text, text).not.toContain('lookup_incomplete');
+            // Each of them looks a contact up by address, and two contacts under one address is refused.
+            expect(text, text).toContain('  contact.not_unique\n');
         }
         for (const c of [sub(sequence_command, 'add-contact'), sub(contact_list_command, 'add-contact'), sub(contact_command, 'opt-out')])
         {

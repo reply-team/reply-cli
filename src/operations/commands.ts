@@ -122,7 +122,8 @@ add_contact_options(sequence_command.command('add-contact')
         [piped('sequence add-contact 123'), ex('sequence add-contact 123 --email ann@example.com --first-name Ann'),
             ex('sequence add-contact 123 --contact-id 456 --start-step 2')],
         ['sequence.not_found', 'sequence.archived', 'sequence.has_no_steps', 'sequence.step_not_found', 'contact.not_found',
-            'contact.opted_out', 'contact.invalid_email', 'contact.invalid_linkedin_url', 'account.contact_limit_reached'],
+            'contact.not_unique', 'contact.opted_out', 'contact.invalid_email', 'contact.invalid_linkedin_url',
+            'account.contact_limit_reached'],
         true,
         'Result: {"status":"added"|"already_in_sequence","sequence_id","contact_id","contact_created","sequence_active"}\n'
             + CONTACT_HELP + ALWAYS_IMPORTED))
@@ -173,8 +174,8 @@ add_contact_options(contact_list_command.command('add-contact')
     .option('--refuse-opted-out', 'Refuse a contact Reply holds as opted out (a list may otherwise hold them)')
     .description('Put a contact on the list, creating the contact if Reply has nobody under the address')
     .addHelpText('after', help([piped('contact-list add-contact 77'), ex('contact-list add-contact 77 --contact-id 456 --refuse-opted-out')],
-        ['contact-list.not_found', 'contact.not_found', 'contact.opted_out', 'contact.invalid_email', 'contact.invalid_linkedin_url',
-            'account.contact_limit_reached'], true,
+        ['contact-list.not_found', 'contact.not_found', 'contact.not_unique', 'contact.opted_out', 'contact.invalid_email',
+            'contact.invalid_linkedin_url', 'account.contact_limit_reached'], true,
         'Result: {"status":"added","list_id","contact_id","contact_created"}\n' + CONTACT_HELP + ALWAYS_IMPORTED))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
