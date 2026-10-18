@@ -98,9 +98,6 @@ const import_contact = async(s: Op_session, person: Person): Promise<Ensured>=>{
     return {id: item.id, created: item.status === 'created'};
 };
 
-const ensure_contact = async(s: Op_session, ref: Contact_ref): Promise<Ensured>=>
-    ref.kind === 'id' ? {id: ref.id, created: false} : import_contact(s, ref.person);
-
 type Lookup = {param: 'email' | 'linkedIn'; values: string[]; holds: (entry: Record<string, unknown>) => boolean};
 
 // What a person is looked up by: the email when there is one, else the LinkedIn URL. An entry
@@ -175,6 +172,29 @@ const find_contact_by_address = async(s: Op_session, person: Person): Promise<nu
     return found;
 };
 
+// INTERIM (API gap): the document does not say how the import compares a LinkedIn URL when it is the
+// key, so a contact Reply holds under the same slug in another case might be imported a second time.
+// Needed: an import that matches a LinkedIn URL by its slug whatever its case, or a word on how it
+// compares.
+// Workaround: a contact with no email is looked up first, as `contact find` does, and imported only
+// when Reply holds nobody under the URL. A contact with an email is imported straight away: the
+// import matches it by the email.
+const ensure_contact = async(s: Op_session, ref: Contact_ref): Promise<Ensured>=>{
+    if (ref.kind === 'id')
+    {
+        return {id: ref.id, created: false};
+    }
+    if (ref.person.email === undefined)
+    {
+        const found = await find_contact_by_address(s, ref.person);
+        if (found !== null)
+        {
+            return {id: found, created: false};
+        }
+    }
+    return import_contact(s, ref.person);
+};
+
 const find_contact = async(s: Op_session, ref: Contact_ref): Promise<number | null>=>
     ref.kind === 'id' ? ref.id : find_contact_by_address(s, ref.person);
 
@@ -199,5 +219,5 @@ const read_opted_out = async(s: Op_session, contact_id: number): Promise<boolean
     return body.isOptedOut;
 };
 
-export {ensure_contact, find_contact, find_contact_by_address, read_opted_out, contact_not_found};
+export {ensure_contact, import_contact, find_contact, find_contact_by_address, read_opted_out, contact_not_found};
 export type {Ensured};

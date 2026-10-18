@@ -2,7 +2,7 @@ import {Operation_error, type Ids} from '../utils/errors';
 import {call_reply, expect_object, item_failure, refusal, open_session, type Op_session} from './call';
 import type {Op_globals} from './options';
 import {read_contact_input, type Contact_flags} from './contact-input';
-import {ensure_contact, find_contact} from './contacts';
+import {find_contact_by_address, import_contact} from './contacts';
 import {print_result, with_ids} from './result';
 import type {Cli_context} from '../context';
 
@@ -35,12 +35,17 @@ const handle_contact_opt_out = async(opts: Opt_out_opts, ctx: Cli_context, g: Op
     const ids: Ids = {};
     try {
         // The person Reply already holds, so the opt-out lands on them. A contact is created only
-        // when Reply holds nobody under the address.
-        let contact_id = await find_contact(s, contact);
+        // when Reply holds nobody under the address, by an import that asks nothing again.
+        let contact_id: number;
         let created = false;
-        if (contact_id === null)
+        if (contact.kind === 'id')
         {
-            const ensured = await ensure_contact(s, contact);
+            contact_id = contact.id;
+        }
+        else
+        {
+            const found = await find_contact_by_address(s, contact.person);
+            const ensured = found === null ? await import_contact(s, contact.person) : {id: found, created: false};
             contact_id = ensured.id;
             created = ensured.created;
         }

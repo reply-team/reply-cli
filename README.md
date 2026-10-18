@@ -215,15 +215,16 @@ echo '{"email":"ann@example.com","first_name":"Ann"}' | reply sequence add-conta
 echo '{"linkedin_url":"https://www.linkedin.com/in/ann-example","first_name":"Ann"}' | reply contact opt-out --contact -
 ```
 
-The two `add-contact` commands always import the contact, and Reply refuses an import without a
-first name, even for a contact it already holds. `contact opt-out` imports only someone Reply
-doesn't hold yet; `sequence remove-contact` never imports. A contact is looked up, and an import
-matched, by its email; one with only a LinkedIn URL, by that. The lookup is Reply's exact one: an
-email matches ignoring case, and a LinkedIn URL is matched by its lowercased slug — on linkedin.com
-the path's case does not count, nor the scheme's or host's, a default port, one trailing slash or a
-fragment, while `www` and the query do. Reply is asked for a LinkedIn URL in that form first, then as
-given, and the CLI stores a LinkedIn URL by its lowercased slug when it imports a contact or runs
-`contact update`.
+The two `add-contact` commands always import a contact given by email, and Reply refuses an import
+without a first name, even for a contact it already holds; a contact given only by LinkedIn URL is
+looked up first and imported only when Reply holds nobody under it. `contact opt-out` imports only
+someone Reply doesn't hold yet; `sequence remove-contact` never imports. A contact is looked up, and
+an import matched, by its email; one with only a LinkedIn URL, by that. The lookup is Reply's exact
+one: an email matches ignoring case, and a LinkedIn URL is matched by its lowercased slug — on
+linkedin.com the path's case does not count, nor the scheme's or host's, a default port, one trailing
+slash or a fragment, while `www` and the query do. Reply is asked for a LinkedIn URL in that form
+first, then as given, and the CLI stores a LinkedIn URL by its lowercased slug when it imports a
+contact or runs `contact update`.
 
 The commands that carry a person's or a sequence's text in a field of their own read it from stdin
 only, and refuse it on the argument list: `contact find --contact -` (`{email}` or

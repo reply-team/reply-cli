@@ -64,20 +64,33 @@ describe('ensure_contact', ()=>{
         await expect(ensure_contact(s, ann)).rejects.toMatchObject({code: 'outcome.unknown', exit_code: 3});
     });
 
-    it('a LinkedIn URL is imported in the form it is looked up by: its lowercased slug', async()=>{
-        answer(json({items: [{id: 458, status: 'created'}]}));
+    it('a contact with only a LinkedIn URL is looked up first, lowercased then as given, and a contact Reply holds is used, '
+        + 'not imported again', async()=>{
+        const given = 'https://www.linkedin.com/in/Marta-Example';
+        answer(json({items: [], hasMore: false}), json({items: [{id: 456, linkedInUrl: given}], hasMore: false}));
+        const s = await open_session(ctx(), {});
+        expect(await ensure_contact(s, {kind: 'person', person: {linkedin_url: given, first_name: 'Marta'}})).toEqual({id: 456, created: false});
+        expect(sent().map(r=>`${r.method} ${r.url}`)).toEqual([
+            `GET https://api/v3/contacts?linkedIn=${encodeURIComponent('https://www.linkedin.com/in/marta-example')}&top=100&skip=0`,
+            `GET https://api/v3/contacts?linkedIn=${encodeURIComponent(given)}&top=100&skip=0`,
+        ]);
+    });
+
+    it('a LinkedIn URL Reply holds nobody under is imported in the form it is looked up by: its lowercased slug', async()=>{
+        answer(json({items: [], hasMore: false}), json({items: [], hasMore: false}), json({items: [{id: 458, status: 'created'}]}));
         const s = await open_session(ctx(), {});
         await ensure_contact(s, {kind: 'person', person: {linkedin_url: 'HTTPS://WWW.LinkedIn.com/in/Marta-Example/', first_name: 'Marta'}});
-        expect(sent()[0].body).toEqual({items: [{linkedInUrl: 'https://www.linkedin.com/in/marta-example', firstName: 'Marta'}],
+        expect(sent().map(r=>r.method)).toEqual(['GET', 'GET', 'POST']);
+        expect(sent()[2].body).toEqual({items: [{linkedInUrl: 'https://www.linkedin.com/in/marta-example', firstName: 'Marta'}],
             options: {keys: {linkedInUrl: true}}});
     });
 
     it('a contact with no email is imported keyed by its LinkedIn URL', async()=>{
         const url = 'https://www.linkedin.com/in/marta-example';
-        answer(json({items: [{id: 458, status: 'created'}]}));
+        answer(json({items: [], hasMore: false}), json({items: [{id: 458, status: 'created'}]}));
         const s = await open_session(ctx(), {});
         expect(await ensure_contact(s, {kind: 'person', person: {linkedin_url: url, first_name: 'Marta'}})).toEqual({id: 458, created: true});
-        expect(sent()[0].body).toEqual({items: [{linkedInUrl: url, firstName: 'Marta'}], options: {keys: {linkedInUrl: true}}});
+        expect(sent()[1].body).toEqual({items: [{linkedInUrl: url, firstName: 'Marta'}], options: {keys: {linkedInUrl: true}}});
     });
 
     it('a contact with an email and a LinkedIn URL is imported keyed by the email, carrying both', async()=>{
@@ -89,7 +102,7 @@ describe('ensure_contact', ()=>{
     });
 
     it('a validation 400 that names the LinkedIn URL is contact.invalid_linkedin_url', async()=>{
-        answer(json({status: 400, errors: [{pointer: '/items/0/linkedInUrl', detail: 'bad'}]}, 400));
+        answer(json({items: [], hasMore: false}), json({status: 400, errors: [{pointer: '/items/0/linkedInUrl', detail: 'bad'}]}, 400));
         const s = await open_session(ctx(), {});
         await expect(ensure_contact(s, {kind: 'person', person: {linkedin_url: 'https://www.linkedin.com/in/x', first_name: 'M'}}))
             .rejects.toMatchObject({code: 'contact.invalid_linkedin_url'});
@@ -97,6 +110,14 @@ describe('ensure_contact', ()=>{
 });
 
 describe('find_contact', ()=>{
+    it('a contact given with both an email and a LinkedIn URL is looked up by the email only', async()=>{
+        answer(json({items: [{id: 456, email: 'marta@example.com'}], hasMore: false}));
+        const s = await open_session(ctx(), {});
+        expect(await find_contact(s, {kind: 'person', person: {email: 'marta@example.com', linkedin_url: 'https://www.linkedin.com/in/Marta-Example'}}))
+            .toBe(456);
+        expect(sent().map(r=>r.url)).toEqual(['https://api/v3/contacts?email=marta%40example.com&top=100&skip=0']);
+    });
+
     it('asks Reply\'s exact lookup by email, encoded, with no containment search', async()=>{
         answer(json({items: [{id: 456, email: 'ann+q4@example.com'}], hasMore: false}));
         const s = await open_session(ctx(), {});

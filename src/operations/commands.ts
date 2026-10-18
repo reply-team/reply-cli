@@ -37,8 +37,8 @@ const ex = (command: string): string=>`${P} ${command}`;
 const piped = (command: string, contact = '{"email":"ann@example.com","first_name":"Ann"}'): string=>
     `echo '${contact}' | ${P} ${command} --contact -`;
 
-const ALWAYS_IMPORTED = 'A contact given by email or LinkedIn URL is always imported, so Reply needs a first name, even for one it\n'
-    + 'already holds.\n';
+const ALWAYS_IMPORTED = 'A contact given by email is always imported, so Reply needs a first name, even for one it already holds.\n'
+    + 'One given only by LinkedIn URL is looked up first and imported only when Reply holds nobody under it.\n';
 
 const run = (fn: (cmd: Command) => Promise<void>)=>async function(this: Command): Promise<void>
 {
@@ -117,7 +117,7 @@ add_contact_options(sequence_command.command('add-contact')
     .argument('<sequence-id>', 'Sequence id'))
     .option('--start-step <n>', 'Start at this step of the sequence (1 = first; the steps must form one chain)')
     .option('--ignore-step-delay', 'Skip the delay of the step the contact starts at (Reply still sends within the sequence\'s schedule)')
-    .description('Put a contact into the sequence, creating the contact if Reply has nobody under the email')
+    .description('Put a contact into the sequence, creating the contact if Reply has nobody under the address')
     .addHelpText('after', help(
         [piped('sequence add-contact 123'), ex('sequence add-contact 123 --email ann@example.com --first-name Ann'),
             ex('sequence add-contact 123 --contact-id 456 --start-step 2')],
@@ -171,7 +171,7 @@ const contact_list_command = new Command('contact-list').description('Put contac
 add_contact_options(contact_list_command.command('add-contact')
     .argument('<list-id>', 'Contact list id'))
     .option('--refuse-opted-out', 'Refuse a contact Reply holds as opted out (a list may otherwise hold them)')
-    .description('Put a contact on the list, creating the contact if Reply has nobody under the email')
+    .description('Put a contact on the list, creating the contact if Reply has nobody under the address')
     .addHelpText('after', help([piped('contact-list add-contact 77'), ex('contact-list add-contact 77 --contact-id 456 --refuse-opted-out')],
         ['contact-list.not_found', 'contact.not_found', 'contact.opted_out', 'contact.invalid_email', 'contact.invalid_linkedin_url',
             'account.contact_limit_reached'], true,

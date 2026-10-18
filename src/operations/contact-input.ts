@@ -53,9 +53,8 @@ const is_linkedin_host = (host: string): boolean=>host === 'linkedin.com' || hos
 // The form a profile URL is compared and written in, or null when the text is not an absolute
 // http(s) URL. On linkedin.com and its subdomains a URL names a person by its slug whatever its case,
 // so the path is lowercased there; on any other host it keeps its case. The case of the scheme and
-// the host, a default port, one trailing slash and a fragment never count; www and the query do. It
-// is the key a do-not-contact list keeps a LinkedIn URL by, so a lookup binds exactly the person
-// such a list names.
+// the host, a default port, one trailing slash and a fragment never count; www and the query do. The
+// CLI stores and matches a LinkedIn URL by this form, so what it writes is what it later finds.
 const linkedin_key = (text: string): string | null=>{
     let url: URL;
     try {
