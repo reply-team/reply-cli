@@ -12,7 +12,7 @@ import {
 import {handle_inbox_reply} from './inbox-reply';
 import {handle_contact_list_add_contact} from './contact-list';
 import {handle_contact_opt_out} from './contact';
-import {handle_contact_find, handle_contact_get} from './contact-record';
+import {handle_contact_find, handle_contact_get, handle_contact_update, handle_contact_delete} from './contact-record';
 
 const P = PROGRAM_NAME;
 const COMMON_ERRORS = [
@@ -152,7 +152,7 @@ add_contact_options(contact_list_command.command('add-contact')
         await handle_contact_list_add_contact(cmd.args[0], cmd.opts(), ctx, g);
     }));
 
-const contact_command = new Command('contact').description('Find a contact, read it, or opt it out');
+const contact_command = new Command('contact').description('Find a contact, read it, change or delete it, or opt it out');
 
 contact_command.command('find')
     .option('--contact <stdin>', 'Only -: {email} or {linkedin_url} as JSON on stdin')
@@ -177,6 +177,35 @@ contact_command.command('get')
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
         await handle_contact_get(cmd.args[0], ctx, g);
+    }));
+
+contact_command.command('update')
+    .argument('<contact-id>', 'Contact id')
+    .option('--fields <stdin>', 'Only -: the fields to change as JSON on stdin')
+    .description('Change some of a contact\'s fields and custom fields; the rest stay as they are')
+    .addHelpText('after', help(
+        [`echo '{"title":"CTO","company":"Acme"}' | ${P} contact update 456 --fields -`,
+            `echo '{"last_name":null,"custom_fields":[{"name":"leadSource","value":"Event"}]}' | ${P} contact update 456 --fields -`],
+        ['contact.not_found', 'contact.field_not_found'], true,
+        'Result: {"status":"updated","contact_id"}\n'
+            + 'Fields: {first_name, last_name, company, title, linkedin_url, custom_fields: [{name, value}]}; a field left out stays as\n'
+            + 'it is, and null clears one. They are read from stdin only, so no value ever sits in the argument list. A custom field\n'
+            + 'is named as the account names it (ignoring case); a name the account has none of is contact.field_not_found, and then\n'
+            + 'nothing is changed.\n'))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_contact_update(cmd.args[0], cmd.opts(), ctx, g);
+    }));
+
+contact_command.command('delete')
+    .argument('<contact-id>', 'Contact id')
+    .description('Delete a contact from the account, with its history at Reply')
+    .addHelpText('after', help([ex('contact delete 456')], ['contact.not_found'], true,
+        'Result: {"status":"deleted","contact_id"}\n'
+            + 'After exit 3 the contact may already be gone: running the command again is safe, and then answers contact.not_found.\n'))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_contact_delete(cmd.args[0], ctx, g);
     }));
 
 add_contact_options(contact_command.command('opt-out'))

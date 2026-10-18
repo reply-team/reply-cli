@@ -20,7 +20,7 @@ describe('operations/commands', ()=>{
     it('names the commands in Reply\'s words', ()=>{
         expect(sequence_command.commands.map(c=>c.name())).toEqual(['get', 'contacts', 'stats', 'add-contact', 'remove-contact', 'pause', 'start']);
         expect(contact_list_command.commands.map(c=>c.name())).toEqual(['add-contact']);
-        expect(contact_command.commands.map(c=>c.name())).toEqual(['find', 'get', 'opt-out']);
+        expect(contact_command.commands.map(c=>c.name())).toEqual(['find', 'get', 'update', 'delete', 'opt-out']);
         expect(inbox_command.commands.map(c=>c.name())).toEqual(['list', 'get', 'reply', 'categories', 'categorize', 'mark-read', 'mark-unread']);
     });
 
@@ -60,6 +60,17 @@ describe('operations/commands', ()=>{
             expect(flags(sub(inbox_command, name)), name).toEqual([]);
         }
         expect(flags(sub(contact_command, 'get'))).toEqual([]);
+        expect(flags(sub(contact_command, 'delete'))).toEqual([]);
+    });
+
+    it('contact update takes its values only through --fields -, and contact delete says what a re-run answers', ()=>{
+        const update = sub(contact_command, 'update');
+        expect(flags(update)).toEqual(['--fields']);
+        const text = help_of(update);
+        expect(text, text).toContain('--fields -');
+        expect(text, text).toContain('contact.field_not_found');
+        const del = help_of(sub(contact_command, 'delete'));
+        expect(del.replace(/\s+/g, ' '), del).toContain('answers contact.not_found');
     });
 
     it('contact find takes the address only through --contact -, and never creates a contact', ()=>{

@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 import {describe, it, expect, beforeEach} from 'vitest';
 import {mock_fetch, json, ctx, sent, answer, capture} from './helpers';
-import {handle_contact_find, handle_contact_get} from '../../operations/contact-record';
+import {handle_contact_find, handle_contact_get, handle_contact_update, handle_contact_delete} from '../../operations/contact-record';
 
 const EMAIL = 'marta@example.com';
 const URL_ = 'https://www.linkedin.com/in/marta-example';
@@ -93,6 +93,118 @@ describe('contact get', ()=>{
 
     it('an id that is not a Reply id is usage.id, with no call', async()=>{
         await expect(handle_contact_get('marta', ctx(), {})).rejects.toMatchObject({code: 'usage.id', exit_code: 2});
+        expect(mock_fetch).not.toHaveBeenCalled();
+    });
+});
+
+const FIELDS_URL = 'https://api/v3/custom-fields?entityType=contact';
+const SECRET = 'Marta Example Secret';
+const update = (source: string | undefined, input?: unknown)=>
+    capture(()=>handle_contact_update('456', {fields: source}, ctx(), {json: true}, input === undefined ? undefined : stdin(input)));
+
+describe('contact update', ()=>{
+    it('changes the fields from stdin with one PATCH: Reply\'s names, a null kept to clear, custom fields by the names the '
+        + 'account gives them after one read of its fields', async()=>{
+        answer(json([{id: 1, title: 'leadSource', fieldType: 'text'}, {id: 2, title: 'budget', fieldType: 'text'}]), json({id: 456}));
+        const {out} = await update('-', {first_name: ' Marta ', title: null, linkedin_url: URL_,
+            custom_fields: [{name: 'leadSource', value: 'Event'}, {name: 'Budget', value: null}]});
+        expect(JSON.parse(out)).toEqual({status: 'updated', contact_id: 456});
+        expect(sent()).toEqual([
+            {method: 'GET', url: FIELDS_URL, body: undefined},
+            {method: 'PATCH', url: 'https://api/v3/contacts/456', body: {firstName: 'Marta', title: null, linkedInUrl: URL_,
+                customFields: [{name: 'leadSource', value: 'Event'}, {name: 'budget', value: null}]}},
+        ]);
+    });
+
+    it('without custom fields there is no read before the PATCH', async()=>{
+        answer(json({id: 456}));
+        const {out} = await update('-', {company: 'Acme', last_name: null});
+        expect(JSON.parse(out)).toEqual({status: 'updated', contact_id: 456});
+        expect(sent()).toEqual([{method: 'PATCH', url: 'https://api/v3/contacts/456', body: {company: 'Acme', lastName: null}}]);
+    });
+
+    it('a custom field the account does not have is contact.field_not_found, named, and nothing is written', async()=>{
+        answer(json([{id: 1, title: 'leadSource', fieldType: 'text'}]));
+        const e = await update('-', {first_name: 'Marta', custom_fields: [{name: 'LEADSOURCE', value: 'x'}, {name: 'Tier', value: SECRET}]})
+            .catch(x=>x);
+        expect(e).toMatchObject({code: 'contact.field_not_found', exit_code: 1, details: {fields: ['Tier']}, ids: {contact_id: 456}});
+        expect(shown(e)).not.toContain(SECRET);
+        expect(sent().map(r=>r.method)).toEqual(['GET']);
+    });
+
+    it('a 404 is contact.not_found', async()=>{
+        answer(json({code: 'contact.notFound'}, 404));
+        await expect(update('-', {company: 'Acme'})).rejects.toMatchObject({code: 'contact.not_found', exit_code: 1, ids: {contact_id: 456}});
+    });
+
+    it('a 400 that names fields is reply.invalid_request with their names only', async()=>{
+        answer(json({status: 400, errors: [{pointer: '/linkedInUrl', detail: `'${URL_}' is not valid`}]}, 400));
+        const e = await update('-', {linkedin_url: URL_}).catch(x=>x);
+        expect(e).toMatchObject({code: 'reply.invalid_request', details: {fields: ['linkedInUrl']}});
+        expect(JSON.stringify(e.details)).not.toContain('marta-example');
+    });
+
+    it('a 503 on the PATCH is outcome.unknown (exit 3), and it was sent once', async()=>{
+        answer(json('', 503));
+        await expect(update('-', {company: 'Acme'})).rejects.toMatchObject({code: 'outcome.unknown', exit_code: 3, ids: {contact_id: 456}});
+        expect(mock_fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('takes the fields from stdin only: inline JSON, @file or no flag is usage.fields, with no call and no value repeated', async()=>{
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'reply-update-'));
+        const file = path.join(dir, 'f.json');
+        fs.writeFileSync(file, JSON.stringify({first_name: SECRET}));
+        try {
+            for (const source of [JSON.stringify({first_name: SECRET}), `@${file}`, undefined])
+            {
+                const e = await update(source).catch(x=>x);
+                expect(e, String(source)).toMatchObject({code: 'usage.fields', exit_code: 2});
+                expect(shown(e), String(source)).not.toContain(SECRET);
+            }
+        } finally {
+            fs.rmSync(dir, {recursive: true, force: true});
+        }
+        expect(mock_fetch).not.toHaveBeenCalled();
+    });
+
+    it('refuses fields that change nothing, an unknown field, a blank or non-string value, a bad LinkedIn URL, a malformed '
+        + 'custom field and a name given twice, with no call and no value repeated', async()=>{
+        for (const input of [{}, {email: EMAIL}, {first_name: '  '}, {first_name: 42}, {linkedin_url: SECRET},
+            {custom_fields: []}, {custom_fields: 'x'}, {custom_fields: [{name: 'Tier'}]}, {custom_fields: [{name: ' ', value: SECRET}]},
+            {custom_fields: [{name: 'Tier', value: 7}]}, {custom_fields: [{name: 'Tier', value: SECRET, id: 1}]}, {custom_fields: [SECRET]},
+            {custom_fields: [{name: 'Tier', value: SECRET}, {name: 'tier', value: '2'}]}, '[]', 'not json'])
+        {
+            const e = await update('-', input).catch(x=>x);
+            expect(e, JSON.stringify(input)).toMatchObject({code: 'usage.fields', exit_code: 2});
+            expect(shown(e), JSON.stringify(input)).not.toContain(SECRET);
+        }
+        expect(mock_fetch).not.toHaveBeenCalled();
+    });
+});
+
+describe('contact delete', ()=>{
+    it('deletes the contact with one DELETE', async()=>{
+        answer(json(undefined, 204));
+        const {out} = await capture(()=>handle_contact_delete('456', ctx(), {json: true}));
+        expect(JSON.parse(out)).toEqual({status: 'deleted', contact_id: 456});
+        expect(sent()).toEqual([{method: 'DELETE', url: 'https://api/v3/contacts/456', body: undefined}]);
+    });
+
+    it('a 404 is contact.not_found', async()=>{
+        answer(json({code: 'contact.notFound'}, 404));
+        await expect(handle_contact_delete('456', ctx(), {})).rejects.toMatchObject({code: 'contact.not_found', exit_code: 1, ids: {contact_id: 456}});
+    });
+
+    it('a 503 is outcome.unknown (exit 3), sent once, and the hint says a re-run answers contact.not_found if it was deleted', async()=>{
+        answer(json('', 503));
+        const e = await handle_contact_delete('456', ctx(), {}).catch(x=>x);
+        expect(e).toMatchObject({code: 'outcome.unknown', exit_code: 3, ids: {contact_id: 456}});
+        expect(e.hint).toContain('contact.not_found');
+        expect(mock_fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('an id that is not a Reply id is usage.id, with no call', async()=>{
+        await expect(handle_contact_delete('0', ctx(), {})).rejects.toMatchObject({code: 'usage.id', exit_code: 2});
         expect(mock_fetch).not.toHaveBeenCalled();
     });
 });
