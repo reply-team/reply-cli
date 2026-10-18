@@ -1,5 +1,5 @@
 import {describe, it, expect, beforeEach} from 'vitest';
-import {mock_fetch, json, ctx, sent, answer, capture} from './helpers';
+import {mock_fetch, json, ctx, sent, answer, capture, instant_timers, real_timers} from './helpers';
 import {handle_inbox_reply} from '../../operations/inbox-reply';
 
 const BODY = 'Thanks Marta, Tuesday at 10 works.';
@@ -110,13 +110,37 @@ describe('inbox reply', ()=>{
         expect(sent().filter(r=>r.method === 'POST')).toHaveLength(1);
     });
 
-    it('a 502 without Reply\'s code, a 503 and an unreadable 200 are outcome.unknown (exit 3), sent once', async()=>{
-        for (const res of [json('<html>bad gateway</html>', 502), json({code: 'inboxThread.unavailable'}, 503), json('<html>ok</html>', 200)])
+    it('a 502 without Reply\'s code, a 503, a 201 and an unreadable 200 are outcome.unknown (exit 3), sent once, each saying a repeat may send it twice', async()=>{
+        const cases: [string, Response][] = [
+            ['uncoded 502', json('<html>bad gateway</html>', 502)],
+            ['503', json({code: 'inboxThread.unavailable'}, 503)],
+            ['201', json({}, 201)],
+            ['unreadable 200', json('<html>ok</html>', 200)],
+        ];
+        for (const [name, res] of cases)
         {
             mock_fetch.mockReset();
             answer(email_thread(), res);
-            await expect(reject({body: BODY})).rejects.toMatchObject({code: 'outcome.unknown', exit_code: 3, ids: {thread_id: 9}});
-            expect(sent().filter(r=>r.method === 'POST')).toHaveLength(1);
+            const e = await reject({body: BODY}).catch((x: unknown)=>x);
+            expect(e, name).toMatchObject({code: 'outcome.unknown', exit_code: 3, ids: {thread_id: 9}});
+            const hint = (e as {hint?: string}).hint ?? '';
+            expect(hint, `${name}: ${hint}`).toContain('may send it twice');
+            expect(hint, `${name}: ${hint}`).not.toContain('safe to re-run');
+            expect(sent().filter(r=>r.method === 'POST'), name).toHaveLength(1);
+        }
+    });
+
+    it('a 5xx on the thread read before the send is reply.unavailable (exit 1): nothing was sent', async()=>{
+        instant_timers();
+        try {
+            // The client asks a read again after a 5xx, so every attempt answers 503.
+            answer(...[1, 2, 3, 4].map(()=>json({title: 'Service Unavailable'}, 503)));
+            const e = await reject({body: BODY}).catch((x: unknown)=>x);
+            expect(e).toMatchObject({code: 'reply.unavailable', exit_code: 1, ids: {thread_id: 9}});
+            expect((e as {hint?: string}).hint ?? '', 'no send-twice hint before a send').not.toContain('may send it twice');
+            expect(sent().map(r=>r.method)).toEqual(['GET', 'GET', 'GET', 'GET']);
+        } finally {
+            real_timers();
         }
     });
 
