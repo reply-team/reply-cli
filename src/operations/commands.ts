@@ -163,11 +163,14 @@ inbox_command.command('list')
     .option('--contact-id <id>', 'Threads with this contact')
     .option('--sequence-id <id>', 'Threads of this sequence')
     .option('--source <source>', 'inbox | sent | unread | ai-draft (Reply\'s default: inbox)')
+    .option('--channel <channel>', 'email | linkedin: only threads on this channel')
+    .option('--category-id <id>', 'Only threads filed under this inbox category (see `inbox categories`)')
     .option('--since <iso>', 'Only threads that moved at or after this moment')
     .option('--limit <n>', 'Threads per page, 1-100 (default 20)')
     .option('--offset <n>', 'Threads to skip (default 0)')
     .description('One page of inbox threads, by contact or by sequence')
-    .addHelpText('after', help([ex('inbox list --contact-id 456'), ex('inbox list --sequence-id 123 --source unread --since 2026-10-01T00:00:00Z')], [], false))
+    .addHelpText('after', help([ex('inbox list --contact-id 456'), ex('inbox list --sequence-id 123 --source unread --since 2026-10-01T00:00:00Z'),
+        ex('inbox list --sequence-id 123 --channel linkedin --category-id 7')], [], false))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
         await handle_inbox_list(cmd.opts(), ctx, g);

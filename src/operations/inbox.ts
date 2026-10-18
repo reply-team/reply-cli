@@ -8,12 +8,19 @@ import type {Cli_context} from '../context';
 const SOURCES = {'inbox': 'inbox', 'sent': 'sent', 'unread': 'unread', 'ai-draft': 'aiDraft'} as const;
 type Source = keyof typeof SOURCES;
 
+// The CLI's channel words and Reply's.
+const CHANNELS = {'email': 'email', 'linkedin': 'linkedIn'} as const;
+type Channel = keyof typeof CHANNELS;
+
 const thread_not_found = (id: number, a: Answer): Operation_error=>
     new Operation_error('inbox.thread_not_found', `This account has no inbox thread ${id} it can see.`, {
         status: a.status, reply_code: reply_code_of(a),
     });
 
-type Inbox_list_opts = {contactId?: string; sequenceId?: string; source?: string; since?: string; limit?: string; offset?: string};
+type Inbox_list_opts = {
+    contactId?: string; sequenceId?: string; source?: string; channel?: string; categoryId?: string;
+    since?: string; limit?: string; offset?: string;
+};
 
 const handle_inbox_list = async(opts: Inbox_list_opts, ctx: Cli_context, g: Op_globals): Promise<void>=>{
     if ((opts.contactId === undefined) === (opts.sequenceId === undefined))
@@ -27,6 +34,15 @@ const handle_inbox_list = async(opts: Inbox_list_opts, ctx: Cli_context, g: Op_g
     if (source !== undefined)
     {
         filter.source = SOURCES[source];
+    }
+    const channel = parse_choice(opts.channel, '--channel', Object.keys(CHANNELS) as Channel[]);
+    if (channel !== undefined)
+    {
+        filter.channels = [CHANNELS[channel]];
+    }
+    if (opts.categoryId !== undefined)
+    {
+        filter.categoryIds = [parse_id(opts.categoryId, '--category-id')];
     }
     if (opts.since !== undefined)
     {

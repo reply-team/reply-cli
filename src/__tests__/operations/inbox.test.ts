@@ -31,6 +31,22 @@ describe('inbox list', ()=>{
     it('refuses a --source Reply has no word for', async()=>{
         await expect(handle_inbox_list({contactId: '1', source: 'all'}, ctx(), {})).rejects.toMatchObject({code: 'usage.choice'});
     });
+
+    it('filters by channel, in Reply\'s spelling, and by category', async()=>{
+        answer(json({items: [], hasMore: false}), json({items: [], hasMore: false}));
+        await capture(()=>handle_inbox_list({sequenceId: '123', channel: 'linkedin', categoryId: '7'}, ctx(), {}));
+        await capture(()=>handle_inbox_list({contactId: '456', channel: 'email'}, ctx(), {}));
+        expect(sent().map(r=>r.body)).toEqual([
+            {sequenceIds: [123], channels: ['linkedIn'], categoryIds: [7]},
+            {contactIds: [456], channels: ['email']},
+        ]);
+    });
+
+    it('refuses a --channel Reply has no word for, and a --category-id that is not an id', async()=>{
+        await expect(handle_inbox_list({contactId: '1', channel: 'sms'}, ctx(), {})).rejects.toMatchObject({code: 'usage.choice'});
+        await expect(handle_inbox_list({contactId: '1', categoryId: '0'}, ctx(), {})).rejects.toMatchObject({code: 'usage.id'});
+        expect(mock_fetch).not.toHaveBeenCalled();
+    });
 });
 
 describe('inbox get', ()=>{

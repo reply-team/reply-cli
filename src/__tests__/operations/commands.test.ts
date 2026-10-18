@@ -29,7 +29,8 @@ describe('operations/commands', ()=>{
         expect(flags(sub(sequence_command, 'add-contact'))).toEqual(expect.arrayContaining(['--start-step', '--ignore-step-delay']));
         expect(flags(sub(sequence_command, 'start'))).toContain('--expect-contacts');
         expect(flags(sub(contact_list_command, 'add-contact'))).toContain('--refuse-opted-out');
-        expect(flags(sub(inbox_command, 'list'))).toEqual(expect.arrayContaining(['--contact-id', '--sequence-id', '--source', '--since', '--limit', '--offset']));
+        expect(flags(sub(inbox_command, 'list'))).toEqual(expect.arrayContaining(
+            ['--contact-id', '--sequence-id', '--source', '--channel', '--category-id', '--since', '--limit', '--offset']));
         expect(flags(sub(sequence_command, 'stats'))).toEqual(expect.arrayContaining(['--preset', '--from', '--to']));
     });
 });
