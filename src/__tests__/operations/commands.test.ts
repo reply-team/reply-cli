@@ -14,7 +14,7 @@ describe('operations/commands', ()=>{
         expect(sequence_command.commands.map(c=>c.name())).toEqual(['get', 'contacts', 'stats', 'add-contact', 'remove-contact', 'pause', 'start']);
         expect(contact_list_command.commands.map(c=>c.name())).toEqual(['add-contact']);
         expect(contact_command.commands.map(c=>c.name())).toEqual(['opt-out']);
-        expect(inbox_command.commands.map(c=>c.name())).toEqual(['list', 'get']);
+        expect(inbox_command.commands.map(c=>c.name())).toEqual(['list', 'get', 'categories', 'categorize', 'mark-read', 'mark-unread']);
     });
 
     it('the commands about a person take the contact flags', ()=>{
@@ -32,5 +32,10 @@ describe('operations/commands', ()=>{
         expect(flags(sub(inbox_command, 'list'))).toEqual(expect.arrayContaining(
             ['--contact-id', '--sequence-id', '--source', '--channel', '--category-id', '--since', '--limit', '--offset']));
         expect(flags(sub(sequence_command, 'stats'))).toEqual(expect.arrayContaining(['--preset', '--from', '--to']));
+        expect(flags(sub(inbox_command, 'categorize'))).toEqual(['--category-id', '--clear']);
+        for (const name of ['categories', 'mark-read', 'mark-unread'])
+        {
+            expect(flags(sub(inbox_command, name)), name).toEqual([]);
+        }
     });
 });

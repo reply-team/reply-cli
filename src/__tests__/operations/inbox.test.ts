@@ -1,6 +1,8 @@
 import {describe, it, expect, beforeEach} from 'vitest';
 import {mock_fetch, json, ctx, sent, answer, capture} from './helpers';
-import {handle_inbox_list, handle_inbox_get} from '../../operations/inbox';
+import {
+    handle_inbox_list, handle_inbox_get, handle_inbox_categories, handle_inbox_categorize, handle_inbox_mark_read, handle_inbox_mark_unread,
+} from '../../operations/inbox';
 
 beforeEach(()=>{ mock_fetch.mockReset(); });
 
@@ -83,5 +85,94 @@ describe('inbox get', ()=>{
 
     it('--limit over 20 is a usage error', async()=>{
         await expect(handle_inbox_get('9', {limit: '21'}, ctx(), {})).rejects.toMatchObject({code: 'usage.range'});
+    });
+});
+
+describe('inbox categories', ()=>{
+    it('passes Reply\'s categories through, the reserved ones included', async()=>{
+        const rows = [
+            {id: 1, name: 'Meeting', color: 'green', isReserved: true, unreadThreadsCount: 3},
+            {id: 7, name: 'Hot Leads', color: 'red', isReserved: false, unreadThreadsCount: 0},
+        ];
+        answer(json(rows));
+        const {out} = await capture(()=>handle_inbox_categories(ctx(), {json: true}));
+        expect(JSON.parse(out)).toEqual({items: rows});
+        expect(sent()).toEqual([{method: 'GET', url: 'https://api/v3/inbox/threads/categories', body: undefined}]);
+    });
+
+    it('an answer that is not a list is reply.unavailable', async()=>{
+        answer(json({items: []}));
+        await expect(handle_inbox_categories(ctx(), {})).rejects.toMatchObject({code: 'reply.unavailable', exit_code: 1});
+    });
+});
+
+describe('inbox categorize', ()=>{
+    it('files the thread under a category with one absolute PUT', async()=>{
+        answer(json(null, 204));
+        const {out} = await capture(()=>handle_inbox_categorize('9', {categoryId: '7'}, ctx(), {json: true}));
+        expect(JSON.parse(out)).toEqual({status: 'categorized', thread_id: 9, category_id: 7});
+        expect(sent()).toEqual([{method: 'PUT', url: 'https://api/v3/inbox/threads/9/category', body: {categoryId: 7}}]);
+    });
+
+    it('--clear sends categoryId null, which is how Reply clears it', async()=>{
+        answer(json(null, 204));
+        const {out} = await capture(()=>handle_inbox_categorize('9', {clear: true}, ctx(), {json: true}));
+        expect(JSON.parse(out)).toEqual({status: 'cleared', thread_id: 9, category_id: null});
+        const body = sent()[0].body;
+        expect(body, `sent ${JSON.stringify(body)}`).toStrictEqual({categoryId: null});
+    });
+
+    it('needs exactly one of --category-id and --clear', async()=>{
+        for (const opts of [{}, {categoryId: '7', clear: true}])
+        {
+            await expect(handle_inbox_categorize('9', opts, ctx(), {})).rejects.toMatchObject({code: 'usage.inbox', exit_code: 2});
+        }
+        expect(mock_fetch).not.toHaveBeenCalled();
+    });
+
+    it('tells a missing thread from a missing category by Reply\'s code', async()=>{
+        const cases: [Response, string][] = [
+            [json({code: 'inboxThread.notFound'}, 404), 'inbox.thread_not_found'],
+            [json({code: 'inboxCategory.notFound'}, 404), 'inbox.category_not_found'],
+            [json({title: 'Not Found'}, 404), 'reply.refused'],
+        ];
+        for (const [res, code] of cases)
+        {
+            mock_fetch.mockReset();
+            answer(res);
+            await expect(handle_inbox_categorize('9', {categoryId: '7'}, ctx(), {})).rejects.toMatchObject({code, ids: {thread_id: 9}});
+        }
+    });
+
+    it('a 503 is outcome.unknown (exit 3), and the PUT is not resent', async()=>{
+        answer(json('', 503));
+        await expect(handle_inbox_categorize('9', {clear: true}, ctx(), {})).rejects.toMatchObject({code: 'outcome.unknown', exit_code: 3});
+        expect(mock_fetch).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('inbox mark-read and mark-unread', ()=>{
+    it('marks one thread with Reply\'s bulk call; an empty failure dictionary means done', async()=>{
+        answer(json({}), json({}));
+        const read = await capture(()=>handle_inbox_mark_read('9', ctx(), {json: true}));
+        const unread = await capture(()=>handle_inbox_mark_unread('9', ctx(), {json: true}));
+        expect(JSON.parse(read.out)).toEqual({status: 'read', thread_id: 9});
+        expect(JSON.parse(unread.out)).toEqual({status: 'unread', thread_id: 9});
+        expect(sent()).toEqual([
+            {method: 'POST', url: 'https://api/v3/inbox/threads/mark-as-read', body: {threadIds: [9]}},
+            {method: 'POST', url: 'https://api/v3/inbox/threads/mark-as-unread', body: {threadIds: [9]}},
+        ]);
+    });
+
+    it('a per-item notFound is inbox.thread_not_found; any other item error is reply.refused with Reply\'s word', async()=>{
+        answer(json({'9': {error: 'notFound', errorDetails: 'Inbox thread not found.'}}));
+        await expect(handle_inbox_mark_read('9', ctx(), {})).rejects.toMatchObject({code: 'inbox.thread_not_found', ids: {thread_id: 9}});
+        answer(json({'9': {error: 'forbidden', errorDetails: null}}));
+        await expect(handle_inbox_mark_unread('9', ctx(), {})).rejects.toMatchObject({code: 'reply.refused', reply_code: 'forbidden'});
+    });
+
+    it('a 200 that is not a dictionary is outcome.unknown', async()=>{
+        answer(json('<html>gateway</html>', 200));
+        await expect(handle_inbox_mark_read('9', ctx(), {})).rejects.toMatchObject({code: 'outcome.unknown', exit_code: 3});
     });
 });

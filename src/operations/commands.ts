@@ -6,7 +6,9 @@ import {add_contact_options, CONTACT_HELP} from './contact-input';
 import {handle_sequence_get, handle_sequence_contacts, handle_sequence_stats} from './sequence-read';
 import {handle_sequence_add_contact, handle_sequence_remove_contact} from './sequence-membership';
 import {handle_sequence_pause, handle_sequence_start} from './sequence-state';
-import {handle_inbox_list, handle_inbox_get} from './inbox';
+import {
+    handle_inbox_list, handle_inbox_get, handle_inbox_categories, handle_inbox_categorize, handle_inbox_mark_read, handle_inbox_mark_unread,
+} from './inbox';
 import {handle_contact_list_add_contact} from './contact-list';
 import {handle_contact_opt_out} from './contact';
 
@@ -157,7 +159,7 @@ add_contact_options(contact_command.command('opt-out'))
         await handle_contact_opt_out(cmd.opts(), ctx, g);
     }));
 
-const inbox_command = new Command('inbox').description('Read inbox threads');
+const inbox_command = new Command('inbox').description('Read inbox threads, file them under a category, mark them read or unread');
 
 inbox_command.command('list')
     .option('--contact-id <id>', 'Threads with this contact')
@@ -187,6 +189,46 @@ inbox_command.command('get')
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
         await handle_inbox_get(cmd.args[0], cmd.opts(), ctx, g);
+    }));
+
+inbox_command.command('categories')
+    .description('The inbox categories a thread can be filed under, Reply\'s reserved ones included')
+    .addHelpText('after', help([ex('inbox categories')], [], false,
+        'Result: {"items"}: Reply\'s categories as it gives them (id, name, color, isReserved, unreadThreadsCount).\n'))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_inbox_categories(ctx, g);
+    }));
+
+inbox_command.command('categorize')
+    .argument('<thread-id>', 'Inbox thread id')
+    .option('--category-id <id>', 'File the thread under this category (see `inbox categories`)')
+    .option('--clear', 'Take the thread out of its category')
+    .description('File a thread under one inbox category, or clear its category (a thread is in at most one)')
+    .addHelpText('after', help([ex('inbox categorize 9876 --category-id 7'), ex('inbox categorize 9876 --clear')],
+        ['inbox.thread_not_found', 'inbox.category_not_found'], true,
+        'Result: {"status":"categorized"|"cleared","thread_id","category_id"}; category_id is null after --clear.\n'))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_inbox_categorize(cmd.args[0], cmd.opts(), ctx, g);
+    }));
+
+inbox_command.command('mark-read')
+    .argument('<thread-id>', 'Inbox thread id')
+    .description('Mark a thread as read (one that is already read stays read)')
+    .addHelpText('after', help([ex('inbox mark-read 9876')], ['inbox.thread_not_found'], true, 'Result: {"status":"read","thread_id"}\n'))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_inbox_mark_read(cmd.args[0], ctx, g);
+    }));
+
+inbox_command.command('mark-unread')
+    .argument('<thread-id>', 'Inbox thread id')
+    .description('Mark a thread as unread, so it needs attention again')
+    .addHelpText('after', help([ex('inbox mark-unread 9876')], ['inbox.thread_not_found'], true, 'Result: {"status":"unread","thread_id"}\n'))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_inbox_mark_unread(cmd.args[0], ctx, g);
     }));
 
 export {sequence_command, contact_list_command, contact_command, inbox_command};
