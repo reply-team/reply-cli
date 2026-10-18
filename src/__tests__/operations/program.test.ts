@@ -81,6 +81,14 @@ describe('the program', ()=>{
         expect(mock_fetch).not.toHaveBeenCalled();
     });
 
+    it('sequence create refuses a name given on the argument list: exit 2, no request, the name not repeated', async()=>{
+        const {code, err} = await run_program(['--json', '-k', 'key-1', 'sequence', 'create', '--name', '{"name":"Q4 Outreach"}']);
+        expect(code).toBe(2);
+        expect(JSON.parse(err)).toMatchObject({error: {code: 'usage.name'}});
+        expect(err, err).not.toContain('Outreach');
+        expect(mock_fetch).not.toHaveBeenCalled();
+    });
+
     it('a usage error exits 2 before any request', async()=>{
         const {code, err} = await run_program(['--json', '-k', 'key-1', 'sequence', 'stats', '123', '--from', '2026-10-02', '--to', '2026-10-01']);
         expect(code).toBe(2);

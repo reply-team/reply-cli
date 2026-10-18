@@ -4,6 +4,7 @@ import {build_context} from '../context';
 import {read_op_globals} from './options';
 import {add_contact_options, CONTACT_HELP} from './contact-input';
 import {handle_sequence_get, handle_sequence_contacts, handle_sequence_stats} from './sequence-read';
+import {handle_sequence_list, handle_sequence_create} from './sequence-by-name';
 import {handle_sequence_add_contact, handle_sequence_remove_contact} from './sequence-membership';
 import {handle_sequence_pause, handle_sequence_start} from './sequence-state';
 import {
@@ -49,7 +50,35 @@ const ctx_of = (cmd: Command)=>{
     return {g, ctx: build_context({profile: g.profile})};
 };
 
-const sequence_command = new Command('sequence').description('Read a sequence, put contacts in or take them out, pause or start it');
+const sequence_command = new Command('sequence')
+    .description('Find or create a sequence by name, read it, put contacts in or take them out, pause or start it');
+
+sequence_command.command('list')
+    .option('--name <stdin>', 'Only -: {name} as JSON on stdin')
+    .description('Every sequence whose name is this one, ignoring case, archived ones included')
+    .addHelpText('after', help([`echo '{"name":"Q4 outreach"}' | ${P} sequence list --name -`], ['sequence.list_incomplete'], false,
+        'Result: {"items":[{"id","name","status","is_archived","created_at"}]}, oldest first: Reply\'s status (new, active,\n'
+            + 'paused), archive flag and creation time, each null when Reply gives none. The name is read from stdin only, so it\n'
+            + 'never sits in the argument list. The list is read to its end; sequence.list_incomplete means it did not end within\n'
+            + '20000 sequences whose names contain this one.\n'))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_sequence_list(cmd.opts(), ctx, g);
+    }));
+
+sequence_command.command('create')
+    .option('--name <stdin>', 'Only -: {name} as JSON on stdin')
+    .description('Make a draft sequence of this name, holding nobody, with one task step to replace before it is started')
+    .addHelpText('after', help([`echo '{"name":"Q4 outreach"}' | ${P} sequence create --name -`], [], true,
+        'Result: {"sequence_id","steps_added","status","is_archived"}: status and is_archived are Reply\'s for the new sequence.\n'
+            + 'The name is read from stdin only, so it never sits in the argument list. Reply allows two sequences of one name and\n'
+            + 'this command does not look first: run `sequence list --name -` before it. The one step is a task for the owner, which\n'
+            + 'reaches nobody; Reply gives the draft the account\'s default schedule and mailbox. The draft is never started here.\n',
+        'the sequence may have been made; running the command again may make a second one, so look it up by name first'))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_sequence_create(cmd.opts(), ctx, g);
+    }));
 
 sequence_command.command('get')
     .argument('<sequence-id>', 'Sequence id')
