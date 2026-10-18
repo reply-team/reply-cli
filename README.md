@@ -192,8 +192,12 @@ prints JSON (indented; compact with `--json`) and says what happened in a stable
 | `reply sequence start <id> [--expect-contacts N]` | → `started` / `already_active` |
 | `reply contact-list add-contact <list-id> <contact> [--refuse-opted-out]` | → `added` |
 | `reply contact opt-out <contact>` | → `opted_out` |
-| `reply inbox list (--contact-id \| --sequence-id) [--source] [--since]` | one page of threads |
+| `reply inbox list (--contact-id \| --sequence-id) [--source] [--channel] [--category-id] [--since]` | one page of threads |
 | `reply inbox get <thread-id>` | a thread with its subject, and one page of its messages |
+| `reply inbox reply <thread-id> --message -` | reply in the thread, on its own channel → `sent` |
+| `reply inbox categories` | the categories a thread can be filed under |
+| `reply inbox categorize <thread-id> (--category-id N \| --clear)` | → `categorized` / `cleared` |
+| `reply inbox mark-read <thread-id>` · `reply inbox mark-unread <thread-id>` | → `read` / `unread` |
 
 `<contact>` is exactly one of `--contact <json>|@file|-`, `--email <address>` (with `--first-name`,
 `--last-name`, `--company`, `--title`), or `--contact-id <id>`. The JSON takes the same fields
@@ -207,6 +211,18 @@ echo '{"email":"ann@example.com","first_name":"Ann"}' | reply sequence add-conta
 The two `add-contact` commands always import a contact given by email, and Reply refuses an import
 without a first name, even for a contact it already holds. `contact opt-out` imports only someone
 Reply doesn't hold yet; `sequence remove-contact` never imports.
+
+`inbox reply` takes its message, `{body, reply_to_message_id}`, from stdin only, and refuses it on
+the argument list. The reply goes to the thread's contact from the account that owns the thread;
+`reply_to_message_id` (email threads only) names the message it answers:
+
+```sh
+echo '{"body":"Thanks, Tuesday works."}' | reply inbox reply 9876 --message -
+```
+
+It is the one work command that is not safe to re-run: on exit 3 (outcome unknown) the reply may
+already have been sent, so read the thread with `reply inbox get` before trying again. Every other
+work command can simply be run again.
 
 **Errors.** With `--json`, a failure is one line on stderr:
 `{"error":{"code":"contact.opted_out","title":…,"status":…,"reply_code":…,"ids":{…}}}`. `ids` is
