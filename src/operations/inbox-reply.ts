@@ -55,8 +55,23 @@ const channel_mismatch = (title: string, status: number, thread_channel: string 
 const cli_channel = (reply_channel: unknown): Channel | undefined=>
     (Object.keys(CHANNELS) as Channel[]).find(c=>CHANNELS[c] === reply_channel);
 
+type Outbound = {at: number; status: unknown};
+
+// The thread's outbound messages that carry a date, oldest first. The document says the inline
+// history is "in order" without saying which way, so the dates decide, never the positions.
+const outbound_of = (thread: Record<string, unknown>): Outbound[]=>
+    (Array.isArray(thread.messages) ? thread.messages : [])
+        .filter(is_object)
+        .filter(m=>m.isOutbound === true && typeof m.date === 'string' && !isNaN(Date.parse(m.date)))
+        .map(m=>({at: Date.parse(m.date as string), status: m.status}))
+        .sort((x, y)=>x.at - y.at);
+
 // Reply's send takes the thread's channel, and only an email reply may name the message it answers.
-const read_thread_channel = async(s: Op_session, id: number, message: Reply_message): Promise<Channel>=>{
+// The newest outbound message the thread already holds is kept, so a failure after the send can be
+// told from one that was there before it.
+const read_thread = async(
+    s: Op_session, id: number, message: Reply_message,
+): Promise<{channel: Channel; last_outbound_at: number | null}>=>{
     const t = await call_reply(s, 'GET', `/v3/inbox/threads/${id}`, 'read');
     if (t.status === 404)
     {
@@ -66,7 +81,8 @@ const read_thread_channel = async(s: Op_session, id: number, message: Reply_mess
     {
         throw refusal(t, 'read');
     }
-    const raw = expect_object(t, 'read').channel;
+    const thread = expect_object(t, 'read');
+    const raw = thread.channel;
     const channel = cli_channel(raw);
     if (channel === undefined)
     {
@@ -77,16 +93,17 @@ const read_thread_channel = async(s: Op_session, id: number, message: Reply_mess
     {
         throw channel_mismatch('reply_to_message_id answers one email message; a LinkedIn thread takes a reply to the thread only.', 200, channel);
     }
-    return channel;
+    return {channel, last_outbound_at: outbound_of(thread).pop()?.at ?? null};
 };
 
 // INTERIM (API gap): the 502 Reply answers when it could not deliver a reply says only that, not why.
 // Needed: the failed message's status code in the 502 itself.
-// Workaround: read the thread once and take the code from its latest outbound message, the one that
-// failed. The code decides what the caller does next (wait out a limit, or reconnect the account),
-// so without it every failed delivery would be the same answer. The read is best-effort: when it
-// fails, the refusal stands without the code.
-const failed_message_code = async(s: Op_session, id: number): Promise<string | null>=>{
+// Workaround: read the thread once and take the code from the newest failed outbound message that is
+// newer than anything outbound the thread held before the send, so an earlier failure is never
+// given as this one's reason; when Reply recorded none, the code is null. The code decides what the
+// caller does next (wait out a limit, or reconnect the account), so without it every failed delivery
+// would be the same answer. The read is best-effort: when it fails, the refusal stands without the code.
+const failed_message_code = async(s: Op_session, id: number, last_outbound_at: number | null): Promise<string | null>=>{
     let t: Answer;
     try {
         t = await call_reply(s, 'GET', `/v3/inbox/threads/${id}`, 'read');
@@ -97,22 +114,28 @@ const failed_message_code = async(s: Op_session, id: number): Promise<string | n
         }
         throw e;
     }
-    if (t.status !== 200 || !is_object(t.data) || !Array.isArray(t.data.messages))
+    if (t.status !== 200 || !is_object(t.data))
     {
         return null;
     }
-    const status = t.data.messages.filter(is_object).filter(m=>m.isOutbound === true).pop()?.status;
-    return is_object(status) && status.state === 'needsAttention' && typeof status.code === 'string' ? status.code : null;
+    const failed = outbound_of(t.data)
+        .filter(m=>last_outbound_at === null || m.at > last_outbound_at)
+        .map(m=>m.status)
+        .filter(is_object)
+        .filter(status=>status.state === 'needsAttention' && typeof status.code === 'string')
+        .pop();
+    return failed === undefined ? null : failed.code as string;
 };
 
 // What a send answered when it did not send.
-const send_refusal = async(s: Op_session, id: number, a: Answer): Promise<Operation_error>=>{
+const send_refusal = async(s: Op_session, id: number, a: Answer, last_outbound_at: number | null): Promise<Operation_error>=>{
     const code = reply_code_of(a);
     if (a.status === 502 && code === 'inboxThread.threadSendFailed')
     {
         // Reply tried and could not deliver: a definite refusal, never an unknown outcome.
         return new Operation_error('inbox.send_failed', 'Reply could not deliver the reply, so it was not sent.', {
-            status: a.status, reply_code: code, detail: detail_of(a), details: {status_code: await failed_message_code(s, id)},
+            status: a.status, reply_code: code, detail: detail_of(a),
+            details: {status_code: await failed_message_code(s, id, last_outbound_at)},
         });
     }
     if (a.status === 404)
@@ -139,7 +162,7 @@ const handle_inbox_reply = async(
     const message = read_reply_message(opts.message, read_stdin);
     const s = await open_session(ctx, g);
     try {
-        const channel = await read_thread_channel(s, id, message);
+        const {channel, last_outbound_at} = await read_thread(s, id, message);
         // The reply goes to the thread's contact from the account that owns the thread: no other
         // recipient can be named.
         const body = channel === 'email'
@@ -149,7 +172,7 @@ const handle_inbox_reply = async(
         const a = await call_reply(s, 'POST', `/v3/inbox/threads/${id}/messages`, 'write', body);
         if (a.status !== 200)
         {
-            throw await send_refusal(s, id, a);
+            throw await send_refusal(s, id, a, last_outbound_at);
         }
         const sent = expect_object(a, 'write');
         print_result({

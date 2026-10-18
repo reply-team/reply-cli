@@ -91,9 +91,9 @@ describe('inbox reply', ()=>{
             linkedin_thread(),
             json({title: 'Bad Gateway', status: 502, detail: 'Failed to deliver the message.', code: 'inboxThread.threadSendFailed'}, 502),
             json({id: 9, channel: 'linkedIn', messages: [
-                {channel: 'linkedIn', isOutbound: true, status: {state: 'needsAttention', code: 'linkedInInvalidCookie'}},
-                {channel: 'linkedIn', isOutbound: false, body: 'inbound'},
-                {channel: 'linkedIn', isOutbound: true, status: {state: 'needsAttention', code: 'linkedInSendingLimitExceeded'}},
+                {channel: 'linkedIn', isOutbound: false, date: '2026-10-18T18:00:00Z', body: 'inbound'},
+                {channel: 'linkedIn', isOutbound: true, date: '2026-10-18T19:00:01Z',
+                    status: {state: 'needsAttention', code: 'linkedInSendingLimitExceeded'}},
             ]}),
         );
         const e = await reject({body: BODY}).catch((x: unknown)=>x);
@@ -102,6 +102,38 @@ describe('inbox reply', ()=>{
             ids: {thread_id: 9}, details: {status_code: 'linkedInSendingLimitExceeded'},
         });
         expect(sent().map(r=>r.method)).toEqual(['GET', 'POST', 'GET']);
+    });
+
+    // The thread's inline history is "in order", in an order the document does not name.
+    it('the reason is the newest failed outbound message\'s by its date, whatever order the history is in', async()=>{
+        const newest_first = [
+            {channel: 'linkedIn', isOutbound: true, date: '2026-10-18T19:00:01Z', status: {state: 'needsAttention', code: 'linkedInSendingLimitExceeded'}},
+            {channel: 'linkedIn', isOutbound: false, date: '2026-10-18T18:00:00Z', body: 'inbound'},
+            {channel: 'linkedIn', isOutbound: true, date: '2026-10-17T09:00:00Z', status: {state: 'needsAttention', code: 'linkedInInvalidCookie'}},
+        ];
+        for (const messages of [newest_first, [...newest_first].reverse()])
+        {
+            mock_fetch.mockReset();
+            answer(linkedin_thread(), json({code: 'inboxThread.threadSendFailed'}, 502), json({id: 9, channel: 'linkedIn', messages}));
+            await expect(reject({body: BODY})).rejects.toMatchObject({
+                code: 'inbox.send_failed', details: {status_code: 'linkedInSendingLimitExceeded'},
+            });
+        }
+    });
+
+    it('a failure the thread already showed before the send is not given as this send\'s reason', async()=>{
+        const earlier_failure = {channel: 'linkedIn', isOutbound: true, date: '2026-10-17T09:00:00Z',
+            status: {state: 'needsAttention', code: 'linkedInInvalidCookie'}};
+        const before = ()=>json({id: 9, channel: 'linkedIn', contact: {id: 456, isDeleted: false}, messages: [earlier_failure]});
+        // Reply did not add the failed reply to the history: the only failure in it is the earlier one.
+        answer(before(), json({code: 'inboxThread.threadSendFailed'}, 502), json({id: 9, channel: 'linkedIn', messages: [earlier_failure]}));
+        await expect(reject({body: BODY})).rejects.toMatchObject({code: 'inbox.send_failed', details: {status_code: null}});
+        // Reply did add it: its reason is given, not the earlier one's.
+        mock_fetch.mockReset();
+        answer(before(), json({code: 'inboxThread.threadSendFailed'}, 502), json({id: 9, channel: 'linkedIn', messages: [earlier_failure,
+            {channel: 'linkedIn', isOutbound: true, date: '2026-10-18T19:00:01Z', status: {state: 'needsAttention', code: 'linkedInSendingLimitExceeded'}},
+        ]}));
+        await expect(reject({body: BODY})).rejects.toMatchObject({code: 'inbox.send_failed', details: {status_code: 'linkedInSendingLimitExceeded'}});
     });
 
     it('a coded 502 whose follow-up read fails is still inbox.send_failed, with no status code', async()=>{
