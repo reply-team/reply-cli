@@ -192,5 +192,6 @@ const handle_inbox_mark_unread = (thread_arg: string, ctx: Cli_context, g: Op_gl
 
 export {
     handle_inbox_list, handle_inbox_get, handle_inbox_categories, handle_inbox_categorize,
-    handle_inbox_mark_read, handle_inbox_mark_unread, SOURCES,
+    handle_inbox_mark_read, handle_inbox_mark_unread, thread_not_found, SOURCES, CHANNELS,
 };
+export type {Channel};

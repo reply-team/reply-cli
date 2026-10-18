@@ -65,6 +65,14 @@ describe('the program', ()=>{
         expect(JSON.parse(err)).toMatchObject({error: {code: 'sequence.not_pausable', reply_code: 'sequenceAction.status'}});
     });
 
+    it('inbox reply refuses a message given on the argument list: exit 2, no request, the text not repeated', async()=>{
+        const {code, err} = await run_program(['--json', '-k', 'key-1', 'inbox', 'reply', '9', '--message', '{"body":"Tuesday works"}']);
+        expect(code).toBe(2);
+        expect(JSON.parse(err)).toMatchObject({error: {code: 'usage.message'}});
+        expect(err, err).not.toContain('Tuesday');
+        expect(mock_fetch).not.toHaveBeenCalled();
+    });
+
     it('a usage error exits 2 before any request', async()=>{
         const {code, err} = await run_program(['--json', '-k', 'key-1', 'sequence', 'stats', '123', '--from', '2026-10-02', '--to', '2026-10-01']);
         expect(code).toBe(2);

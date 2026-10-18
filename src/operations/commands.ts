@@ -9,6 +9,7 @@ import {handle_sequence_pause, handle_sequence_start} from './sequence-state';
 import {
     handle_inbox_list, handle_inbox_get, handle_inbox_categories, handle_inbox_categorize, handle_inbox_mark_read, handle_inbox_mark_unread,
 } from './inbox';
+import {handle_inbox_reply} from './inbox-reply';
 import {handle_contact_list_add_contact} from './contact-list';
 import {handle_contact_opt_out} from './contact';
 
@@ -17,14 +18,16 @@ const COMMON_ERRORS = [
     'access.denied', 'access.feature_unavailable', 'rate_limited', 'reply.unavailable', 'reply.refused', 'reply.invalid_request',
 ];
 
-const errors_help = (codes: string[], write: boolean): string=>
+const SAFE_TO_REPEAT = 'a write may have happened; re-running is safe';
+
+const errors_help = (codes: string[], write: boolean, unknown_outcome: string): string=>
     '\nErrors (with --json, one line on stderr: {"error":{"code":…,"ids":…}}):\n'
     + [...codes, ...COMMON_ERRORS, ...(write ? ['outcome.unknown'] : [])].map(c=>`  ${c}`).join('\n')
     + '\nExit codes: 0 done · 1 failed, main effect not done (partial effects are in "ids") · 2 usage, nothing sent'
-    + ' · 3 outcome unknown (a write may have happened; re-running is safe)';
+    + ` · 3 outcome unknown (${unknown_outcome})`;
 
-const help = (examples: string[], codes: string[], write: boolean, extra = ''): string=>
-    `\nExamples:\n${examples.map(e=>`  ${e}`).join('\n')}\n${extra ? `\n${extra}` : ''}${errors_help(codes, write)}`;
+const help = (examples: string[], codes: string[], write: boolean, extra = '', unknown_outcome = SAFE_TO_REPEAT): string=>
+    `\nExamples:\n${examples.map(e=>`  ${e}`).join('\n')}\n${extra ? `\n${extra}` : ''}${errors_help(codes, write, unknown_outcome)}`;
 
 const ex = (command: string): string=>`${P} ${command}`;
 
@@ -159,7 +162,7 @@ add_contact_options(contact_command.command('opt-out'))
         await handle_contact_opt_out(cmd.opts(), ctx, g);
     }));
 
-const inbox_command = new Command('inbox').description('Read inbox threads, file them under a category, mark them read or unread');
+const inbox_command = new Command('inbox').description('Read inbox threads, reply in them, file them under a category, mark them read or unread');
 
 inbox_command.command('list')
     .option('--contact-id <id>', 'Threads with this contact')
@@ -189,6 +192,25 @@ inbox_command.command('get')
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
         await handle_inbox_get(cmd.args[0], cmd.opts(), ctx, g);
+    }));
+
+inbox_command.command('reply')
+    .argument('<thread-id>', 'Inbox thread id')
+    .option('--message <stdin>', 'Only -: the message {body, reply_to_message_id} as JSON on stdin')
+    .description('Reply to the contact in an existing thread, on the thread\'s own channel')
+    .addHelpText('after', help(
+        [`echo '{"body":"Thanks, Tuesday works."}' | ${P} inbox reply 9876 --message -`,
+            `echo '{"body":"Thanks!","reply_to_message_id":"<abc@example.com>"}' | ${P} inbox reply 9876 --message -`],
+        ['inbox.thread_not_found', 'inbox.channel_mismatch', 'contact.opted_out', 'inbox.send_failed'], true,
+        'Result: {"status":"sent","thread_id","channel":"email"|"linkedin","message_id","sent_at"}; message_id is null on LinkedIn.\n'
+            + 'The message is read from stdin only, so its text never sits in the argument list. The reply goes to the thread\'s\n'
+            + 'contact from the account that owns the thread; no other recipient can be named. reply_to_message_id (email only)\n'
+            + 'answers one message of the thread; without it Reply answers the latest. inbox.send_failed means Reply could not\n'
+            + 'deliver it: "details.status_code" is Reply\'s reason (e.g. linkedInSendingLimitExceeded), null when it gave none.\n',
+        'the reply may have been sent; running the command again may send it twice, so read the thread first'))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_inbox_reply(cmd.args[0], cmd.opts(), ctx, g);
     }));
 
 inbox_command.command('categories')
