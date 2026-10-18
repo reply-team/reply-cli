@@ -222,7 +222,8 @@ matched, by its email; one with only a LinkedIn URL, by that. The lookup is Repl
 email matches ignoring case, and a LinkedIn URL is matched by its lowercased slug — on linkedin.com
 the path's case does not count, nor the scheme's or host's, a default port, one trailing slash or a
 fragment, while `www` and the query do. Reply is asked for a LinkedIn URL in that form first, then as
-given, and an import or `contact update` writes it in that form.
+given, and the CLI stores a LinkedIn URL by its lowercased slug when it imports a contact or runs
+`contact update`.
 
 The commands that carry a person's or a sequence's text in a field of their own read it from stdin
 only, and refuse it on the argument list: `contact find --contact -` (`{email}` or

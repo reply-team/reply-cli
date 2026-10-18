@@ -219,9 +219,9 @@ contact_command.command('update')
         ['contact.not_found', 'contact.field_not_found'], true,
         'Result: {"status":"updated","contact_id"}\n'
             + 'Fields: {first_name, last_name, company, title, linkedin_url, custom_fields: [{name, value}]}; a field left out stays as\n'
-            + 'it is, and null clears one. They are read from stdin only, so no value ever sits in the argument list. A LinkedIn URL\n'
-            + 'is written by its lowercased slug, the form contacts are looked up by. A custom field is named as the account names\n'
-            + 'it (ignoring case); a name the account has none of is contact.field_not_found, and then nothing is changed.\n'))
+            + 'it is, and null clears one. They are read from stdin only, so no value ever sits in the argument list. The CLI stores\n'
+            + 'a LinkedIn URL by its lowercased slug, the form contacts are looked up by. A custom field is named as the account\n'
+            + 'names it (ignoring case); a name the account has none of is contact.field_not_found, and then nothing is changed.\n'))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
         await handle_contact_update(cmd.args[0], cmd.opts(), ctx, g);

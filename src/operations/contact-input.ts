@@ -37,7 +37,7 @@ A contact is given exactly one way:
   --email <address> [--first-name <name>] [--last-name <name>] [--company <name>] [--title <title>]
   --contact-id <id>                  a contact Reply already holds
 Reply is asked about a contact by its email; one with only a LinkedIn URL, by that. A LinkedIn URL is
-matched by its lowercased slug, and an import writes it in that form.
+matched by its lowercased slug, and the CLI stores it by that slug when it imports the contact.
 
 `;
 

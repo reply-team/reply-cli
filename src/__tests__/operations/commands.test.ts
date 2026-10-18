@@ -39,7 +39,7 @@ describe('operations/commands', ()=>{
         {
             const text = help_of(c);
             expect(text, text).toContain('linkedin_url');
-            expect(text, text).toContain('lowercased slug');
+            expect(text.replace(/\s+/g, ' '), text).toContain('stores it by that slug');
             expect(text, text).not.toContain('lookup_incomplete');
         }
         for (const c of [sub(sequence_command, 'add-contact'), sub(contact_list_command, 'add-contact'), sub(contact_command, 'opt-out')])
@@ -83,6 +83,7 @@ describe('operations/commands', ()=>{
         const text = help_of(update);
         expect(text, text).toContain('--fields -');
         expect(text, text).toContain('contact.field_not_found');
+        expect(text.replace(/\s+/g, ' '), text).toContain('stores a LinkedIn URL by its lowercased slug');
         const del = help_of(sub(contact_command, 'delete'));
         expect(del.replace(/\s+/g, ' '), del).toContain('answers contact.not_found');
     });
