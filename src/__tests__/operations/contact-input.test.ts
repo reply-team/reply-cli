@@ -34,7 +34,7 @@ describe('read_contact_input', ()=>{
     });
 
     it('refuses a --contact that is not an object, has unknown fields, or non-string values', ()=>{
-        for (const stdin of ['null', '[]', '"ann@example.com"', '{"email":"a@b.co","phone":"1"}', '{"email":42}', ''])
+        for (const stdin of ['null', '[]', '"ann@example.com"', '{"email":"a@b.co","phone":"1"}', '{"email":42}', '{"linkedin_url":42}', ''])
         {
             expect(usage(()=>read_contact_input({contact: '-'}, ()=>stdin)).code).toBe('usage.contact');
         }
@@ -45,6 +45,29 @@ describe('read_contact_input', ()=>{
         expect(e.code).toBe('usage.contact');
         expect(e.message).not.toContain('ann at acme');
         expect(usage(()=>read_contact_input({contact: '-'}, ()=>'{"first_name":"Ann"}')).code).toBe('usage.contact');
+    });
+
+    it('takes linkedin_url in the --contact JSON, with or without an email', ()=>{
+        const url = 'https://www.linkedin.com/in/marta-example';
+        expect(read_contact_input({contact: '-'}, ()=>JSON.stringify({linkedin_url: ` ${url} `, first_name: 'Marta'})))
+            .toEqual({kind: 'person', person: {linkedin_url: url, first_name: 'Marta'}});
+        expect(read_contact_input({contact: '-'}, ()=>JSON.stringify({email: 'marta@example.com', linkedin_url: url})))
+            .toEqual({kind: 'person', person: {email: 'marta@example.com', linkedin_url: url}});
+    });
+
+    it('refuses a contact with neither an email nor a LinkedIn URL', ()=>{
+        const e = usage(()=>read_contact_input({contact: '-'}, ()=>'{"first_name":"Marta","linkedin_url":" "}'));
+        expect(e.code).toBe('usage.contact');
+        expect(e.message).toContain('LinkedIn URL');
+    });
+
+    it('refuses a linkedin_url that is not an absolute http(s) URL, without echoing it', ()=>{
+        for (const bad of ['linkedin.com/in/marta-example', 'ftp://linkedin.com/in/marta-example', 'marta-example', 'https://'])
+        {
+            const e = usage(()=>read_contact_input({contact: '-'}, ()=>JSON.stringify({linkedin_url: bad})));
+            expect(e.code, bad).toBe('usage.contact');
+            expect(`${e.message} ${e.hint ?? ''}`, bad).not.toContain('marta-example');
+        }
     });
 
     it('refuses a bad --contact-id as a usage.id error', ()=>{

@@ -3,7 +3,8 @@ import {UsageError} from '../utils/errors';
 import {read_json_arg} from '../utils/json-arg';
 import {parse_id} from './options';
 
-type Person = {email: string; first_name?: string; last_name?: string; company?: string; title?: string};
+// At least one of email and linkedin_url.
+type Person = {email?: string; linkedin_url?: string; first_name?: string; last_name?: string; company?: string; title?: string};
 type Contact_ref = {kind: 'id'; id: number} | {kind: 'person'; person: Person};
 type Contact_flags = {
     contactId?: string;
@@ -15,9 +16,9 @@ type Contact_flags = {
     contact?: string;
 };
 
-const PERSON_FIELDS = ['email', 'first_name', 'last_name', 'company', 'title'] as const;
+const PERSON_FIELDS = ['email', 'linkedin_url', 'first_name', 'last_name', 'company', 'title'] as const;
 const CODE = 'usage.contact';
-const ONE_WAY_HINT = 'Use exactly one of --contact-id, --email (with its name flags), or --contact.';
+const ONE_WAY_HINT = 'Use exactly one of --contact-id, --email (with its name flags), or --contact (which also takes linkedin_url).';
 
 const add_contact_options = (cmd: Command): Command=>cmd
     .option('--contact-id <id>', 'The contact by its Reply id')
@@ -26,14 +27,16 @@ const add_contact_options = (cmd: Command): Command=>cmd
     .option('--last-name <name>', 'Last name (with --email)')
     .option('--company <name>', 'Company (with --email)')
     .option('--title <title>', 'Job title (with --email)')
-    .option('--contact <json>', 'The contact as JSON {email, first_name, last_name, company, title}: inline, @file, or - for stdin');
+    .option('--contact <json>', 'The contact as JSON {email, linkedin_url, first_name, last_name, company, title}: inline, @file, or - for stdin');
 
 const CONTACT_HELP = `
 A contact is given exactly one way:
-  --contact <json>|@file|-           {email, first_name, last_name, company, title}; '-' reads
-                                     stdin, which keeps personal data out of the argument list
+  --contact <json>|@file|-           {email, linkedin_url, first_name, last_name, company, title},
+                                     with an email, a LinkedIn URL or both; '-' reads stdin, which
+                                     keeps personal data out of the argument list
   --email <address> [--first-name <name>] [--last-name <name>] [--company <name>] [--title <title>]
   --contact-id <id>                  a contact Reply already holds
+Reply is asked about a contact by its email; one with only a LinkedIn URL, by that.
 
 `;
 
@@ -42,19 +45,55 @@ const clean = (v: unknown): string | undefined=>{
     return text ? text : undefined;
 };
 
-// The person as Reply will be asked about them: trimmed, empty fields dropped, an email required.
-// Messages never echo the address: a caller may log stderr where personal data must not go.
+const is_email = (text: string): boolean=>/^[^\s@]+@[^\s@]+$/.test(text);
+
+// The key a LinkedIn profile URL is compared by, or null when the text is not an absolute http(s)
+// URL. Two URLs that differ only in the case of the scheme or the host, a default port, one
+// trailing slash or a fragment are the same profile; the path keeps its case, and www and the query
+// count. The rule is deliberately no looser than the key a do-not-contact list is kept by: matching
+// a path whose case differs could bind a contact under a spelling someone holds as stopped.
+const linkedin_key = (text: string): string | null=>{
+    let url: URL;
+    try {
+        url = new URL(text.trim());
+    } catch {
+        return null;
+    }
+    if ((url.protocol !== 'http:' && url.protocol !== 'https:') || url.hostname === '')
+    {
+        return null;
+    }
+    const path = url.pathname.endsWith('/') ? url.pathname.slice(0, -1) : url.pathname;
+    return `${url.protocol}//${url.host}${path}${url.search}`;
+};
+
+// The person as Reply will be asked about them: trimmed, empty fields dropped, an email or a
+// LinkedIn URL required. Messages never echo either: a caller may log stderr where personal data
+// must not go.
 const person_of = (raw: Record<string, unknown>): Person=>{
     const email = clean(raw.email);
-    if (email === undefined)
+    const linkedin_url = clean(raw.linkedin_url);
+    if (email === undefined && linkedin_url === undefined)
     {
-        throw new UsageError('The contact needs an email.', {code: CODE, hint: ONE_WAY_HINT});
+        throw new UsageError('The contact needs an email or a LinkedIn URL.', {code: CODE, hint: ONE_WAY_HINT});
     }
-    if (!/^[^\s@]+@[^\s@]+$/.test(email))
+    if (email !== undefined && !is_email(email))
     {
         throw new UsageError('The contact\'s email is not an email address.', {code: CODE});
     }
-    const person: Person = {email};
+    if (linkedin_url !== undefined && linkedin_key(linkedin_url) === null)
+    {
+        throw new UsageError('The contact\'s linkedin_url is not an absolute http or https URL.', {code: CODE});
+    }
+    const person: Person = {};
+    if (email !== undefined)
+    {
+        person.email = email;
+    }
+    if (linkedin_url !== undefined)
+    {
+        person.linkedin_url = linkedin_url;
+    }
     for (const field of ['first_name', 'last_name', 'company', 'title'] as const)
     {
         const value = clean(raw[field]);
@@ -107,5 +146,5 @@ const read_contact_input = (f: Contact_flags, read_stdin?: () => string): Contac
     })};
 };
 
-export {read_contact_input, add_contact_options, CONTACT_HELP};
+export {read_contact_input, add_contact_options, CONTACT_HELP, linkedin_key, is_email};
 export type {Person, Contact_ref, Contact_flags};

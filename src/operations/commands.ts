@@ -35,7 +35,8 @@ const ex = (command: string): string=>`${P} ${command}`;
 const piped = (command: string, contact = '{"email":"ann@example.com","first_name":"Ann"}'): string=>
     `echo '${contact}' | ${P} ${command} --contact -`;
 
-const ALWAYS_IMPORTED = 'A contact given by email is always imported, so Reply needs a first name, even for one it already holds.\n';
+const ALWAYS_IMPORTED = 'A contact given by email or LinkedIn URL is always imported, so Reply needs a first name, even for one it\n'
+    + 'already holds.\n';
 
 const run = (fn: (cmd: Command) => Promise<void>)=>async function(this: Command): Promise<void>
 {
@@ -91,7 +92,7 @@ add_contact_options(sequence_command.command('add-contact')
         [piped('sequence add-contact 123'), ex('sequence add-contact 123 --email ann@example.com --first-name Ann'),
             ex('sequence add-contact 123 --contact-id 456 --start-step 2')],
         ['sequence.not_found', 'sequence.archived', 'sequence.has_no_steps', 'sequence.step_not_found', 'contact.not_found',
-            'contact.opted_out', 'contact.invalid_email', 'account.contact_limit_reached'],
+            'contact.opted_out', 'contact.invalid_email', 'contact.invalid_linkedin_url', 'account.contact_limit_reached'],
         true,
         'Result: {"status":"added"|"already_in_sequence","sequence_id","contact_id","contact_created","sequence_active"}\n'
             + CONTACT_HELP + ALWAYS_IMPORTED))
@@ -104,9 +105,9 @@ add_contact_options(sequence_command.command('remove-contact')
     .argument('<sequence-id>', 'Sequence id'))
     .description('Take a contact out of the sequence; their history stays. Never creates a contact')
     .addHelpText('after', help([piped('sequence remove-contact 123', '{"email":"ann@example.com"}'), ex('sequence remove-contact 123 --contact-id 456')],
-        ['sequence.not_found', 'contact.not_unique', 'contact.lookup_incomplete'], true,
+        ['sequence.not_found', 'contact.not_unique'], true,
         'Result: {"status":"removed"|"not_in_sequence","sequence_id","contact_id"}\n'
-            + CONTACT_HELP + 'A contact given by email is only looked up, never imported, so no first name is needed.\n'))
+            + CONTACT_HELP + 'A contact given by email or LinkedIn URL is only looked up, never imported, so no first name is needed.\n'))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
         await handle_sequence_remove_contact(cmd.args[0], cmd.opts(), ctx, g);
@@ -142,7 +143,8 @@ add_contact_options(contact_list_command.command('add-contact')
     .option('--refuse-opted-out', 'Refuse a contact Reply holds as opted out (a list may otherwise hold them)')
     .description('Put a contact on the list, creating the contact if Reply has nobody under the email')
     .addHelpText('after', help([piped('contact-list add-contact 77'), ex('contact-list add-contact 77 --contact-id 456 --refuse-opted-out')],
-        ['contact-list.not_found', 'contact.not_found', 'contact.opted_out', 'contact.invalid_email', 'account.contact_limit_reached'], true,
+        ['contact-list.not_found', 'contact.not_found', 'contact.opted_out', 'contact.invalid_email', 'contact.invalid_linkedin_url',
+            'account.contact_limit_reached'], true,
         'Result: {"status":"added","list_id","contact_id","contact_created"}\n' + CONTACT_HELP + ALWAYS_IMPORTED))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
@@ -154,9 +156,10 @@ const contact_command = new Command('contact').description('Act on a contact');
 add_contact_options(contact_command.command('opt-out'))
     .description('Mark the contact as opted out at Reply, creating them only if Reply has nobody under the email')
     .addHelpText('after', help([piped('contact opt-out'), ex('contact opt-out --contact-id 456')],
-        ['contact.not_found', 'contact.not_unique', 'contact.lookup_incomplete', 'contact.invalid_email', 'account.contact_limit_reached'], true,
+        ['contact.not_found', 'contact.not_unique', 'contact.invalid_email', 'contact.invalid_linkedin_url', 'account.contact_limit_reached'], true,
         'Result: {"status":"opted_out","contact_id","contact_created"}\n' + CONTACT_HELP
-            + 'A contact given by email is imported only when Reply holds nobody under the address; only then does Reply need a first name.\n'))
+            + 'A contact given by email or LinkedIn URL is imported only when Reply holds nobody under the address; only then does\n'
+            + 'Reply need a first name.\n'))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
         await handle_contact_opt_out(cmd.opts(), ctx, g);

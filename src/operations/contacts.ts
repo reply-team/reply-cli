@@ -3,15 +3,23 @@ import {
     call_reply, expect_object, read_page, is_object, is_reply_id, reply_code_of, detail_of, invalid_fields, refusal, unreadable,
     type Answer, type Op_session,
 } from './call';
-import type {Contact_ref, Person} from './contact-input';
+import {linkedin_key, type Contact_ref, type Person} from './contact-input';
 
 type Ensured = {id: number; created: boolean};
 
 const LOOKUP_PAGE = 100;
-const LOOKUP_PAGES = 5;
+const LOOKUP_PAGES = 10;
 
 const import_item = (p: Person): Record<string, string>=>{
-    const item: Record<string, string> = {email: p.email};
+    const item: Record<string, string> = {};
+    if (p.email !== undefined)
+    {
+        item.email = p.email;
+    }
+    if (p.linkedin_url !== undefined)
+    {
+        item.linkedInUrl = p.linkedin_url;
+    }
     if (p.first_name !== undefined)
     {
         item.firstName = p.first_name;
@@ -31,19 +39,32 @@ const import_item = (p: Person): Record<string, string>=>{
     return item;
 };
 
-const names_email = (a: Answer): boolean=>
-    invalid_fields(a)?.some(field=>field.toLowerCase() === 'email') === true;
+const names_field = (a: Answer, name: string): boolean=>
+    invalid_fields(a)?.some(field=>field.toLowerCase() === name.toLowerCase()) === true;
 
 // v3's import matches an existing contact by email or creates one, and says which, in one call; on
-// a match it fills only the contact's empty fields. Reply requires a first name here, even for an
-// email it already holds, and refuses an item without one as "Invalid data", which is passed on as
+// a match it fills only the contact's empty fields. A contact with no email is matched by its
+// LinkedIn URL instead: the import's keys add to the email rather than replace it, so that key is
+// asked for only when there is no email to match. Reply requires a first name here, even for a
+// contact it already holds, and refuses an item without one as "Invalid data", which is passed on as
 // reply.refused. POST /v3/contacts is not used: it also requires a first name, and for an email Reply
 // already holds it overwrites that contact and blanks every field the request did not send.
 const import_contact = async(s: Op_session, person: Person): Promise<Ensured>=>{
-    const a = await call_reply(s, 'POST', '/v3/contacts/import', 'write', {items: [import_item(person)]});
-    if (a.status === 400 && names_email(a))
+    const body: Record<string, unknown> = {items: [import_item(person)]};
+    if (person.email === undefined)
+    {
+        body.options = {keys: {linkedInUrl: true}};
+    }
+    const a = await call_reply(s, 'POST', '/v3/contacts/import', 'write', body);
+    if (a.status === 400 && names_field(a, 'email'))
     {
         throw new Operation_error('contact.invalid_email', 'Reply did not accept the contact\'s email address.', {
+            status: 400, reply_code: reply_code_of(a),
+        });
+    }
+    if (a.status === 400 && names_field(a, 'linkedInUrl'))
+    {
+        throw new Operation_error('contact.invalid_linkedin_url', 'Reply did not accept the contact\'s LinkedIn URL.', {
             status: 400, reply_code: reply_code_of(a),
         });
     }
@@ -57,8 +78,8 @@ const import_contact = async(s: Op_session, person: Person): Promise<Ensured>=>{
     {
         throw refusal(a, 'write');
     }
-    const body = expect_object(a, 'write');
-    const item = Array.isArray(body.items) ? body.items[0] : undefined;
+    const answer = expect_object(a, 'write');
+    const item = Array.isArray(answer.items) ? answer.items[0] : undefined;
     if (!is_object(item))
     {
         throw unreadable(a, 'write');
@@ -79,18 +100,33 @@ const import_contact = async(s: Op_session, person: Person): Promise<Ensured>=>{
 const ensure_contact = async(s: Op_session, ref: Contact_ref): Promise<Ensured>=>
     ref.kind === 'id' ? {id: ref.id, created: false} : import_contact(s, ref.person);
 
-// INTERIM (API gap): POST /v3/contacts/filter has no exact-email filter. Its `rules` take a
-// property/condition vocabulary that v3 publishes nowhere, and its `searchTerm` matches by
-// containment, so "ann@example.com" also finds "joann@example.com".
-// Needed: an exact email lookup, or a documented `rules` vocabulary.
-// Workaround: page through the searchTerm matches (5 pages of 100) and compare addresses exactly,
-// ignoring case. Refuse rather than guess when two match or the end isn't reached.
-const find_contact_by_exact_email = async(s: Op_session, email: string): Promise<number | null>=>{
-    const wanted = email.toLowerCase();
+type Lookup = {param: 'email' | 'linkedIn'; value: string; holds: (entry: Record<string, unknown>) => boolean};
+
+// What a person is looked up by: the email when there is one, else the LinkedIn URL. An entry
+// counts only when it carries the same address: an email equal ignoring case, a LinkedIn URL equal
+// under linkedin_key.
+const lookup_of = (p: Person): Lookup=>{
+    if (p.email !== undefined)
+    {
+        const wanted = p.email.toLowerCase();
+        return {param: 'email', value: p.email, holds: entry=>typeof entry.email === 'string' && entry.email.toLowerCase() === wanted};
+    }
+    const url = p.linkedin_url as string;
+    const wanted = linkedin_key(url);
+    return {param: 'linkedIn', value: url, holds: entry=>typeof entry.linkedInUrl === 'string' && linkedin_key(entry.linkedInUrl) === wanted};
+};
+
+// GET /v3/contacts looks a contact up by exact email or LinkedIn URL. The answer is read to its end,
+// and only entries carrying the asked address count. Two contacts under one address is refused
+// rather than guessed between. An exact lookup never runs to pages of entries without an end, so
+// ten such pages are an answer that can't be read, not a reason to guess.
+const find_contact_by_address = async(s: Op_session, person: Person): Promise<number | null>=>{
+    const lookup = lookup_of(person);
     let found: number | null = null;
     for (let page = 0; page < LOOKUP_PAGES; page++)
     {
-        const a = await call_reply(s, 'POST', `/v3/contacts/filter?top=${LOOKUP_PAGE}&skip=${page * LOOKUP_PAGE}`, 'read', {searchTerm: email});
+        const a = await call_reply(s, 'GET',
+            `/v3/contacts?${lookup.param}=${encodeURIComponent(lookup.value)}&top=${LOOKUP_PAGE}&skip=${page * LOOKUP_PAGE}`, 'read');
         if (a.status !== 200)
         {
             throw refusal(a, 'read');
@@ -98,7 +134,7 @@ const find_contact_by_exact_email = async(s: Op_session, email: string): Promise
         const body = read_page(a);
         for (const entry of body.items)
         {
-            if (!is_object(entry) || typeof entry.email !== 'string' || entry.email.toLowerCase() !== wanted)
+            if (!is_object(entry) || !lookup.holds(entry))
             {
                 continue;
             }
@@ -108,7 +144,7 @@ const find_contact_by_exact_email = async(s: Op_session, email: string): Promise
             }
             if (found !== null && found !== entry.id)
             {
-                throw new Operation_error('contact.not_unique', 'Reply holds more than one contact with this email address.', {status: 200});
+                throw new Operation_error('contact.not_unique', 'Reply holds more than one contact under this address.', {status: 200});
             }
             found = entry.id;
         }
@@ -117,11 +153,11 @@ const find_contact_by_exact_email = async(s: Op_session, email: string): Promise
             return found;
         }
     }
-    throw new Operation_error('contact.lookup_incomplete', `More than ${LOOKUP_PAGE * LOOKUP_PAGES} contacts contain this address, so it could not be decided which one is meant.`, {status: 200});
+    throw new Operation_error('reply.unavailable', 'Reply answered the exact lookup with more pages than one address can fill.', {status: 200});
 };
 
 const find_contact = async(s: Op_session, ref: Contact_ref): Promise<number | null>=>
-    ref.kind === 'id' ? ref.id : find_contact_by_exact_email(s, ref.person.email);
+    ref.kind === 'id' ? ref.id : find_contact_by_address(s, ref.person);
 
 const read_opted_out = async(s: Op_session, contact_id: number): Promise<boolean>=>{
     const a = await call_reply(s, 'GET', `/v3/contacts/${contact_id}/statuses`, 'read');
@@ -143,5 +179,5 @@ const read_opted_out = async(s: Op_session, contact_id: number): Promise<boolean
     return body.isOptedOut;
 };
 
-export {ensure_contact, find_contact, read_opted_out};
+export {ensure_contact, find_contact, find_contact_by_address, read_opted_out};
 export type {Ensured};

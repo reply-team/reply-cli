@@ -32,6 +32,21 @@ describe('operations/commands', ()=>{
         }
     });
 
+    it('the commands about a person say their JSON takes linkedin_url, and a lookup is never left incomplete', ()=>{
+        for (const c of [sub(sequence_command, 'add-contact'), sub(sequence_command, 'remove-contact'),
+            sub(contact_list_command, 'add-contact'), sub(contact_command, 'opt-out')])
+        {
+            const text = help_of(c);
+            expect(text, text).toContain('linkedin_url');
+            expect(text, text).not.toContain('lookup_incomplete');
+        }
+        for (const c of [sub(sequence_command, 'add-contact'), sub(contact_list_command, 'add-contact'), sub(contact_command, 'opt-out')])
+        {
+            const text = help_of(c);
+            expect(text, text).toContain('contact.invalid_linkedin_url');
+        }
+    });
+
     it('carries each command\'s own flags', ()=>{
         expect(flags(sub(sequence_command, 'add-contact'))).toEqual(expect.arrayContaining(['--start-step', '--ignore-step-delay']));
         expect(flags(sub(sequence_command, 'start'))).toContain('--expect-contacts');
