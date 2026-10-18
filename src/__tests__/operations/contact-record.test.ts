@@ -2,7 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import {describe, it, expect, beforeEach} from 'vitest';
-import {mock_fetch, json, ctx, sent, answer, capture} from './helpers';
+import {mock_fetch, json, ctx, sent, answer, capture, instant_timers, real_timers} from './helpers';
 import {handle_contact_find, handle_contact_get, handle_contact_update, handle_contact_delete} from '../../operations/contact-record';
 
 const EMAIL = 'marta@example.com';
@@ -77,6 +77,27 @@ describe('contact find', ()=>{
     });
 });
 
+describe('malformed JSON on stdin', ()=>{
+    // A parser's message quotes some ten characters around the bad token, so a refusal that passed it on would carry
+    // part of the text.
+    it('is refused without repeating any of its text, for contact find and contact update', async()=>{
+        const cases: [() => Promise<unknown>, string][] = [
+            [()=>find('-', '{"email": Marta Example}'), 'usage.contact'],
+            [()=>find('-', '{"linkedin_url": "https://www.linkedin.com/in/marta-example" Marta}'), 'usage.contact'],
+            [()=>update('-', '{"first_name": Marta Example}'), 'usage.fields'],
+            [()=>update('-', '{"custom_fields": [{"name": "leadSource", "value": Marta Example}]}'), 'usage.fields'],
+        ];
+        for (const [run, code] of cases)
+        {
+            const e = await run().catch(x=>x);
+            expect(e, code).toMatchObject({code, exit_code: 2});
+            expect(shown(e), code).not.toContain('Marta');
+            expect(shown(e), code).not.toContain('marta');
+        }
+        expect(mock_fetch).not.toHaveBeenCalled();
+    });
+});
+
 describe('contact get', ()=>{
     it('prints the contact as Reply holds it', async()=>{
         const contact = {id: 456, email: EMAIL, firstName: 'Marta', isOptedOut: false, customFields: [{key: 'leadSource', value: 'Event'}]};
@@ -136,6 +157,20 @@ describe('contact update', ()=>{
         expect(e).toMatchObject({code: 'contact.field_not_found', exit_code: 1, details: {fields: ['Tier']}, ids: {contact_id: 456}});
         expect(shown(e)).not.toContain(SECRET);
         expect(sent().map(r=>r.method)).toEqual(['GET']);
+    });
+
+    it('a custom-field read that fails is reply.unavailable, and no PATCH goes out', async()=>{
+        instant_timers();
+        try {
+            mock_fetch.mockImplementation(()=>Promise.resolve(json('', 503)));
+            const e = await update('-', {title: 'CTO', custom_fields: [{name: 'leadSource', value: 'Event'}]}).catch(x=>x);
+            expect(e).toMatchObject({code: 'reply.unavailable', exit_code: 1, ids: {contact_id: 456}});
+            expect(sent().map(r=>r.method), JSON.stringify(sent())).not.toContain('PATCH');
+            expect(sent().length).toBeGreaterThan(0);
+        } finally {
+            real_timers();
+            mock_fetch.mockReset();
+        }
     });
 
     it('a 404 is contact.not_found', async()=>{

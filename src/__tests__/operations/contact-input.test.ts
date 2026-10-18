@@ -77,6 +77,7 @@ describe('read_contact_input', ()=>{
         expect(linkedin_key('https://uk.linkedin.com/in/Marta-Example')).toBe('https://uk.linkedin.com/in/marta-example');
         expect(linkedin_key('https://www.linkedin.com/in/Marta-Example?trk=AbC')).toBe('https://www.linkedin.com/in/marta-example?trk=AbC');
         expect(linkedin_key('https://www.linkedin.com/in/marta-example//')).toBe('https://www.linkedin.com/in/marta-example/');
+        expect(linkedin_key('https://www.linkedin.com:8443/in/Marta-Example')).toBe('https://www.linkedin.com:8443/in/marta-example');
         expect(linkedin_key('https://linkedin.com/in/marta-example')).not.toBe(linkedin_key('https://www.linkedin.com/in/marta-example'));
         expect(linkedin_key('http://www.linkedin.com/in/marta-example')).not.toBe(linkedin_key('https://www.linkedin.com/in/marta-example'));
         expect(linkedin_key('https://www.example.com/in/Marta-Example/')).toBe('https://www.example.com/in/Marta-Example');

@@ -107,6 +107,21 @@ describe('sequence list --name', ()=>{
     });
 });
 
+describe('a name in malformed JSON on stdin', ()=>{
+    // A parser's message quotes some ten characters around the bad token, so a refusal that passed it on would carry
+    // part of the name.
+    it('is refused without repeating any of it, for sequence list and sequence create', async()=>{
+        for (const run of [()=>list('-', '{"name": Q4 Outreach}'), ()=>create('-', '{"name": Q4 Outreach}')])
+        {
+            const e = await run().catch(x=>x);
+            expect(e).toMatchObject({code: 'usage.name', exit_code: 2});
+            expect(shown(e)).not.toContain('Q4');
+            expect(shown(e)).not.toContain('Outreach');
+        }
+        expect(mock_fetch).not.toHaveBeenCalled();
+    });
+});
+
 describe('sequence create --name', ()=>{
     const PLACEHOLDER = {
         type: 'task', actionType: 'toDo', delayInMinutes: 0,

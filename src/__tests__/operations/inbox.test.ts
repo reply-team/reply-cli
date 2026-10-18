@@ -153,6 +153,13 @@ describe('inbox categorize', ()=>{
             await expect(handle_inbox_categorize('9', {categoryId: '7'}, ctx(), {}))
                 .rejects.toMatchObject({code: 'inbox.thread_not_found', ids: {thread_id: 9}});
             expect(sent().filter(r=>r.method === 'PUT')).toHaveLength(1);
+            mock_fetch.mockReset();
+            const lost = Object.assign(new TypeError('fetch failed'), {cause: Object.assign(new Error('ECONNRESET'), {code: 'ECONNRESET'})});
+            answer(json({code: 'inboxThread.notFound'}, 404));
+            mock_fetch.mockImplementation(()=>Promise.reject(lost));
+            await expect(handle_inbox_categorize('9', {categoryId: '7'}, ctx(), {}))
+                .rejects.toMatchObject({code: 'inbox.thread_not_found', ids: {thread_id: 9}});
+            expect(sent().filter(r=>r.method === 'GET').length).toBeGreaterThan(0);
         } finally {
             real_timers();
             mock_fetch.mockReset();
