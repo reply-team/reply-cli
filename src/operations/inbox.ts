@@ -1,19 +1,28 @@
 import {Operation_error, UsageError} from '../utils/errors';
-import {call_reply, expect_object, read_page, refusal, reply_code_of, is_object, open_session, type Answer} from './call';
+import {
+    call_reply, expect_object, read_page, refusal, reply_code_of, is_object, item_failure, unreadable, open_session, type Answer,
+} from './call';
 import {parse_id, parse_int_in, parse_iso, parse_choice, type Op_globals} from './options';
-import {print_result} from './result';
+import {print_result, with_ids} from './result';
 import type {Cli_context} from '../context';
 
 // Reply's own `source` filter. It has no "all": without --source Reply answers its default, inbox.
 const SOURCES = {'inbox': 'inbox', 'sent': 'sent', 'unread': 'unread', 'ai-draft': 'aiDraft'} as const;
 type Source = keyof typeof SOURCES;
 
+// The CLI's channel words and Reply's.
+const CHANNELS = {'email': 'email', 'linkedin': 'linkedIn'} as const;
+type Channel = keyof typeof CHANNELS;
+
 const thread_not_found = (id: number, a: Answer): Operation_error=>
     new Operation_error('inbox.thread_not_found', `This account has no inbox thread ${id} it can see.`, {
         status: a.status, reply_code: reply_code_of(a),
     });
 
-type Inbox_list_opts = {contactId?: string; sequenceId?: string; source?: string; since?: string; limit?: string; offset?: string};
+type Inbox_list_opts = {
+    contactId?: string; sequenceId?: string; source?: string; channel?: string; categoryId?: string;
+    since?: string; limit?: string; offset?: string;
+};
 
 const handle_inbox_list = async(opts: Inbox_list_opts, ctx: Cli_context, g: Op_globals): Promise<void>=>{
     if ((opts.contactId === undefined) === (opts.sequenceId === undefined))
@@ -27,6 +36,15 @@ const handle_inbox_list = async(opts: Inbox_list_opts, ctx: Cli_context, g: Op_g
     if (source !== undefined)
     {
         filter.source = SOURCES[source];
+    }
+    const channel = parse_choice(opts.channel, '--channel', Object.keys(CHANNELS) as Channel[]);
+    if (channel !== undefined)
+    {
+        filter.channels = [CHANNELS[channel]];
+    }
+    if (opts.categoryId !== undefined)
+    {
+        filter.categoryIds = [parse_id(opts.categoryId, '--category-id')];
     }
     if (opts.since !== undefined)
     {
@@ -88,4 +106,93 @@ const handle_inbox_get = async(
     print_result({thread: thread_header(thread), messages: read_page(m)}, g);
 };
 
-export {handle_inbox_list, handle_inbox_get, SOURCES};
+const handle_inbox_categories = async(ctx: Cli_context, g: Op_globals): Promise<void>=>{
+    const s = await open_session(ctx, g);
+    const a = await call_reply(s, 'GET', '/v3/inbox/threads/categories', 'read');
+    if (a.status !== 200)
+    {
+        throw refusal(a, 'read');
+    }
+    if (!Array.isArray(a.data))
+    {
+        throw unreadable(a, 'read');
+    }
+    print_result({items: a.data}, g);
+};
+
+// One absolute PUT, so a repeat lands on the same state. Reply clears the category on a null id.
+const handle_inbox_categorize = async(
+    thread_arg: string, opts: {categoryId?: string; clear?: boolean}, ctx: Cli_context, g: Op_globals,
+): Promise<void>=>{
+    const id = parse_id(thread_arg, 'Thread id');
+    if ((opts.categoryId === undefined) === (opts.clear !== true))
+    {
+        throw new UsageError('Give exactly one of --category-id and --clear.', {code: 'usage.inbox'});
+    }
+    const category_id = opts.categoryId === undefined ? null : parse_id(opts.categoryId, '--category-id');
+    const s = await open_session(ctx, g);
+    try {
+        const a = await call_reply(s, 'PUT', `/v3/inbox/threads/${id}/category`, 'write', {categoryId: category_id});
+        // One 404 for both. Reply's document gives this call inboxThread.notFound, and inboxCategory.notFound
+        // only for the category endpoints themselves; a 404 with neither code is reply.refused.
+        if (a.status === 404 && reply_code_of(a) === 'inboxThread.notFound')
+        {
+            throw thread_not_found(id, a);
+        }
+        if (a.status === 404 && reply_code_of(a) === 'inboxCategory.notFound')
+        {
+            throw new Operation_error('inbox.category_not_found', `This account has no inbox category ${category_id}.`, {
+                status: a.status, reply_code: reply_code_of(a),
+            });
+        }
+        if (a.status !== 204 && a.status !== 200)
+        {
+            throw refusal(a, 'write');
+        }
+        print_result({status: category_id === null ? 'cleared' : 'categorized', thread_id: id, category_id}, g);
+    } catch (e) {
+        throw with_ids(e, {thread_id: id});
+    }
+};
+
+// Reply marks threads only in bulk and answers with the ones it did not mark, so a thread missing
+// from the answer is marked. No read first: a thread that is already so is answered the same way.
+const mark_thread = async(thread_arg: string, read: boolean, ctx: Cli_context, g: Op_globals): Promise<void>=>{
+    const id = parse_id(thread_arg, 'Thread id');
+    const s = await open_session(ctx, g);
+    try {
+        const a = await call_reply(s, 'POST', `/v3/inbox/threads/${read ? 'mark-as-read' : 'mark-as-unread'}`, 'write', {threadIds: [id]});
+        if (a.status !== 200)
+        {
+            throw refusal(a, 'write');
+        }
+        const failed = item_failure(expect_object(a, 'write'), id);
+        if (failed?.error === 'notFound')
+        {
+            throw new Operation_error('inbox.thread_not_found', `This account has no inbox thread ${id} it can see.`, {
+                status: 200, reply_code: 'notFound',
+            });
+        }
+        if (failed !== undefined)
+        {
+            throw new Operation_error('reply.refused', `Reply did not mark the thread as ${read ? 'read' : 'unread'}.`, {
+                status: 200, reply_code: failed.error ?? undefined, detail: failed.details ?? undefined,
+            });
+        }
+        print_result({status: read ? 'read' : 'unread', thread_id: id}, g);
+    } catch (e) {
+        throw with_ids(e, {thread_id: id});
+    }
+};
+
+const handle_inbox_mark_read = (thread_arg: string, ctx: Cli_context, g: Op_globals): Promise<void>=>
+    mark_thread(thread_arg, true, ctx, g);
+
+const handle_inbox_mark_unread = (thread_arg: string, ctx: Cli_context, g: Op_globals): Promise<void>=>
+    mark_thread(thread_arg, false, ctx, g);
+
+export {
+    handle_inbox_list, handle_inbox_get, handle_inbox_categories, handle_inbox_categorize,
+    handle_inbox_mark_read, handle_inbox_mark_unread, thread_not_found, SOURCES, CHANNELS,
+};
+export type {Channel};

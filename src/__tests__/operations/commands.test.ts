@@ -8,13 +8,20 @@ const sub = (parent: Command, name: string): Command=>{
     return found;
 };
 const flags = (c: Command): string[]=>c.options.map(o=>o.long as string);
+// The help as `--help` prints it, the text added after the options included.
+const help_of = (c: Command): string=>{
+    let text = '';
+    c.configureOutput({writeOut: (s: string)=>{ text += s; }});
+    c.outputHelp();
+    return text;
+};
 
 describe('operations/commands', ()=>{
     it('names the commands in Reply\'s words', ()=>{
         expect(sequence_command.commands.map(c=>c.name())).toEqual(['get', 'contacts', 'stats', 'add-contact', 'remove-contact', 'pause', 'start']);
         expect(contact_list_command.commands.map(c=>c.name())).toEqual(['add-contact']);
         expect(contact_command.commands.map(c=>c.name())).toEqual(['opt-out']);
-        expect(inbox_command.commands.map(c=>c.name())).toEqual(['list', 'get']);
+        expect(inbox_command.commands.map(c=>c.name())).toEqual(['list', 'get', 'reply', 'categories', 'categorize', 'mark-read', 'mark-unread']);
     });
 
     it('the commands about a person take the contact flags', ()=>{
@@ -29,7 +36,24 @@ describe('operations/commands', ()=>{
         expect(flags(sub(sequence_command, 'add-contact'))).toEqual(expect.arrayContaining(['--start-step', '--ignore-step-delay']));
         expect(flags(sub(sequence_command, 'start'))).toContain('--expect-contacts');
         expect(flags(sub(contact_list_command, 'add-contact'))).toContain('--refuse-opted-out');
-        expect(flags(sub(inbox_command, 'list'))).toEqual(expect.arrayContaining(['--contact-id', '--sequence-id', '--source', '--since', '--limit', '--offset']));
+        expect(flags(sub(inbox_command, 'list'))).toEqual(expect.arrayContaining(
+            ['--contact-id', '--sequence-id', '--source', '--channel', '--category-id', '--since', '--limit', '--offset']));
         expect(flags(sub(sequence_command, 'stats'))).toEqual(expect.arrayContaining(['--preset', '--from', '--to']));
+        expect(flags(sub(inbox_command, 'categorize'))).toEqual(['--category-id', '--clear']);
+        for (const name of ['categories', 'mark-read', 'mark-unread'])
+        {
+            expect(flags(sub(inbox_command, name)), name).toEqual([]);
+        }
+    });
+
+    it('inbox reply takes its text only through --message, and says a repeat may send it twice', ()=>{
+        const reply = sub(inbox_command, 'reply');
+        expect(flags(reply)).toEqual(['--message']);
+        const text = help_of(reply);
+        expect(text, text).toContain('--message -');
+        expect(text, text).toContain('may send it twice');
+        expect(text, text).not.toContain('re-running is safe');
+        const mark = help_of(sub(inbox_command, 'mark-read'));
+        expect(mark, mark).toContain('re-running is safe');
     });
 });

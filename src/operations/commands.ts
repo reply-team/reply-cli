@@ -6,7 +6,10 @@ import {add_contact_options, CONTACT_HELP} from './contact-input';
 import {handle_sequence_get, handle_sequence_contacts, handle_sequence_stats} from './sequence-read';
 import {handle_sequence_add_contact, handle_sequence_remove_contact} from './sequence-membership';
 import {handle_sequence_pause, handle_sequence_start} from './sequence-state';
-import {handle_inbox_list, handle_inbox_get} from './inbox';
+import {
+    handle_inbox_list, handle_inbox_get, handle_inbox_categories, handle_inbox_categorize, handle_inbox_mark_read, handle_inbox_mark_unread,
+} from './inbox';
+import {handle_inbox_reply} from './inbox-reply';
 import {handle_contact_list_add_contact} from './contact-list';
 import {handle_contact_opt_out} from './contact';
 
@@ -15,14 +18,16 @@ const COMMON_ERRORS = [
     'access.denied', 'access.feature_unavailable', 'rate_limited', 'reply.unavailable', 'reply.refused', 'reply.invalid_request',
 ];
 
-const errors_help = (codes: string[], write: boolean): string=>
+const SAFE_TO_REPEAT = 'a write may have happened; re-running is safe';
+
+const errors_help = (codes: string[], write: boolean, unknown_outcome: string): string=>
     '\nErrors (with --json, one line on stderr: {"error":{"code":…,"ids":…}}):\n'
     + [...codes, ...COMMON_ERRORS, ...(write ? ['outcome.unknown'] : [])].map(c=>`  ${c}`).join('\n')
     + '\nExit codes: 0 done · 1 failed, main effect not done (partial effects are in "ids") · 2 usage, nothing sent'
-    + ' · 3 outcome unknown (a write may have happened; re-running is safe)';
+    + ` · 3 outcome unknown (${unknown_outcome})`;
 
-const help = (examples: string[], codes: string[], write: boolean, extra = ''): string=>
-    `\nExamples:\n${examples.map(e=>`  ${e}`).join('\n')}\n${extra ? `\n${extra}` : ''}${errors_help(codes, write)}`;
+const help = (examples: string[], codes: string[], write: boolean, extra = '', unknown_outcome = SAFE_TO_REPEAT): string=>
+    `\nExamples:\n${examples.map(e=>`  ${e}`).join('\n')}\n${extra ? `\n${extra}` : ''}${errors_help(codes, write, unknown_outcome)}`;
 
 const ex = (command: string): string=>`${P} ${command}`;
 
@@ -157,17 +162,20 @@ add_contact_options(contact_command.command('opt-out'))
         await handle_contact_opt_out(cmd.opts(), ctx, g);
     }));
 
-const inbox_command = new Command('inbox').description('Read inbox threads');
+const inbox_command = new Command('inbox').description('Read inbox threads, reply in them, file them under a category, mark them read or unread');
 
 inbox_command.command('list')
     .option('--contact-id <id>', 'Threads with this contact')
     .option('--sequence-id <id>', 'Threads of this sequence')
     .option('--source <source>', 'inbox | sent | unread | ai-draft (Reply\'s default: inbox)')
+    .option('--channel <channel>', 'email | linkedin: only threads on this channel')
+    .option('--category-id <id>', 'Only threads filed under this inbox category (see `inbox categories`)')
     .option('--since <iso>', 'Only threads that moved at or after this moment')
     .option('--limit <n>', 'Threads per page, 1-100 (default 20)')
     .option('--offset <n>', 'Threads to skip (default 0)')
     .description('One page of inbox threads, by contact or by sequence')
-    .addHelpText('after', help([ex('inbox list --contact-id 456'), ex('inbox list --sequence-id 123 --source unread --since 2026-10-01T00:00:00Z')], [], false))
+    .addHelpText('after', help([ex('inbox list --contact-id 456'), ex('inbox list --sequence-id 123 --source unread --since 2026-10-01T00:00:00Z'),
+        ex('inbox list --sequence-id 123 --channel linkedin --category-id 7')], [], false))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
         await handle_inbox_list(cmd.opts(), ctx, g);
@@ -184,6 +192,66 @@ inbox_command.command('get')
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
         await handle_inbox_get(cmd.args[0], cmd.opts(), ctx, g);
+    }));
+
+inbox_command.command('reply')
+    .argument('<thread-id>', 'Inbox thread id')
+    .option('--message <stdin>', 'Only -: the message {body, reply_to_message_id} as JSON on stdin')
+    .description('Reply to the contact in an existing thread, on the thread\'s own channel')
+    .addHelpText('after', help(
+        [`echo '{"body":"Thanks, Tuesday works."}' | ${P} inbox reply 9876 --message -`,
+            `echo '{"body":"Thanks!","reply_to_message_id":"<abc@example.com>"}' | ${P} inbox reply 9876 --message -`],
+        ['inbox.thread_not_found', 'inbox.channel_mismatch', 'contact.opted_out', 'inbox.send_failed'], true,
+        'Result: {"status":"sent","thread_id","channel":"email"|"linkedin","message_id","sent_at"}: Reply\'s messageId and date,\n'
+            + 'each null when Reply gives none.\n'
+            + 'The message is read from stdin only, so its text never sits in the argument list. The reply goes to the thread\'s\n'
+            + 'contact from the account that owns the thread; no other recipient can be named. reply_to_message_id (email only)\n'
+            + 'answers one message of the thread; without it Reply answers the latest. inbox.send_failed means Reply could not\n'
+            + 'deliver it: "details.status_code" is Reply\'s reason (e.g. linkedInSendingLimitExceeded), null when it gave none.\n',
+        'the reply may have been sent; running the command again may send it twice, so read the thread first'))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_inbox_reply(cmd.args[0], cmd.opts(), ctx, g);
+    }));
+
+inbox_command.command('categories')
+    .description('The inbox categories a thread can be filed under, Reply\'s reserved ones included')
+    .addHelpText('after', help([ex('inbox categories')], [], false,
+        'Result: {"items"}: Reply\'s categories as it gives them (id, name, color, isReserved, unreadThreadsCount).\n'))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_inbox_categories(ctx, g);
+    }));
+
+inbox_command.command('categorize')
+    .argument('<thread-id>', 'Inbox thread id')
+    .option('--category-id <id>', 'File the thread under this category (see `inbox categories`)')
+    .option('--clear', 'Take the thread out of its category')
+    .description('File a thread under one inbox category, or clear its category (a thread is in at most one)')
+    .addHelpText('after', help([ex('inbox categorize 9876 --category-id 7'), ex('inbox categorize 9876 --clear')],
+        ['inbox.thread_not_found', 'inbox.category_not_found'], true,
+        'Result: {"status":"categorized"|"cleared","thread_id","category_id"}; category_id is null after --clear.\n'))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_inbox_categorize(cmd.args[0], cmd.opts(), ctx, g);
+    }));
+
+inbox_command.command('mark-read')
+    .argument('<thread-id>', 'Inbox thread id')
+    .description('Mark a thread as read (one that is already read stays read)')
+    .addHelpText('after', help([ex('inbox mark-read 9876')], ['inbox.thread_not_found'], true, 'Result: {"status":"read","thread_id"}\n'))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_inbox_mark_read(cmd.args[0], ctx, g);
+    }));
+
+inbox_command.command('mark-unread')
+    .argument('<thread-id>', 'Inbox thread id')
+    .description('Mark a thread as unread, so it needs attention again')
+    .addHelpText('after', help([ex('inbox mark-unread 9876')], ['inbox.thread_not_found'], true, 'Result: {"status":"unread","thread_id"}\n'))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_inbox_mark_unread(cmd.args[0], ctx, g);
     }));
 
 export {sequence_command, contact_list_command, contact_command, inbox_command};
