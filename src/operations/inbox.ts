@@ -133,7 +133,8 @@ const handle_inbox_categorize = async(
     const s = await open_session(ctx, g);
     try {
         const a = await call_reply(s, 'PUT', `/v3/inbox/threads/${id}/category`, 'write', {categoryId: category_id});
-        // One 404 for both: Reply's code says which of the two it could not find.
+        // One 404 for both. Reply's document gives this call inboxThread.notFound, and inboxCategory.notFound
+        // only for the category endpoints themselves; a 404 with neither code is reply.refused.
         if (a.status === 404 && reply_code_of(a) === 'inboxThread.notFound')
         {
             throw thread_not_found(id, a);

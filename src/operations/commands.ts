@@ -202,7 +202,8 @@ inbox_command.command('reply')
         [`echo '{"body":"Thanks, Tuesday works."}' | ${P} inbox reply 9876 --message -`,
             `echo '{"body":"Thanks!","reply_to_message_id":"<abc@example.com>"}' | ${P} inbox reply 9876 --message -`],
         ['inbox.thread_not_found', 'inbox.channel_mismatch', 'contact.opted_out', 'inbox.send_failed'], true,
-        'Result: {"status":"sent","thread_id","channel":"email"|"linkedin","message_id","sent_at"}; message_id is null on LinkedIn.\n'
+        'Result: {"status":"sent","thread_id","channel":"email"|"linkedin","message_id","sent_at"}: Reply\'s messageId and date,\n'
+            + 'each null when Reply gives none.\n'
             + 'The message is read from stdin only, so its text never sits in the argument list. The reply goes to the thread\'s\n'
             + 'contact from the account that owns the thread; no other recipient can be named. reply_to_message_id (email only)\n'
             + 'answers one message of the thread; without it Reply answers the latest. inbox.send_failed means Reply could not\n'
