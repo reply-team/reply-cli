@@ -14,7 +14,7 @@ import {handle_inbox_reply} from './inbox-reply';
 import {handle_contact_list_add_contact} from './contact-list';
 import {handle_contact_opt_out} from './contact';
 import {handle_contact_find, handle_contact_get, handle_contact_update, handle_contact_delete} from './contact-record';
-import {handle_direct_send} from './direct-send';
+import {handle_direct_send, type Direct_send_name} from './direct-send';
 
 const P = PROGRAM_NAME;
 const COMMON_ERRORS = [
@@ -272,6 +272,72 @@ contact_command.command('send-email')
         const {g, ctx} = ctx_of(cmd);
         await handle_direct_send('send-email', cmd.opts(), ctx, g);
     }));
+
+// The four LinkedIn sends share their flags, their first codes and the shape of their result.
+const LINKEDIN_SEND_CODES = [
+    'contact.not_found', 'contact.no_linkedin_profile', 'linkedin.account_not_found', 'linkedin.feature_disabled',
+    'linkedin.account_inactive', 'linkedin.invalid_cookie',
+];
+const LINKEDIN_SENT = '"contact_id","activity_id","sent_at"}:\n'
+    + 'activity_id and sent_at are Reply\'s linkedInActivityId and sentAtUtc as Reply gives them, each null when it gives\n'
+    + 'none; the CLI adds no time of its own.\n';
+const VARIABLES = (where: string): string=>
+    `Reply reads {{…}} in the ${where} as its template variables; one it cannot fill is linkedin.missing_variables.\n`;
+const LINKEDIN_EXAMPLE = '--contact-id 456 --linkedin-account-id 34';
+
+const linkedin_send = (
+    name: Exclude<Direct_send_name, 'send-email'>, description: string, message: string, examples: string[], codes: string[],
+    extra: string, what: string,
+): void=>{
+    contact_command.command(name)
+        .option('--contact-id <id>', 'The contact by its Reply id')
+        .option('--linkedin-account-id <id>', 'The LinkedIn account to send from (see `account list`)')
+        .option('--message <stdin>', `Only -: the ${message} as JSON on stdin`)
+        .description(description)
+        .addHelpText('after', help(examples, [...LINKEDIN_SEND_CODES, ...codes], true, extra, SEND_TWICE(what)))
+        .action(run(async(cmd)=>{
+            const {g, ctx} = ctx_of(cmd);
+            await handle_direct_send(name, cmd.opts(), ctx, g);
+        }));
+};
+
+linkedin_send('linkedin-connect', 'Invite a contact to connect on LinkedIn, with or without a note', 'note {note}',
+    [`echo '{"note":"Hi Ann, we met at the meetup."}' | ${P} contact linkedin-connect ${LINKEDIN_EXAMPLE} --message -`,
+        ex(`contact linkedin-connect ${LINKEDIN_EXAMPLE}`)],
+    ['linkedin.not_connected', 'linkedin.limit_reached', 'linkedin.message_too_long', 'linkedin.missing_variables'],
+    'Result: {"status":"sent"|"already_connected",' + LINKEDIN_SENT
+        + 'already_connected means the contact is already a connection: nothing is sent, and activity_id and sent_at are null.\n'
+        + 'The note is read from stdin only, so its text never sits in the argument list; without --message the invitation\n'
+        + 'carries no note. Reply publishes no limit for a note, and one it finds too long is linkedin.message_too_long.\n'
+        + VARIABLES('note'),
+    'invitation');
+
+linkedin_send('linkedin-message', 'Send a LinkedIn message to a contact the account is connected with', 'message {body}',
+    [`echo '{"body":"Thanks for connecting, Ann."}' | ${P} contact linkedin-message ${LINKEDIN_EXAMPLE} --message -`],
+    ['linkedin.not_connected', 'linkedin.limit_reached', 'linkedin.message_too_long', 'linkedin.missing_variables'],
+    'Result: {"status":"sent",' + LINKEDIN_SENT
+        + 'The message is read from stdin only, so its text never sits in the argument list. Reply takes a body of at most\n'
+        + '8000 characters.\n' + VARIABLES('body'),
+    'message');
+
+linkedin_send('linkedin-inmail', 'Send a LinkedIn InMail to a contact, connected or not (needs Sales Navigator and InMail credits)',
+    'InMail {subject, body}',
+    [`echo '{"subject":"Quick question","body":"Hi Ann, does Tuesday work?"}' | ${P} contact linkedin-inmail ${LINKEDIN_EXAMPLE} --message -`],
+    ['linkedin.limit_reached', 'linkedin.message_too_long', 'linkedin.missing_variables', 'linkedin.sales_navigator_required',
+        'linkedin.sales_navigator_disconnected', 'linkedin.no_inmail_credits'],
+    'Result: {"status":"sent",' + LINKEDIN_SENT
+        + 'The InMail is read from stdin only, so its text never sits in the argument list. Reply takes a subject of at most\n'
+        + '200 characters and a body of at most 1900.\n' + VARIABLES('text'),
+    'InMail');
+
+linkedin_send('linkedin-voice', 'Send a LinkedIn voice message that Reply speaks from a script in the account\'s voice', 'script {script}',
+    [`echo '{"script":"Hi Ann, a quick hello about Tuesday."}' | ${P} contact linkedin-voice ${LINKEDIN_EXAMPLE} --message -`],
+    ['linkedin.not_connected', 'linkedin.limit_reached', 'linkedin.missing_variables', 'linkedin.voice_profile_missing',
+        'linkedin.voice_too_long'],
+    'Result: {"status":"sent",' + LINKEDIN_SENT
+        + 'The script is read from stdin only, so its text never sits in the argument list. Reply takes at most 1000 characters\n'
+        + 'and speaks them with the LinkedIn account\'s voice profile; a recorded message cannot be sent here.\n' + VARIABLES('script'),
+    'voice message');
 
 const inbox_command = new Command('inbox').description('Read inbox threads, reply in them, file them under a category, mark them read or unread');
 

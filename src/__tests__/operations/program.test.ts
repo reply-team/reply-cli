@@ -92,6 +92,10 @@ describe('the program', ()=>{
     it('every direct send refuses its text given on the argument list: exit 2, no request, the text not repeated', async()=>{
         const sends: string[][] = [
             ['send-email', '--email-account-id', '12', '--message', '{"subject":"Hi Marta","body":"Tuesday works"}'],
+            ['linkedin-connect', '--linkedin-account-id', '34', '--message', '{"note":"Hi Marta, Tuesday works"}'],
+            ['linkedin-message', '--linkedin-account-id', '34', '--message', '{"body":"Hi Marta, Tuesday works"}'],
+            ['linkedin-inmail', '--linkedin-account-id', '34', '--message', '{"subject":"Hi Marta","body":"Tuesday works"}'],
+            ['linkedin-voice', '--linkedin-account-id', '34', '--message', '{"script":"Hi Marta, Tuesday works"}'],
         ];
         for (const [name, ...rest] of sends)
         {

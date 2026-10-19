@@ -21,7 +21,8 @@ describe('operations/commands', ()=>{
         expect(sequence_command.commands.map(c=>c.name())).toEqual(
             ['list', 'create', 'get', 'contacts', 'stats', 'add-contact', 'remove-contact', 'pause', 'start']);
         expect(contact_list_command.commands.map(c=>c.name())).toEqual(['add-contact']);
-        expect(contact_command.commands.map(c=>c.name())).toEqual(['find', 'get', 'update', 'delete', 'opt-out', 'send-email']);
+        expect(contact_command.commands.map(c=>c.name())).toEqual(['find', 'get', 'update', 'delete', 'opt-out',
+            'send-email', 'linkedin-connect', 'linkedin-message', 'linkedin-inmail', 'linkedin-voice']);
         expect(inbox_command.commands.map(c=>c.name())).toEqual(['list', 'get', 'reply', 'categories', 'categorize', 'mark-read', 'mark-unread']);
     });
 
@@ -102,9 +103,21 @@ describe('operations/commands', ()=>{
 
     // Each direct send: the flag naming the account it goes from, the codes its endpoint publishes, and what its help
     // says sent_at is.
+    const LINKEDIN = ['contact.not_found', 'contact.no_linkedin_profile', 'linkedin.account_not_found', 'linkedin.feature_disabled',
+        'linkedin.account_inactive', 'linkedin.invalid_cookie'];
+    const SENT_AT_AS_GIVEN = 'sentAtUtc as Reply gives them, each null when it gives none; the CLI adds no time of its own';
     const DIRECT_SENDS: [string, string, string[], string][] = [
         ['send-email', '--email-account-id', ['contact.not_found', 'email_account.not_found', 'contact.blacklisted'],
             'sent_at is always null; the CLI adds none of its own'],
+        ['linkedin-connect', '--linkedin-account-id', [...LINKEDIN, 'linkedin.not_connected', 'linkedin.limit_reached',
+            'linkedin.message_too_long', 'linkedin.missing_variables'], SENT_AT_AS_GIVEN],
+        ['linkedin-message', '--linkedin-account-id', [...LINKEDIN, 'linkedin.not_connected', 'linkedin.limit_reached',
+            'linkedin.message_too_long', 'linkedin.missing_variables'], SENT_AT_AS_GIVEN],
+        ['linkedin-inmail', '--linkedin-account-id', [...LINKEDIN, 'linkedin.limit_reached', 'linkedin.message_too_long',
+            'linkedin.missing_variables', 'linkedin.sales_navigator_required', 'linkedin.sales_navigator_disconnected',
+            'linkedin.no_inmail_credits'], SENT_AT_AS_GIVEN],
+        ['linkedin-voice', '--linkedin-account-id', [...LINKEDIN, 'linkedin.not_connected', 'linkedin.limit_reached',
+            'linkedin.missing_variables', 'linkedin.voice_profile_missing', 'linkedin.voice_too_long'], SENT_AT_AS_GIVEN],
     ];
 
     it('each direct send takes ids by flag and its text only through --message -, and says a repeat may send it twice', ()=>{
@@ -119,10 +132,10 @@ describe('operations/commands', ()=>{
             expect(text, text).not.toContain('re-running is safe');
             expect(flat, text).toContain(sent_at);
             expect(flat, text).toContain('read from stdin only');
-            for (const code of [...codes, 'outcome.unknown'])
-            {
-                expect(text, `${name}: ${code}`).toContain(`  ${code}\n`);
-            }
+            // Exactly the codes its endpoint publishes, then the shared ones, as the help lists them.
+            const listed = text.split('\nErrors')[1].split('\nExit codes')[0].split('\n').slice(1).map(l=>l.trim());
+            expect(listed, name).toEqual([...codes, 'access.denied', 'access.feature_unavailable', 'rate_limited', 'reply.unavailable',
+                'reply.refused', 'reply.invalid_request', 'outcome.unknown']);
         }
     });
 
