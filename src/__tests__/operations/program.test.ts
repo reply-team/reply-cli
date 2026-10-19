@@ -109,6 +109,13 @@ describe('the program', ()=>{
         }
     });
 
+    it('account list is a work command of its own: a channel it does not know exits 2 before any request', async()=>{
+        const {code, err} = await run_program(['--json', '-k', 'key-1', 'account', 'list', '--channel', 'sms']);
+        expect(code).toBe(2);
+        expect(JSON.parse(err)).toMatchObject({error: {code: 'usage.choice'}});
+        expect(mock_fetch).not.toHaveBeenCalled();
+    });
+
     it('a usage error exits 2 before any request', async()=>{
         const {code, err} = await run_program(['--json', '-k', 'key-1', 'sequence', 'stats', '123', '--from', '2026-10-02', '--to', '2026-10-01']);
         expect(code).toBe(2);

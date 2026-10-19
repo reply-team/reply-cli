@@ -1,6 +1,6 @@
 import {describe, it, expect} from 'vitest';
 import type {Command} from 'commander';
-import {sequence_command, contact_list_command, contact_command, inbox_command} from '../../operations/commands';
+import {sequence_command, contact_list_command, contact_command, inbox_command, account_command} from '../../operations/commands';
 
 const sub = (parent: Command, name: string): Command=>{
     const found = parent.commands.find(c=>c.name() === name);
@@ -24,6 +24,19 @@ describe('operations/commands', ()=>{
         expect(contact_command.commands.map(c=>c.name())).toEqual(['find', 'get', 'update', 'delete', 'opt-out',
             'send-email', 'linkedin-connect', 'linkedin-message', 'linkedin-inmail', 'linkedin-voice']);
         expect(inbox_command.commands.map(c=>c.name())).toEqual(['list', 'get', 'reply', 'categories', 'categorize', 'mark-read', 'mark-unread']);
+        expect(account_command.commands.map(c=>c.name())).toEqual(['list']);
+    });
+
+    it('account list takes only --channel, and says what each status means and that every page is read', ()=>{
+        const c = sub(account_command, 'list');
+        expect(flags(c)).toEqual(['--channel']);
+        const text = help_of(c);
+        const flat = text.replace(/\s+/g, ' ');
+        expect(flat, text).toContain('status is active, inactive, disconnected or other');
+        expect(flat, text).toContain('reply_status is Reply\'s own word');
+        expect(flat, text).toContain('A LinkedIn account at its daily limit is active');
+        expect(text, text).toContain('  account.list_incomplete\n');
+        expect(text, text).not.toContain('outcome.unknown');
     });
 
     it('the commands about a person take the contact flags', ()=>{

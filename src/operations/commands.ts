@@ -15,6 +15,7 @@ import {handle_contact_list_add_contact} from './contact-list';
 import {handle_contact_opt_out} from './contact';
 import {handle_contact_find, handle_contact_get, handle_contact_update, handle_contact_delete} from './contact-record';
 import {handle_direct_send, type Direct_send_name} from './direct-send';
+import {handle_account_list} from './accounts';
 
 const P = PROGRAM_NAME;
 const COMMON_ERRORS = [
@@ -431,4 +432,20 @@ inbox_command.command('mark-unread')
         await handle_inbox_mark_unread(cmd.args[0], ctx, g);
     }));
 
-export {sequence_command, contact_list_command, contact_command, inbox_command};
+const account_command = new Command('account').description('List the email and LinkedIn accounts a send can go from');
+
+account_command.command('list')
+    .option('--channel <channel>', 'email | linkedin: only the accounts of this channel')
+    .description('The email and LinkedIn accounts a send can go from, and the state of each')
+    .addHelpText('after', help([ex('account list'), ex('account list --channel linkedin')], ['account.list_incomplete'], false,
+        'Result: {"items":[{"id","channel","name","address","status","reply_status"}]}, the email accounts first: status is\n'
+            + 'active, inactive, disconnected or other, and reply_status is Reply\'s own word for it, null when it gives none. name\n'
+            + 'is the sender name or the LinkedIn name, and address the mailbox\'s email or the LinkedIn profile URL, each null when\n'
+            + 'Reply gives none. A LinkedIn account at its daily limit is active: a send that meets the limit answers\n'
+            + 'linkedin.limit_reached. Every page is read; account.list_incomplete means the email accounts did not end within 20000.\n'))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_account_list(cmd.opts(), ctx, g);
+    }));
+
+export {sequence_command, contact_list_command, contact_command, inbox_command, account_command};
