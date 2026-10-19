@@ -22,10 +22,10 @@ const failure = (name: Direct_send_name, message: unknown, opts: Direct_send_opt
 const lost_connection = ()=>Object.assign(new TypeError('fetch failed'),
     {cause: Object.assign(new Error('ECONNRESET'), {code: 'ECONNRESET'})});
 
-// What a failure shows a caller: none of it may carry the person's words.
+// What a failure shows a caller, as text and as the --json line: none of it may carry the person's words.
 const shown = (e: unknown): string=>{
-    const err = e as {message?: string; title?: string; hint?: string; detail?: string};
-    return [err.message, err.title, err.hint, err.detail].join(' ');
+    const err = e as {message?: string; title?: string; hint?: string; detail?: string; to_json?: () => unknown};
+    return [err.message, err.title, err.hint, err.detail, JSON.stringify(err.to_json?.())].join(' ');
 };
 
 beforeEach(()=>{ mock_fetch.mockReset(); });
@@ -79,6 +79,7 @@ describe('contact send-email', ()=>{
             const e = await failure('send-email', {subject: SUBJECT, body: BODY}, EMAIL_OPTS);
             expect(e, code).toMatchObject({code, exit_code: 1, ids: {contact_id: 456, email_account_id: 12}});
             expect((e as {reply_code?: string}).reply_code, code).toBe(reply_code);
+            expect(shown(e), shown(e)).not.toContain('Marta');
             expect(sent(), code).toHaveLength(1);
         }
     });
@@ -164,7 +165,31 @@ describe('the LinkedIn sends', ()=>{
             expect(e, `${name} ${reply_code}`).toMatchObject({
                 code, exit_code: 1, status, reply_code, ids: {contact_id: 456, linkedin_account_id: 34},
             });
+            expect(shown(e), shown(e)).not.toContain('Marta');
             expect(mock_fetch, `${name} ${reply_code}`).toHaveBeenCalledTimes(1);
+        }
+    });
+
+    it('reads contact-not-found, the limits and already-connected only under the status Reply publishes each with', async()=>{
+        const cases: [Direct_send_name, unknown, Direct_send_opts, string][] = [
+            ['send-email', {subject: SUBJECT, body: BODY}, EMAIL_OPTS, 'contact.notFound'],
+            ['linkedin-message', {body: TEXT}, LINKEDIN_OPTS, 'directLinkedIn.contactNotFound'],
+            ['linkedin-message', {body: TEXT}, LINKEDIN_OPTS, 'directLinkedIn.dailyLimitReached'],
+            ['linkedin-connect', {note: NOTE}, LINKEDIN_OPTS, 'directLinkedIn.weeklyLimitReached'],
+            ['linkedin-connect', {note: NOTE}, LINKEDIN_OPTS, 'directLinkedIn.alreadyConnected'],
+        ];
+        // Under another status the code says nothing: a 400 is Reply's plain refusal, and a 503 may hide a send.
+        const statuses: [number, string, number][] = [[400, 'reply.refused', 1], [503, 'outcome.unknown', 3]];
+        for (const [name, text, opts, reply_code] of cases)
+        {
+            for (const [status, code, exit_code] of statuses)
+            {
+                mock_fetch.mockReset();
+                answer(json({title: 'Refused', status, code: reply_code}, status));
+                const e = await failure(name, text, opts);
+                expect(e, `${name} ${status} ${reply_code}`).toMatchObject({code, exit_code, reply_code});
+                expect(mock_fetch, `${name} ${status} ${reply_code}`).toHaveBeenCalledTimes(1);
+            }
         }
     });
 
@@ -181,6 +206,7 @@ describe('the LinkedIn sends', ()=>{
             const e = await failure('linkedin-connect', {note: NOTE}, LINKEDIN_OPTS);
             expect(e, code).toMatchObject({code, exit_code: 1, retry_after: 3600, ids: {contact_id: 456, linkedin_account_id: 34}});
             expect((e as {details?: unknown}).details, code).toEqual(limit === undefined ? undefined : {limit});
+            expect(shown(e), shown(e)).not.toContain('Marta');
             expect(mock_fetch, code).toHaveBeenCalledTimes(1);
         }
     });
@@ -261,6 +287,7 @@ describe('every direct send', ()=>{
                 const hint = (e as {hint?: string}).hint ?? '';
                 expect(hint, `${name}, ${label}: ${hint}`).toContain('may send it twice');
                 expect(hint, `${name}, ${label}: ${hint}`).not.toContain('safe to re-run');
+                expect(shown(e), shown(e)).not.toContain('Marta');
                 expect(mock_fetch, `${name}, ${label}`).toHaveBeenCalledTimes(1);
             }
         }
