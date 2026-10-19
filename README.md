@@ -183,6 +183,8 @@ prints JSON (indented; compact with `--json`) and says what happened in a stable
 
 | Command | Does |
 |---|---|
+| `reply sequence list --name -` | every sequence of a name, ignoring case, archived ones included |
+| `reply sequence create --name -` | make a draft of a name, holding nobody, with one task step → its id |
 | `reply sequence get <id>` | the sequence as Reply holds it |
 | `reply sequence contacts <id> [--limit] [--offset]` | one page of its contacts, plus the total |
 | `reply sequence stats <id> (--preset … \| --from … --to …)` | its email and LinkedIn counts over a window |
@@ -191,6 +193,10 @@ prints JSON (indented; compact with `--json`) and says what happened in a stable
 | `reply sequence pause <id>` | → `paused` |
 | `reply sequence start <id> [--expect-contacts N]` | → `started` / `already_active` |
 | `reply contact-list add-contact <list-id> <contact> [--refuse-opted-out]` | → `added` |
+| `reply contact find --contact -` | the id of the contact under an email or a LinkedIn URL, or null; never creates one |
+| `reply contact get <id>` | the contact as Reply holds it |
+| `reply contact update <id> --fields -` | change some fields and custom fields; null clears one → `updated` |
+| `reply contact delete <id>` | → `deleted` |
 | `reply contact opt-out <contact>` | → `opted_out` |
 | `reply inbox list (--contact-id \| --sequence-id) [--source] [--channel] [--category-id] [--since]` | one page of threads |
 | `reply inbox get <thread-id>` | a thread with its subject, and one page of its messages |
@@ -201,16 +207,38 @@ prints JSON (indented; compact with `--json`) and says what happened in a stable
 
 `<contact>` is exactly one of `--contact <json>|@file|-`, `--email <address>` (with `--first-name`,
 `--last-name`, `--company`, `--title`), or `--contact-id <id>`. The JSON takes the same fields
-(`email`, `first_name`, …), and `-` reads it from stdin, which keeps personal data out of the
-argument list:
+(`email`, `first_name`, …) plus `linkedin_url`, with an email, a LinkedIn URL or both, and `-` reads
+it from stdin, which keeps personal data out of the argument list:
 
 ```sh
 echo '{"email":"ann@example.com","first_name":"Ann"}' | reply sequence add-contact 123 --contact -
+echo '{"linkedin_url":"https://www.linkedin.com/in/ann-example","first_name":"Ann"}' | reply contact opt-out --contact -
 ```
 
 The two `add-contact` commands always import a contact given by email, and Reply refuses an import
-without a first name, even for a contact it already holds. `contact opt-out` imports only someone
-Reply doesn't hold yet; `sequence remove-contact` never imports.
+without a first name, even for a contact it already holds; a contact given only by LinkedIn URL is
+looked up first and imported only when Reply holds nobody under it. `contact opt-out` imports only
+someone Reply doesn't hold yet; `sequence remove-contact` never imports. A contact is looked up, and
+an import matched, by its email; one with only a LinkedIn URL, by that. The lookup is Reply's exact
+one: an email matches ignoring case, and a LinkedIn URL is matched by its lowercased slug — on
+linkedin.com the path's case does not count, nor the scheme's or host's, a default port, one trailing
+slash or a fragment, while `www` and the query do. Reply is asked for a LinkedIn URL in that form
+first, then as given, and the CLI stores a LinkedIn URL by its lowercased slug when it imports a
+contact or runs `contact update`.
+
+The commands that carry a person's or a sequence's text in a field of their own read it from stdin
+only, and refuse it on the argument list: `contact find --contact -` (`{email}` or
+`{linkedin_url}`), `contact update --fields -` (`{first_name, last_name, company, title,
+linkedin_url, custom_fields: [{name, value}]}`, where a field left out stays as it is and `null`
+clears one), and `sequence list|create --name -` (`{name}`):
+
+```sh
+echo '{"title":"CTO","custom_fields":[{"name":"leadSource","value":"Event"}]}' | reply contact update 456 --fields -
+echo '{"name":"Q4 outreach"}' | reply sequence list --name -
+```
+
+`contact update` refuses a custom field the account has none of, `contact.field_not_found`, before
+it changes anything.
 
 `inbox reply` takes its message, `{body, reply_to_message_id}`, from stdin only, and refuses it on
 the argument list. The reply goes to the thread's contact from the account that owns the thread;
@@ -220,9 +248,11 @@ the argument list. The reply goes to the thread's contact from the account that 
 echo '{"body":"Thanks, Tuesday works."}' | reply inbox reply 9876 --message -
 ```
 
-It is the one work command that is not safe to re-run: on exit 3 (outcome unknown) the reply may
-already have been sent, so read the thread with `reply inbox get` before trying again. Every other
-work command can simply be run again.
+It is one of two work commands that are not safe to re-run: on exit 3 (outcome unknown) the reply
+may already have been sent, so read the thread with `reply inbox get` before trying again. The other
+is `sequence create`: Reply allows two sequences of one name, so after exit 3 look the name up with
+`sequence list --name -` first. Every other work command can simply be run again; a `contact delete`
+repeated after its first one took effect answers `contact.not_found`.
 
 **Errors.** With `--json`, a failure is one line on stderr:
 `{"error":{"code":"contact.opted_out","title":…,"status":…,"reply_code":…,"ids":{…}}}`. `ids` is
@@ -232,8 +262,8 @@ Reply refused the add. `reply.invalid_request` means Reply didn't accept a field
 
 **Exit codes.** `0` done · `1` failed, and the main effect did not happen · `2` usage error, nothing
 sent · `3` **outcome unknown**: a write may have happened and no answer came back. Re-running the
-same command is safe: each one checks or relies on Reply's own state rather than repeating an effect
-blindly.
+same command is safe, except `inbox reply` and `sequence create` (above): each one checks or relies
+on Reply's own state rather than repeating an effect blindly.
 
 **Retries.** Reads are retried on errors. A write is retried only when it can't have reached Reply:
 the connection was never made, or a `429` asked to wait 3 seconds or less. A longer `429` comes back

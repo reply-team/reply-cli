@@ -23,6 +23,23 @@ describe('sequence add-contact', ()=>{
         expect(sent()[2].body).toEqual({contactIds: [456], removeFromExisting: false, ignoreStepDelay: false});
     });
 
+    it('a contact given only by LinkedIn URL is looked up before any import, and one Reply holds under another case is added, '
+        + 'not imported again', async()=>{
+        const given = 'https://www.linkedin.com/in/Marta-Example';
+        answer(json(SEQ), json({items: [], hasMore: false}), json({items: [{id: 456, linkedInUrl: given}], hasMore: false}),
+            json({code: 'sequenceContact.notInSequence'}, 404), json({added: [456], notProcessed: {}}));
+        const {out} = await capture(()=>handle_sequence_add_contact('123', {contact: '-'}, ctx(), {json: true},
+            ()=>JSON.stringify({linkedin_url: given, first_name: 'Marta'})));
+        expect(JSON.parse(out)).toMatchObject({status: 'added', contact_id: 456, contact_created: false});
+        expect(sent().map(r=>`${r.method} ${r.url}`)).toEqual([
+            'GET https://api/v3/sequences/123',
+            `GET https://api/v3/contacts?linkedIn=${encodeURIComponent('https://www.linkedin.com/in/marta-example')}&top=100&skip=0`,
+            `GET https://api/v3/contacts?linkedIn=${encodeURIComponent(given)}&top=100&skip=0`,
+            'GET https://api/v3/sequences/123/contacts/456',
+            'POST https://api/v3/sequences/123/contact-links/bulk',
+        ]);
+    });
+
     it('an existing contact already in the sequence: nothing is written', async()=>{
         answer(json(SEQ), json({items: [{id: 456, status: 'updated'}]}), json({contactId: 456, statusInSequence: 'active'}));
         const {out} = await run({email: 'ann@example.com'});

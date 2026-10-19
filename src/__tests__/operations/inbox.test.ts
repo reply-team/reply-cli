@@ -1,5 +1,5 @@
 import {describe, it, expect, beforeEach} from 'vitest';
-import {mock_fetch, json, ctx, sent, answer, capture} from './helpers';
+import {mock_fetch, json, ctx, sent, answer, capture, instant_timers, real_timers} from './helpers';
 import {
     handle_inbox_list, handle_inbox_get, handle_inbox_categories, handle_inbox_categorize, handle_inbox_mark_read, handle_inbox_mark_unread,
 } from '../../operations/inbox';
@@ -130,9 +130,50 @@ describe('inbox categorize', ()=>{
         expect(mock_fetch).not.toHaveBeenCalled();
     });
 
-    it('tells a missing thread from a missing category by Reply\'s code', async()=>{
+    it('a missing category on a thread that exists is inbox.category_not_found: Reply answers it as a missing thread, so one '
+        + 'thread read tells the two apart', async()=>{
+        answer(json({code: 'inboxThread.notFound'}, 404), json({id: 9, channel: 'email', messages: []}));
+        await expect(handle_inbox_categorize('9', {categoryId: '7'}, ctx(), {}))
+            .rejects.toMatchObject({code: 'inbox.category_not_found', reply_code: 'inboxThread.notFound', ids: {thread_id: 9}});
+        expect(sent().map(r=>`${r.method} ${r.url}`)).toEqual([
+            'PUT https://api/v3/inbox/threads/9/category',
+            'GET https://api/v3/inbox/threads/9',
+        ]);
+    });
+
+    it('a missing thread stays inbox.thread_not_found after the read, and so does one whose read fails', async()=>{
+        answer(json({code: 'inboxThread.notFound'}, 404), json({code: 'inboxThread.notFound'}, 404));
+        await expect(handle_inbox_categorize('9', {categoryId: '7'}, ctx(), {}))
+            .rejects.toMatchObject({code: 'inbox.thread_not_found', ids: {thread_id: 9}});
+        mock_fetch.mockReset();
+        instant_timers();
+        try {
+            answer(json({code: 'inboxThread.notFound'}, 404));
+            mock_fetch.mockImplementation(()=>Promise.resolve(json('', 503)));
+            await expect(handle_inbox_categorize('9', {categoryId: '7'}, ctx(), {}))
+                .rejects.toMatchObject({code: 'inbox.thread_not_found', ids: {thread_id: 9}});
+            expect(sent().filter(r=>r.method === 'PUT')).toHaveLength(1);
+            mock_fetch.mockReset();
+            const lost = Object.assign(new TypeError('fetch failed'), {cause: Object.assign(new Error('ECONNRESET'), {code: 'ECONNRESET'})});
+            answer(json({code: 'inboxThread.notFound'}, 404));
+            mock_fetch.mockImplementation(()=>Promise.reject(lost));
+            await expect(handle_inbox_categorize('9', {categoryId: '7'}, ctx(), {}))
+                .rejects.toMatchObject({code: 'inbox.thread_not_found', ids: {thread_id: 9}});
+            expect(sent().filter(r=>r.method === 'GET').length).toBeGreaterThan(0);
+        } finally {
+            real_timers();
+            mock_fetch.mockReset();
+        }
+    });
+
+    it('--clear names no category, so its 404 is the thread\'s, with no read', async()=>{
+        answer(json({code: 'inboxThread.notFound'}, 404));
+        await expect(handle_inbox_categorize('9', {clear: true}, ctx(), {})).rejects.toMatchObject({code: 'inbox.thread_not_found'});
+        expect(sent().map(r=>r.method)).toEqual(['PUT']);
+    });
+
+    it('a 404 with the category code is inbox.category_not_found and one with no known code is reply.refused, with no read', async()=>{
         const cases: [Response, string][] = [
-            [json({code: 'inboxThread.notFound'}, 404), 'inbox.thread_not_found'],
             [json({code: 'inboxCategory.notFound'}, 404), 'inbox.category_not_found'],
             [json({title: 'Not Found'}, 404), 'reply.refused'],
         ];
@@ -141,6 +182,7 @@ describe('inbox categorize', ()=>{
             mock_fetch.mockReset();
             answer(res);
             await expect(handle_inbox_categorize('9', {categoryId: '7'}, ctx(), {})).rejects.toMatchObject({code, ids: {thread_id: 9}});
+            expect(mock_fetch).toHaveBeenCalledTimes(1);
         }
     });
 

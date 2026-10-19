@@ -63,21 +63,85 @@ describe('ensure_contact', ()=>{
         const s = await open_session(ctx(), {});
         await expect(ensure_contact(s, ann)).rejects.toMatchObject({code: 'outcome.unknown', exit_code: 3});
     });
+
+    it('a contact with only a LinkedIn URL is looked up first, lowercased then as given, and a contact Reply holds is used, '
+        + 'not imported again', async()=>{
+        const given = 'https://www.linkedin.com/in/Marta-Example';
+        answer(json({items: [], hasMore: false}), json({items: [{id: 456, linkedInUrl: given}], hasMore: false}));
+        const s = await open_session(ctx(), {});
+        expect(await ensure_contact(s, {kind: 'person', person: {linkedin_url: given, first_name: 'Marta'}})).toEqual({id: 456, created: false});
+        expect(sent().map(r=>`${r.method} ${r.url}`)).toEqual([
+            `GET https://api/v3/contacts?linkedIn=${encodeURIComponent('https://www.linkedin.com/in/marta-example')}&top=100&skip=0`,
+            `GET https://api/v3/contacts?linkedIn=${encodeURIComponent(given)}&top=100&skip=0`,
+        ]);
+    });
+
+    it('a LinkedIn URL Reply holds nobody under is imported in the form it is looked up by: its lowercased slug', async()=>{
+        answer(json({items: [], hasMore: false}), json({items: [], hasMore: false}), json({items: [{id: 458, status: 'created'}]}));
+        const s = await open_session(ctx(), {});
+        await ensure_contact(s, {kind: 'person', person: {linkedin_url: 'HTTPS://WWW.LinkedIn.com/in/Marta-Example/', first_name: 'Marta'}});
+        expect(sent().map(r=>r.method)).toEqual(['GET', 'GET', 'POST']);
+        expect(sent()[2].body).toEqual({items: [{linkedInUrl: 'https://www.linkedin.com/in/marta-example', firstName: 'Marta'}],
+            options: {keys: {linkedInUrl: true}}});
+    });
+
+    it('a contact with no email is imported keyed by its LinkedIn URL', async()=>{
+        const url = 'https://www.linkedin.com/in/marta-example';
+        answer(json({items: [], hasMore: false}), json({items: [{id: 458, status: 'created'}]}));
+        const s = await open_session(ctx(), {});
+        expect(await ensure_contact(s, {kind: 'person', person: {linkedin_url: url, first_name: 'Marta'}})).toEqual({id: 458, created: true});
+        expect(sent()[1].body).toEqual({items: [{linkedInUrl: url, firstName: 'Marta'}], options: {keys: {linkedInUrl: true}}});
+    });
+
+    it('a contact with an email and a LinkedIn URL is imported keyed by the email, carrying both', async()=>{
+        const url = 'https://www.linkedin.com/in/marta-example';
+        answer(json({items: [{id: 458, status: 'updated'}]}));
+        const s = await open_session(ctx(), {});
+        await ensure_contact(s, {kind: 'person', person: {email: 'marta@example.com', linkedin_url: url, first_name: 'Marta'}});
+        expect(sent()[0].body).toEqual({items: [{email: 'marta@example.com', linkedInUrl: url, firstName: 'Marta'}]});
+    });
+
+    it('a validation 400 that names the LinkedIn URL is contact.invalid_linkedin_url', async()=>{
+        answer(json({items: [], hasMore: false}), json({status: 400, errors: [{pointer: '/items/0/linkedInUrl', detail: 'bad'}]}, 400));
+        const s = await open_session(ctx(), {});
+        await expect(ensure_contact(s, {kind: 'person', person: {linkedin_url: 'https://www.linkedin.com/in/x', first_name: 'M'}}))
+            .rejects.toMatchObject({code: 'contact.invalid_linkedin_url'});
+    });
 });
 
 describe('find_contact', ()=>{
-    it('finds the one exact match among containment matches, across pages, whatever the case', async()=>{
+    it('a contact given with both an email and a LinkedIn URL is looked up by the email only', async()=>{
+        answer(json({items: [{id: 456, email: 'marta@example.com'}], hasMore: false}));
+        const s = await open_session(ctx(), {});
+        expect(await find_contact(s, {kind: 'person', person: {email: 'marta@example.com', linkedin_url: 'https://www.linkedin.com/in/Marta-Example'}}))
+            .toBe(456);
+        expect(sent().map(r=>r.url)).toEqual(['https://api/v3/contacts?email=marta%40example.com&top=100&skip=0']);
+    });
+
+    it('asks Reply\'s exact lookup by email, encoded, with no containment search', async()=>{
+        answer(json({items: [{id: 456, email: 'ann+q4@example.com'}], hasMore: false}));
+        const s = await open_session(ctx(), {});
+        expect(await find_contact(s, {kind: 'person', person: {email: 'ann+q4@example.com'}})).toBe(456);
+        expect(sent()).toEqual([{method: 'GET', url: 'https://api/v3/contacts?email=ann%2Bq4%40example.com&top=100&skip=0', body: undefined}]);
+    });
+
+    it('counts only an entry whose email is the one asked, whatever the case', async()=>{
+        answer(json({items: [{id: 1, email: 'joann@example.com'}, {id: 456, email: 'ANN@EXAMPLE.COM'}, {id: 2}], hasMore: false}));
+        const s = await open_session(ctx(), {});
+        expect(await find_contact(s, {kind: 'person', person: {email: 'ann@example.com'}})).toBe(456);
+    });
+
+    it('reads the answer to its end', async()=>{
         answer(
             json({items: [{id: 1, email: 'joann@example.com'}], hasMore: true}),
-            json({items: [{id: 456, email: 'ANN@EXAMPLE.COM'}], hasMore: false}),
+            json({items: [{id: 456, email: 'ann@example.com'}], hasMore: false}),
         );
         const s = await open_session(ctx(), {});
         expect(await find_contact(s, {kind: 'person', person: {email: 'ann@example.com'}})).toBe(456);
         expect(sent().map(r=>r.url)).toEqual([
-            'https://api/v3/contacts/filter?top=100&skip=0',
-            'https://api/v3/contacts/filter?top=100&skip=100',
+            'https://api/v3/contacts?email=ann%40example.com&top=100&skip=0',
+            'https://api/v3/contacts?email=ann%40example.com&top=100&skip=100',
         ]);
-        expect(sent()[0].body).toEqual({searchTerm: 'ann@example.com'});
     });
 
     it('answers null when Reply holds nobody under the address', async()=>{
@@ -86,22 +150,86 @@ describe('find_contact', ()=>{
         expect(await find_contact(s, {kind: 'person', person: {email: 'ann@example.com'}})).toBeNull();
     });
 
-    it('refuses two exact matches as contact.not_unique', async()=>{
-        answer(json({items: [{id: 1, email: 'ann@example.com'}, {id: 2, email: 'Ann@example.com'}], hasMore: false}));
+    it('refuses two contacts under the address as contact.not_unique, on one page or across two', async()=>{
+        answer(json({items: [{id: 1, email: 'ann@example.com'}, {id: 2, email: 'Ann@example.com'}], hasMore: true}));
         const s = await open_session(ctx(), {});
+        await expect(find_contact(s, {kind: 'person', person: {email: 'ann@example.com'}}))
+            .rejects.toMatchObject({code: 'contact.not_unique'});
+        expect(mock_fetch).toHaveBeenCalledTimes(1);
+        mock_fetch.mockReset();
+        answer(json({items: [{id: 1, email: 'ann@example.com'}], hasMore: true}), json({items: [{id: 2, email: 'ann@example.com'}], hasMore: false}));
         await expect(find_contact(s, {kind: 'person', person: {email: 'ann@example.com'}}))
             .rejects.toMatchObject({code: 'contact.not_unique'});
     });
 
-    it('refuses an unfinished lookup as contact.lookup_incomplete', async()=>{
-        for (let i = 0; i < 5; i++)
+    it('asks by LinkedIn URL when the contact has no email', async()=>{
+        const url = 'https://www.linkedin.com/in/marta-example';
+        answer(json({items: [{id: 456, linkedInUrl: url}], hasMore: false}));
+        const s = await open_session(ctx(), {});
+        expect(await find_contact(s, {kind: 'person', person: {linkedin_url: url}})).toBe(456);
+        expect(sent().map(r=>r.url)).toEqual([`https://api/v3/contacts?linkedIn=${encodeURIComponent(url)}&top=100&skip=0`]);
+    });
+
+    it('asks for a LinkedIn URL by its lowercased slug first, then as given, and counts only entries with the same slug', async()=>{
+        const asked = 'https://www.linkedin.com/in/Marta-Example/';
+        const normal = 'https://www.linkedin.com/in/marta-example';
+        answer(
+            json({items: [
+                {id: 456, linkedInUrl: normal},
+                {id: 3, linkedInUrl: 'https://linkedin.com/in/marta-example'},
+                {id: 4, linkedInUrl: 'http://www.linkedin.com/in/marta-example'},
+                {id: 5, linkedInUrl: 'https://www.linkedin.com/in/marta-example?trk=x'},
+                {id: 6, linkedInUrl: 'not a url'},
+            ], hasMore: false}),
+            json({items: [{id: 456, linkedInUrl: 'HTTPS://WWW.LinkedIn.COM:443/in/Marta-Example#about'}], hasMore: false}),
+        );
+        const s = await open_session(ctx(), {});
+        expect(await find_contact(s, {kind: 'person', person: {linkedin_url: asked}})).toBe(456);
+        expect(sent().map(r=>r.url)).toEqual([
+            `https://api/v3/contacts?linkedIn=${encodeURIComponent(normal)}&top=100&skip=0`,
+            `https://api/v3/contacts?linkedIn=${encodeURIComponent(asked)}&top=100&skip=0`,
+        ]);
+    });
+
+    it('finds a contact Reply holds under the slug as given when the lowercased one finds nobody', async()=>{
+        answer(json({items: [], hasMore: false}), json({items: [{id: 456, linkedInUrl: 'https://www.linkedin.com/in/Marta-Example'}], hasMore: false}));
+        const s = await open_session(ctx(), {});
+        expect(await find_contact(s, {kind: 'person', person: {linkedin_url: 'https://www.linkedin.com/in/Marta-Example'}})).toBe(456);
+    });
+
+    it('one slug held as two contacts under two spellings is contact.not_unique', async()=>{
+        answer(
+            json({items: [{id: 1, linkedInUrl: 'https://www.linkedin.com/in/marta-example'}], hasMore: false}),
+            json({items: [{id: 2, linkedInUrl: 'https://www.linkedin.com/in/Marta-Example'}], hasMore: false}),
+        );
+        const s = await open_session(ctx(), {});
+        await expect(find_contact(s, {kind: 'person', person: {linkedin_url: 'https://www.linkedin.com/in/Marta-Example'}}))
+            .rejects.toMatchObject({code: 'contact.not_unique'});
+    });
+
+    it('a LinkedIn URL already in its normal form is asked for once', async()=>{
+        answer(json({items: [], hasMore: false}));
+        const s = await open_session(ctx(), {});
+        expect(await find_contact(s, {kind: 'person', person: {linkedin_url: 'https://www.linkedin.com/in/marta-example'}})).toBeNull();
+        expect(mock_fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('ten pages without an end is not an exact lookup\'s answer: reply.unavailable', async()=>{
+        for (let i = 0; i < 10; i++)
         {
             answer(json({items: [{id: i + 10, email: `x${i}ann@example.com`}], hasMore: true}));
         }
         const s = await open_session(ctx(), {});
         await expect(find_contact(s, {kind: 'person', person: {email: 'ann@example.com'}}))
-            .rejects.toMatchObject({code: 'contact.lookup_incomplete'});
-        expect(mock_fetch).toHaveBeenCalledTimes(5);
+            .rejects.toMatchObject({code: 'reply.unavailable'});
+        expect(mock_fetch).toHaveBeenCalledTimes(10);
+    });
+
+    it('a matching entry without a usable id is reply.unavailable, never a guess', async()=>{
+        answer(json({items: [{id: 'x', email: 'ann@example.com'}], hasMore: false}));
+        const s = await open_session(ctx(), {});
+        await expect(find_contact(s, {kind: 'person', person: {email: 'ann@example.com'}}))
+            .rejects.toMatchObject({code: 'reply.unavailable'});
     });
 
     it('uses a --contact-id as given', async()=>{

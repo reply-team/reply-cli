@@ -1,6 +1,7 @@
 import {Operation_error, UsageError} from '../utils/errors';
 import {
-    call_reply, expect_object, read_page, refusal, reply_code_of, is_object, item_failure, unreadable, open_session, type Answer,
+    call_reply, expect_object, read_page, refusal, reply_code_of, is_object, item_failure, unreadable, open_session,
+    type Answer, type Op_session,
 } from './call';
 import {parse_id, parse_int_in, parse_iso, parse_choice, type Op_globals} from './options';
 import {print_result, with_ids} from './result';
@@ -120,6 +121,31 @@ const handle_inbox_categories = async(ctx: Cli_context, g: Op_globals): Promise<
     print_result({items: a.data}, g);
 };
 
+const category_not_found = (category_id: number | null, a: Answer): Operation_error=>
+    new Operation_error('inbox.category_not_found', `This account has no inbox category ${category_id}.`, {
+        status: a.status, reply_code: reply_code_of(a),
+    });
+
+// INTERIM (API gap): PUT /v3/inbox/threads/{id}/category answers a category the account does not
+// have with the same 404 and inboxThread.notFound as a thread it does not have, so on its own the
+// answer would report an existing thread as missing.
+// Needed: a code of its own for a missing category; the document gives inboxCategory.notFound only to
+// the category endpoints themselves.
+// Workaround: after that 404 on a categorize that names a category, read the thread once. When it is
+// there, the category is what is missing. The read is best-effort: when it fails, Reply's own word
+// stands.
+const thread_exists = async(s: Op_session, id: number): Promise<boolean>=>{
+    try {
+        return (await call_reply(s, 'GET', `/v3/inbox/threads/${id}`, 'read')).status === 200;
+    } catch (e) {
+        if (e instanceof Operation_error)
+        {
+            return false;
+        }
+        throw e;
+    }
+};
+
 // One absolute PUT, so a repeat lands on the same state. Reply clears the category on a null id.
 const handle_inbox_categorize = async(
     thread_arg: string, opts: {categoryId?: string; clear?: boolean}, ctx: Cli_context, g: Op_globals,
@@ -133,17 +159,15 @@ const handle_inbox_categorize = async(
     const s = await open_session(ctx, g);
     try {
         const a = await call_reply(s, 'PUT', `/v3/inbox/threads/${id}/category`, 'write', {categoryId: category_id});
-        // One 404 for both. Reply's document gives this call inboxThread.notFound, and inboxCategory.notFound
-        // only for the category endpoints themselves; a 404 with neither code is reply.refused.
+        // Without a category named (--clear), the 404 can only be the thread's. inboxCategory.notFound is
+        // read too, should Reply ever answer this call with it; a 404 with neither code is reply.refused.
         if (a.status === 404 && reply_code_of(a) === 'inboxThread.notFound')
         {
-            throw thread_not_found(id, a);
+            throw category_id !== null && await thread_exists(s, id) ? category_not_found(category_id, a) : thread_not_found(id, a);
         }
         if (a.status === 404 && reply_code_of(a) === 'inboxCategory.notFound')
         {
-            throw new Operation_error('inbox.category_not_found', `This account has no inbox category ${category_id}.`, {
-                status: a.status, reply_code: reply_code_of(a),
-            });
+            throw category_not_found(category_id, a);
         }
         if (a.status !== 204 && a.status !== 200)
         {

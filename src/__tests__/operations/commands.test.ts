@@ -18,9 +18,10 @@ const help_of = (c: Command): string=>{
 
 describe('operations/commands', ()=>{
     it('names the commands in Reply\'s words', ()=>{
-        expect(sequence_command.commands.map(c=>c.name())).toEqual(['get', 'contacts', 'stats', 'add-contact', 'remove-contact', 'pause', 'start']);
+        expect(sequence_command.commands.map(c=>c.name())).toEqual(
+            ['list', 'create', 'get', 'contacts', 'stats', 'add-contact', 'remove-contact', 'pause', 'start']);
         expect(contact_list_command.commands.map(c=>c.name())).toEqual(['add-contact']);
-        expect(contact_command.commands.map(c=>c.name())).toEqual(['opt-out']);
+        expect(contact_command.commands.map(c=>c.name())).toEqual(['find', 'get', 'update', 'delete', 'opt-out']);
         expect(inbox_command.commands.map(c=>c.name())).toEqual(['list', 'get', 'reply', 'categories', 'categorize', 'mark-read', 'mark-unread']);
     });
 
@@ -29,6 +30,24 @@ describe('operations/commands', ()=>{
             sub(contact_list_command, 'add-contact'), sub(contact_command, 'opt-out')])
         {
             expect(flags(c)).toEqual(expect.arrayContaining(['--contact-id', '--email', '--contact']));
+        }
+    });
+
+    it('the commands about a person say their JSON takes linkedin_url, and a lookup is never left incomplete', ()=>{
+        for (const c of [sub(sequence_command, 'add-contact'), sub(sequence_command, 'remove-contact'),
+            sub(contact_list_command, 'add-contact'), sub(contact_command, 'opt-out')])
+        {
+            const text = help_of(c);
+            expect(text, text).toContain('linkedin_url');
+            expect(text.replace(/\s+/g, ' '), text).toContain('stores it by that slug');
+            expect(text, text).not.toContain('lookup_incomplete');
+            // Each of them looks a contact up by address, and two contacts under one address is refused.
+            expect(text, text).toContain('  contact.not_unique\n');
+        }
+        for (const c of [sub(sequence_command, 'add-contact'), sub(contact_list_command, 'add-contact'), sub(contact_command, 'opt-out')])
+        {
+            const text = help_of(c);
+            expect(text, text).toContain('contact.invalid_linkedin_url');
         }
     });
 
@@ -44,6 +63,41 @@ describe('operations/commands', ()=>{
         {
             expect(flags(sub(inbox_command, name)), name).toEqual([]);
         }
+        expect(flags(sub(contact_command, 'get'))).toEqual([]);
+        expect(flags(sub(contact_command, 'delete'))).toEqual([]);
+    });
+
+    it('sequence list and create take the name only through --name -, and create says a repeat may make a second one', ()=>{
+        expect(flags(sub(sequence_command, 'list'))).toEqual(['--name']);
+        const create = sub(sequence_command, 'create');
+        expect(flags(create)).toEqual(['--name']);
+        const text = help_of(create);
+        expect(text, text).toContain('--name -');
+        expect(text, text).toContain('may make a second one');
+        expect(text, text).not.toContain('re-running is safe');
+        const listed = help_of(sub(sequence_command, 'list'));
+        expect(listed, listed).toContain('sequence.list_incomplete');
+    });
+
+    it('contact update takes its values only through --fields -, and contact delete says what a re-run answers', ()=>{
+        const update = sub(contact_command, 'update');
+        expect(flags(update)).toEqual(['--fields']);
+        const text = help_of(update);
+        expect(text, text).toContain('--fields -');
+        expect(text, text).toContain('contact.field_not_found');
+        expect(text.replace(/\s+/g, ' '), text).toContain('stores a LinkedIn URL by its lowercased slug');
+        const del = help_of(sub(contact_command, 'delete'));
+        expect(del.replace(/\s+/g, ' '), del).toContain('answers contact.not_found');
+    });
+
+    it('contact find takes the address only through --contact -, and never creates a contact', ()=>{
+        const find = sub(contact_command, 'find');
+        expect(flags(find)).toEqual(['--contact']);
+        const text = help_of(find);
+        expect(text, text).toContain('--contact -');
+        expect(text.replace(/\s+/g, ' '), text).toContain('Never creates a contact');
+        expect(text, text).toContain('contact.not_unique');
+        expect(text.replace(/\s+/g, ' '), text).toContain('matched by its lowercased slug');
     });
 
     it('inbox reply takes its text only through --message, and says a repeat may send it twice', ()=>{

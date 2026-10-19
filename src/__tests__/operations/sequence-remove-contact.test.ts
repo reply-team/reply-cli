@@ -37,11 +37,20 @@ describe('sequence remove-contact', ()=>{
         await expect(run({contactId: '456'})).rejects.toMatchObject({code: 'sequence.not_found', ids: {sequence_id: 123, contact_id: 456}});
     });
 
-    it('finds the contact by email, and never creates one', async()=>{
+    it('finds the contact by Reply\'s exact lookup by email, and never creates one', async()=>{
         answer(json({items: [], hasMore: false}));
         const {out} = await run({email: 'ann@example.com'});
         expect(JSON.parse(out)).toEqual({status: 'not_in_sequence', sequence_id: 123, contact_id: null});
-        expect(sent().map(r=>r.url)).toEqual(['https://api/v3/contacts/filter?top=100&skip=0']);
+        expect(sent().map(r=>`${r.method} ${r.url}`)).toEqual(['GET https://api/v3/contacts?email=ann%40example.com&top=100&skip=0']);
+    });
+
+    it('finds the contact by LinkedIn URL, and removes them', async()=>{
+        const url = 'https://www.linkedin.com/in/marta-example';
+        answer(json({items: [{id: 456, linkedInUrl: url}], hasMore: false}), json({statusInSequence: 'active'}), json(undefined, 204));
+        const {out} = await capture(()=>handle_sequence_remove_contact('123', {contact: '-'}, ctx(), {json: true},
+            ()=>JSON.stringify({linkedin_url: url})));
+        expect(JSON.parse(out)).toEqual({status: 'removed', sequence_id: 123, contact_id: 456});
+        expect(sent()[0].url).toBe(`https://api/v3/contacts?linkedIn=${encodeURIComponent(url)}&top=100&skip=0`);
     });
 
     it('a 404 on the DELETE (left in between) is not_in_sequence', async()=>{
