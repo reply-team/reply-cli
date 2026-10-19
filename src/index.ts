@@ -7,7 +7,7 @@ import {team_command} from './commands/team';
 import {api_command} from './commands/api';
 import {skills_command} from './commands/skills';
 import {install_command} from './commands/install';
-import {sequence_command, contact_list_command, contact_command, inbox_command} from './operations/commands';
+import {sequence_command, contact_list_command, contact_command, inbox_command, account_command} from './operations/commands';
 import {update_notice} from './selfupdate/notice';
 import {CliError, format_hint} from './utils/errors';
 import {info, set_quiet} from './utils/output';
@@ -46,7 +46,7 @@ const build_program = (): Command=>{
 
     const WORK = 'Work with your Reply account:';
     const SETUP = 'Setup:';
-    for (const c of [sequence_command, contact_list_command, contact_command, inbox_command, api_command])
+    for (const c of [sequence_command, contact_list_command, contact_command, inbox_command, account_command, api_command])
     {
         program.addCommand(c.helpGroup(WORK));
     }
@@ -90,6 +90,7 @@ Work commands (JSON out; exit 0 done, 1 failed, 2 usage, 3 outcome unknown):
     ${PROGRAM_NAME} sequence start 123 --expect-contacts 40
     ${PROGRAM_NAME} contact opt-out --contact-id 456
     ${PROGRAM_NAME} inbox list --contact-id 456
+    ${PROGRAM_NAME} account list --channel linkedin
   Each command's --help lists its flags, its result and its error codes.
 
 Raw API (agent/CI escape hatch) — docs: https://docs.reply.io/api-reference/introduction

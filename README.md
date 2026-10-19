@@ -198,12 +198,16 @@ prints JSON (indented; compact with `--json`) and says what happened in a stable
 | `reply contact update <id> --fields -` | change some fields and custom fields; null clears one → `updated` |
 | `reply contact delete <id>` | → `deleted` |
 | `reply contact opt-out <contact>` | → `opted_out` |
+| `reply contact send-email --contact-id N --email-account-id N --message -` | one email now, outside any sequence → `sent` |
+| `reply contact linkedin-connect --contact-id N --linkedin-account-id N [--message -]` | a LinkedIn invitation, with or without a note → `sent` / `already_connected` |
+| `reply contact linkedin-message …` · `linkedin-inmail …` · `linkedin-voice …` | a LinkedIn message, an InMail, or an AI voice message spoken from a script → `sent` |
 | `reply inbox list (--contact-id \| --sequence-id) [--source] [--channel] [--category-id] [--since]` | one page of threads |
 | `reply inbox get <thread-id>` | a thread with its subject, and one page of its messages |
 | `reply inbox reply <thread-id> --message -` | reply in the thread, on its own channel → `sent` |
 | `reply inbox categories` | the categories a thread can be filed under |
 | `reply inbox categorize <thread-id> (--category-id N \| --clear)` | → `categorized` / `cleared` |
 | `reply inbox mark-read <thread-id>` · `reply inbox mark-unread <thread-id>` | → `read` / `unread` |
+| `reply account list [--channel email\|linkedin]` | the email and LinkedIn accounts a send can go from, whose each is, and the state of each |
 
 `<contact>` is exactly one of `--contact <json>|@file|-`, `--email <address>` (with `--first-name`,
 `--last-name`, `--company`, `--title`), or `--contact-id <id>`. The JSON takes the same fields
@@ -248,9 +252,32 @@ the argument list. The reply goes to the thread's contact from the account that 
 echo '{"body":"Thanks, Tuesday works."}' | reply inbox reply 9876 --message -
 ```
 
-It is one of two work commands that are not safe to re-run: on exit 3 (outcome unknown) the reply
-may already have been sent, so read the thread with `reply inbox get` before trying again. The other
-is `sequence create`: Reply allows two sequences of one name, so after exit 3 look the name up with
+The direct sends reach a contact outside any sequence, from an account you name: `contact
+send-email` (`{subject, body}`, the body HTML), `contact linkedin-connect` (`{note}`, or no
+`--message` for an invitation without one), `contact linkedin-message` (`{body}`), `contact
+linkedin-inmail` (`{subject, body}`) and `contact linkedin-voice` (`{script}`, which Reply speaks in
+the LinkedIn account's voice). Each reads its text from stdin only and refuses it on the argument
+list. `reply account list` gives the ids to send from, each account's status (`active`, `inactive`,
+`disconnected` or `other`) and Reply's own word for it. In a team that shares its accounts the list
+holds teammates' accounts too, and `owner_user_id` says whose each one is. Without `--channel` both
+lists are read, and one the plan or role does not include fails the whole command; `--channel email`
+or `--channel linkedin` reads one alone:
+
+```sh
+echo '{"subject":"Quick question","body":"<p>Hi Ann, does Tuesday work?</p>"}' | reply contact send-email --contact-id 456 --email-account-id 12 --message -
+echo '{"body":"Thanks for connecting, Ann."}' | reply contact linkedin-message --contact-id 456 --linkedin-account-id 34 --message -
+```
+
+A LinkedIn send answers Reply's activity id and its `sentAtUtc` as Reply gives it; a direct email
+answers no time, so its `sent_at` is null, and the CLI never puts its own clock in either. The
+lengths Reply publishes (a LinkedIn message's 8000 characters, an InMail's 200 and 1900, a script's
+1000) are refused before anything is sent. Reply reads `{{…}}` in a LinkedIn text as its template
+variables, and refuses one it cannot fill with `linkedin.missing_variables`.
+
+`inbox reply`, `sequence create` and the five direct sends are the work commands that are not safe to
+re-run. On exit 3 (outcome unknown) a reply or a send may already have gone, and running it again may
+send it twice; for `inbox reply`, read the thread with `reply inbox get` before trying again. For
+`sequence create`, Reply allows two sequences of one name, so after exit 3 look the name up with
 `sequence list --name -` first. Every other work command can simply be run again; a `contact delete`
 repeated after its first one took effect answers `contact.not_found`.
 
@@ -262,8 +289,8 @@ Reply refused the add. `reply.invalid_request` means Reply didn't accept a field
 
 **Exit codes.** `0` done · `1` failed, and the main effect did not happen · `2` usage error, nothing
 sent · `3` **outcome unknown**: a write may have happened and no answer came back. Re-running the
-same command is safe, except `inbox reply` and `sequence create` (above): each one checks or relies
-on Reply's own state rather than repeating an effect blindly.
+same command is safe, except `inbox reply`, `sequence create` and the direct sends (above): each of
+the others checks or relies on Reply's own state rather than repeating an effect blindly.
 
 **Retries.** Reads are retried on errors. A write is retried only when it can't have reached Reply:
 the connection was never made, or a `429` asked to wait 3 seconds or less. A longer `429` comes back

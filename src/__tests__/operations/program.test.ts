@@ -89,6 +89,33 @@ describe('the program', ()=>{
         expect(mock_fetch).not.toHaveBeenCalled();
     });
 
+    it('every direct send refuses its text given on the argument list: exit 2, no request, the text not repeated', async()=>{
+        const sends: string[][] = [
+            ['send-email', '--email-account-id', '12', '--message', '{"subject":"Hi Marta","body":"Tuesday works"}'],
+            ['linkedin-connect', '--linkedin-account-id', '34', '--message', '{"note":"Hi Marta, Tuesday works"}'],
+            ['linkedin-message', '--linkedin-account-id', '34', '--message', '{"body":"Hi Marta, Tuesday works"}'],
+            ['linkedin-inmail', '--linkedin-account-id', '34', '--message', '{"subject":"Hi Marta","body":"Tuesday works"}'],
+            ['linkedin-voice', '--linkedin-account-id', '34', '--message', '{"script":"Hi Marta, Tuesday works"}'],
+        ];
+        for (const [name, ...rest] of sends)
+        {
+            mock_fetch.mockReset();
+            const {code, err} = await run_program(['--json', '-k', 'key-1', 'contact', name, '--contact-id', '456', ...rest]);
+            expect(code, name).toBe(2);
+            expect(JSON.parse(err), name).toMatchObject({error: {code: 'usage.message'}});
+            expect(err, err).not.toContain('Marta');
+            expect(err, err).not.toContain('Tuesday');
+            expect(mock_fetch, name).not.toHaveBeenCalled();
+        }
+    });
+
+    it('account list is a work command of its own: a channel it does not know exits 2 before any request', async()=>{
+        const {code, err} = await run_program(['--json', '-k', 'key-1', 'account', 'list', '--channel', 'sms']);
+        expect(code).toBe(2);
+        expect(JSON.parse(err)).toMatchObject({error: {code: 'usage.choice'}});
+        expect(mock_fetch).not.toHaveBeenCalled();
+    });
+
     it('a usage error exits 2 before any request', async()=>{
         const {code, err} = await run_program(['--json', '-k', 'key-1', 'sequence', 'stats', '123', '--from', '2026-10-02', '--to', '2026-10-01']);
         expect(code).toBe(2);

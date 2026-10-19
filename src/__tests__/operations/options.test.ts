@@ -1,5 +1,5 @@
 import {describe, it, expect} from 'vitest';
-import {parse_id, parse_int_in, parse_iso, parse_choice} from '../../operations/options';
+import {parse_id, parse_int_in, parse_iso, parse_choice, LARGEST_SAFE_ID} from '../../operations/options';
 import {UsageError} from '../../utils/errors';
 
 const usage_code = (fn: () => unknown): string | undefined=>{
@@ -14,6 +14,15 @@ describe('operations/options', ()=>{
         for (const bad of ['0', '007', '-1', 'abc', '1.5', '2147483648', ''])
         {
             expect(usage_code(()=>parse_id(bad, 'Sequence id'))).toBe('usage.id');
+        }
+    });
+
+    it('parse_id takes a larger bound for the ids Reply numbers in 64 bits, up to what a JSON number carries exactly', ()=>{
+        expect(parse_id('2147483648', 'Email account id', LARGEST_SAFE_ID)).toBe(2147483648);
+        expect(parse_id('9007199254740991', 'Email account id', LARGEST_SAFE_ID)).toBe(9007199254740991);
+        for (const bad of ['0', '-1', '9007199254740992', '9007199254740993', '99999999999999999999', '1e3'])
+        {
+            expect(usage_code(()=>parse_id(bad, 'Email account id', LARGEST_SAFE_ID)), bad).toBe('usage.id');
         }
     });
 

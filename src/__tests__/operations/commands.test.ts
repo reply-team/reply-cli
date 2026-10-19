@@ -1,6 +1,6 @@
 import {describe, it, expect} from 'vitest';
 import type {Command} from 'commander';
-import {sequence_command, contact_list_command, contact_command, inbox_command} from '../../operations/commands';
+import {sequence_command, contact_list_command, contact_command, inbox_command, account_command} from '../../operations/commands';
 
 const sub = (parent: Command, name: string): Command=>{
     const found = parent.commands.find(c=>c.name() === name);
@@ -21,8 +21,25 @@ describe('operations/commands', ()=>{
         expect(sequence_command.commands.map(c=>c.name())).toEqual(
             ['list', 'create', 'get', 'contacts', 'stats', 'add-contact', 'remove-contact', 'pause', 'start']);
         expect(contact_list_command.commands.map(c=>c.name())).toEqual(['add-contact']);
-        expect(contact_command.commands.map(c=>c.name())).toEqual(['find', 'get', 'update', 'delete', 'opt-out']);
+        expect(contact_command.commands.map(c=>c.name())).toEqual(['find', 'get', 'update', 'delete', 'opt-out',
+            'send-email', 'linkedin-connect', 'linkedin-message', 'linkedin-inmail', 'linkedin-voice']);
         expect(inbox_command.commands.map(c=>c.name())).toEqual(['list', 'get', 'reply', 'categories', 'categorize', 'mark-read', 'mark-unread']);
+        expect(account_command.commands.map(c=>c.name())).toEqual(['list']);
+    });
+
+    it('account list takes only --channel, and says what each status means and that every page is read', ()=>{
+        const c = sub(account_command, 'list');
+        expect(flags(c)).toEqual(['--channel']);
+        const text = help_of(c);
+        const flat = text.replace(/\s+/g, ' ');
+        expect(flat, text).toContain('status is active, inactive, disconnected or other');
+        expect(flat, text).toContain('reply_status is Reply\'s own word');
+        expect(flat, text).toContain('A LinkedIn account at its daily limit is active');
+        expect(flat, text).toContain('the list holds teammates\' accounts too, and owner_user_id is the Reply user whose each one is');
+        expect(flat, text).toContain('one the account\'s plan or role does not include fails the whole command');
+        expect(flat, text).toContain('--channel reads one channel alone');
+        expect(text, text).toContain('  account.list_incomplete\n');
+        expect(text, text).not.toContain('outcome.unknown');
     });
 
     it('the commands about a person take the contact flags', ()=>{
@@ -98,6 +115,51 @@ describe('operations/commands', ()=>{
         expect(text.replace(/\s+/g, ' '), text).toContain('Never creates a contact');
         expect(text, text).toContain('contact.not_unique');
         expect(text.replace(/\s+/g, ' '), text).toContain('matched by its lowercased slug');
+    });
+
+    // Each direct send: the flag naming the account it goes from, the codes its endpoint publishes, and what its help
+    // says sent_at is.
+    const LINKEDIN = ['contact.not_found', 'contact.no_linkedin_profile', 'linkedin.account_not_found', 'linkedin.feature_disabled',
+        'linkedin.account_inactive', 'linkedin.invalid_cookie'];
+    const SENT_AT_AS_GIVEN = 'sentAtUtc as Reply gives them, each null when it gives none; the CLI adds no time of its own';
+    const DIRECT_SENDS: [string, string, string[], string][] = [
+        ['send-email', '--email-account-id', ['contact.not_found', 'email_account.not_found', 'contact.blacklisted'],
+            'sent_at is always null; the CLI adds none of its own'],
+        ['linkedin-connect', '--linkedin-account-id', [...LINKEDIN, 'linkedin.not_connected', 'linkedin.limit_reached',
+            'linkedin.message_too_long', 'linkedin.missing_variables'], SENT_AT_AS_GIVEN],
+        ['linkedin-message', '--linkedin-account-id', [...LINKEDIN, 'linkedin.not_connected', 'linkedin.limit_reached',
+            'linkedin.message_too_long', 'linkedin.missing_variables'], SENT_AT_AS_GIVEN],
+        ['linkedin-inmail', '--linkedin-account-id', [...LINKEDIN, 'linkedin.limit_reached', 'linkedin.message_too_long',
+            'linkedin.missing_variables', 'linkedin.sales_navigator_required', 'linkedin.sales_navigator_disconnected',
+            'linkedin.no_inmail_credits'], SENT_AT_AS_GIVEN],
+        ['linkedin-voice', '--linkedin-account-id', [...LINKEDIN, 'linkedin.not_connected', 'linkedin.limit_reached',
+            'linkedin.missing_variables', 'linkedin.voice_profile_missing', 'linkedin.voice_too_long'], SENT_AT_AS_GIVEN],
+    ];
+
+    it('the InMail help claims only what Reply says of an InMail: it reaches a contact the account is not connected with', ()=>{
+        const c = sub(contact_command, 'linkedin-inmail');
+        const text = help_of(c).replace(/\s+/g, ' ');
+        expect(c.description(), c.description()).toContain('a contact the account is not connected with');
+        expect(text, text).not.toContain('connected or not');
+    });
+
+    it('each direct send takes ids by flag and its text only through --message -, and says a repeat may send it twice', ()=>{
+        for (const [name, account_flag, codes, sent_at] of DIRECT_SENDS)
+        {
+            const c = sub(contact_command, name);
+            expect(flags(c), name).toEqual(['--contact-id', account_flag, '--message']);
+            const text = help_of(c);
+            const flat = text.replace(/\s+/g, ' ');
+            expect(text, text).toContain('--message -');
+            expect(flat, text).toContain('may send it twice');
+            expect(text, text).not.toContain('re-running is safe');
+            expect(flat, text).toContain(sent_at);
+            expect(flat, text).toContain('read from stdin only');
+            // Exactly the codes its endpoint publishes, then the shared ones, as the help lists them.
+            const listed = text.split('\nErrors')[1].split('\nExit codes')[0].split('\n').slice(1).map(l=>l.trim());
+            expect(listed, name).toEqual([...codes, 'access.denied', 'access.feature_unavailable', 'rate_limited', 'reply.unavailable',
+                'reply.refused', 'reply.invalid_request', 'outcome.unknown']);
+        }
     });
 
     it('inbox reply takes its text only through --message, and says a repeat may send it twice', ()=>{
