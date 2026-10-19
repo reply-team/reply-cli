@@ -21,7 +21,7 @@ describe('operations/commands', ()=>{
         expect(sequence_command.commands.map(c=>c.name())).toEqual(
             ['list', 'create', 'get', 'contacts', 'stats', 'add-contact', 'remove-contact', 'pause', 'start']);
         expect(contact_list_command.commands.map(c=>c.name())).toEqual(['add-contact']);
-        expect(contact_command.commands.map(c=>c.name())).toEqual(['find', 'get', 'update', 'delete', 'opt-out']);
+        expect(contact_command.commands.map(c=>c.name())).toEqual(['find', 'get', 'update', 'delete', 'opt-out', 'send-email']);
         expect(inbox_command.commands.map(c=>c.name())).toEqual(['list', 'get', 'reply', 'categories', 'categorize', 'mark-read', 'mark-unread']);
     });
 
@@ -98,6 +98,32 @@ describe('operations/commands', ()=>{
         expect(text.replace(/\s+/g, ' '), text).toContain('Never creates a contact');
         expect(text, text).toContain('contact.not_unique');
         expect(text.replace(/\s+/g, ' '), text).toContain('matched by its lowercased slug');
+    });
+
+    // Each direct send: the flag naming the account it goes from, the codes its endpoint publishes, and what its help
+    // says sent_at is.
+    const DIRECT_SENDS: [string, string, string[], string][] = [
+        ['send-email', '--email-account-id', ['contact.not_found', 'email_account.not_found', 'contact.blacklisted'],
+            'sent_at is always null; the CLI adds none of its own'],
+    ];
+
+    it('each direct send takes ids by flag and its text only through --message -, and says a repeat may send it twice', ()=>{
+        for (const [name, account_flag, codes, sent_at] of DIRECT_SENDS)
+        {
+            const c = sub(contact_command, name);
+            expect(flags(c), name).toEqual(['--contact-id', account_flag, '--message']);
+            const text = help_of(c);
+            const flat = text.replace(/\s+/g, ' ');
+            expect(text, text).toContain('--message -');
+            expect(flat, text).toContain('may send it twice');
+            expect(text, text).not.toContain('re-running is safe');
+            expect(flat, text).toContain(sent_at);
+            expect(flat, text).toContain('read from stdin only');
+            for (const code of [...codes, 'outcome.unknown'])
+            {
+                expect(text, `${name}: ${code}`).toContain(`  ${code}\n`);
+            }
+        }
     });
 
     it('inbox reply takes its text only through --message, and says a repeat may send it twice', ()=>{

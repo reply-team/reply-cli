@@ -14,6 +14,7 @@ import {handle_inbox_reply} from './inbox-reply';
 import {handle_contact_list_add_contact} from './contact-list';
 import {handle_contact_opt_out} from './contact';
 import {handle_contact_find, handle_contact_get, handle_contact_update, handle_contact_delete} from './contact-record';
+import {handle_direct_send} from './direct-send';
 
 const P = PROGRAM_NAME;
 const COMMON_ERRORS = [
@@ -182,7 +183,7 @@ add_contact_options(contact_list_command.command('add-contact')
         await handle_contact_list_add_contact(cmd.args[0], cmd.opts(), ctx, g);
     }));
 
-const contact_command = new Command('contact').description('Find a contact, read it, change or delete it, or opt it out');
+const contact_command = new Command('contact').description('Find a contact, read it, change or delete it, opt it out, or send to it outside a sequence');
 
 contact_command.command('find')
     .option('--contact <stdin>', 'Only -: {email} or {linkedin_url} as JSON on stdin')
@@ -249,6 +250,27 @@ add_contact_options(contact_command.command('opt-out'))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
         await handle_contact_opt_out(cmd.opts(), ctx, g);
+    }));
+
+const SEND_TWICE = (what: string): string=>`the ${what} may have been sent; running the command again may send it twice`;
+
+contact_command.command('send-email')
+    .option('--contact-id <id>', 'The contact by its Reply id')
+    .option('--email-account-id <id>', 'The mailbox to send from (see `account list`)')
+    .option('--message <stdin>', 'Only -: the email {subject, body} as JSON on stdin')
+    .description('Send one email to a contact now, outside any sequence, from the mailbox you name')
+    .addHelpText('after', help(
+        [`echo '{"subject":"Quick question","body":"<p>Hi Ann, does Tuesday work?</p>"}' | ${P} contact send-email --contact-id 456 --email-account-id 12 --message -`],
+        ['contact.not_found', 'email_account.not_found', 'contact.blacklisted'], true,
+        'Result: {"status":"sent","contact_id","message_id","sent_at","reply_status"}: sent means Reply accepted the email, and\n'
+            + 'reply_status is Reply\'s own word for it (new or sent). message_id is Reply\'s messageId, null when it gives none.\n'
+            + 'Reply\'s answer carries no time, so sent_at is always null; the CLI adds none of its own.\n'
+            + 'The email is read from stdin only, so its text never sits in the argument list. The body is HTML. Reply sends a\n'
+            + 'direct email at once, outside the mailbox\'s daily limit and sending delay.\n',
+        SEND_TWICE('email')))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_direct_send('send-email', cmd.opts(), ctx, g);
     }));
 
 const inbox_command = new Command('inbox').description('Read inbox threads, reply in them, file them under a category, mark them read or unread');

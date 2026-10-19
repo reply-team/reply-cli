@@ -89,6 +89,22 @@ describe('the program', ()=>{
         expect(mock_fetch).not.toHaveBeenCalled();
     });
 
+    it('every direct send refuses its text given on the argument list: exit 2, no request, the text not repeated', async()=>{
+        const sends: string[][] = [
+            ['send-email', '--email-account-id', '12', '--message', '{"subject":"Hi Marta","body":"Tuesday works"}'],
+        ];
+        for (const [name, ...rest] of sends)
+        {
+            mock_fetch.mockReset();
+            const {code, err} = await run_program(['--json', '-k', 'key-1', 'contact', name, '--contact-id', '456', ...rest]);
+            expect(code, name).toBe(2);
+            expect(JSON.parse(err), name).toMatchObject({error: {code: 'usage.message'}});
+            expect(err, err).not.toContain('Marta');
+            expect(err, err).not.toContain('Tuesday');
+            expect(mock_fetch, name).not.toHaveBeenCalled();
+        }
+    });
+
     it('a usage error exits 2 before any request', async()=>{
         const {code, err} = await run_program(['--json', '-k', 'key-1', 'sequence', 'stats', '123', '--from', '2026-10-02', '--to', '2026-10-01']);
         expect(code).toBe(2);

@@ -21,12 +21,15 @@ const read_op_globals = (cmd: Command): Op_globals=>{
 };
 
 const LARGEST_REPLY_ID = 2147483647;
+const LARGEST_SAFE_ID = Number.MAX_SAFE_INTEGER;
 
 // Reply numbers its sequences, contacts, lists and threads with positive 32-bit integers, so a
-// value that is not one names nothing an account could hold and is refused before any call.
-const parse_id = (raw: string, label: string): number=>{
+// value that is not one names nothing an account could hold and is refused before any call. Its
+// mailboxes are numbered in 64 bits; for them the bound is the largest whole number a JSON number
+// carries exactly.
+const parse_id = (raw: string, label: string, largest = LARGEST_REPLY_ID): number=>{
     const value = raw.trim();
-    if (!/^[1-9][0-9]{0,9}$/.test(value) || Number(value) > LARGEST_REPLY_ID)
+    if (!/^[1-9][0-9]*$/.test(value) || Number(value) > largest)
     {
         // Not echoed when it looks like an address: stderr may be logged where personal data must not go.
         throw new UsageError(`${label} must be a Reply id: a positive whole number.`, {
@@ -77,6 +80,6 @@ const parse_choice = <T extends string>(raw: string | undefined, label: string, 
 };
 
 export {
-    read_op_globals, parse_id, parse_int_in, parse_iso, parse_choice, LARGEST_REPLY_ID,
+    read_op_globals, parse_id, parse_int_in, parse_iso, parse_choice, LARGEST_REPLY_ID, LARGEST_SAFE_ID,
 };
 export type {Op_globals};
