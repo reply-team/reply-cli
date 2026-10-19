@@ -35,6 +35,9 @@ describe('operations/commands', ()=>{
         expect(flat, text).toContain('status is active, inactive, disconnected or other');
         expect(flat, text).toContain('reply_status is Reply\'s own word');
         expect(flat, text).toContain('A LinkedIn account at its daily limit is active');
+        expect(flat, text).toContain('the list holds teammates\' accounts too, and owner_user_id is the Reply user whose each one is');
+        expect(flat, text).toContain('one the account\'s plan or role does not include fails the whole command');
+        expect(flat, text).toContain('--channel reads one channel alone');
         expect(text, text).toContain('  account.list_incomplete\n');
         expect(text, text).not.toContain('outcome.unknown');
     });

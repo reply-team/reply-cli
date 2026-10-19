@@ -207,7 +207,7 @@ prints JSON (indented; compact with `--json`) and says what happened in a stable
 | `reply inbox categories` | the categories a thread can be filed under |
 | `reply inbox categorize <thread-id> (--category-id N \| --clear)` | → `categorized` / `cleared` |
 | `reply inbox mark-read <thread-id>` · `reply inbox mark-unread <thread-id>` | → `read` / `unread` |
-| `reply account list [--channel email\|linkedin]` | the email and LinkedIn accounts a send can go from, and the state of each |
+| `reply account list [--channel email\|linkedin]` | the email and LinkedIn accounts a send can go from, whose each is, and the state of each |
 
 `<contact>` is exactly one of `--contact <json>|@file|-`, `--email <address>` (with `--first-name`,
 `--last-name`, `--company`, `--title`), or `--contact-id <id>`. The JSON takes the same fields
@@ -258,7 +258,10 @@ send-email` (`{subject, body}`, the body HTML), `contact linkedin-connect` (`{no
 linkedin-inmail` (`{subject, body}`) and `contact linkedin-voice` (`{script}`, which Reply speaks in
 the LinkedIn account's voice). Each reads its text from stdin only and refuses it on the argument
 list. `reply account list` gives the ids to send from, each account's status (`active`, `inactive`,
-`disconnected` or `other`) and Reply's own word for it:
+`disconnected` or `other`) and Reply's own word for it. In a team that shares its accounts the list
+holds teammates' accounts too, and `owner_user_id` says whose each one is. Without `--channel` both
+lists are read, and one the plan or role does not include fails the whole command; `--channel email`
+or `--channel linkedin` reads one alone:
 
 ```sh
 echo '{"subject":"Quick question","body":"<p>Hi Ann, does Tuesday work?</p>"}' | reply contact send-email --contact-id 456 --email-account-id 12 --message -

@@ -7,7 +7,10 @@ import type {Cli_context} from '../context';
 const ACCOUNT_CHANNELS = ['email', 'linkedin'] as const;
 type Account_channel = typeof ACCOUNT_CHANNELS[number];
 type Account_status = 'active' | 'inactive' | 'disconnected' | 'other';
-type Account = {id: number; channel: Account_channel; name: string | null; address: string | null; status: Account_status; reply_status: string | null};
+type Account = {
+    id: number; channel: Account_channel; name: string | null; address: string | null; owner_user_id: number | null;
+    status: Account_status; reply_status: string | null;
+};
 
 // Reply's words for an account's state, and the CLI's. A word not here is `other`; Reply's own word
 // always goes beside it. A LinkedIn account at its daily limit is on and connected, so it is
@@ -22,6 +25,8 @@ const MAX_PAGES = 20;
 
 const text_or_null = (v: unknown): string | null=>(typeof v === 'string' && v.trim() !== '' ? v : null);
 
+const positive_integer = (v: unknown): number | null=>(typeof v === 'number' && Number.isSafeInteger(v) && v > 0 ? v : null);
+
 const account_of = (
     entry: unknown, channel: Account_channel, words: Record<string, Account_status>, fields: {name: string; address: string; status: string},
 ): Account=>{
@@ -35,6 +40,8 @@ const account_of = (
         id: entry.id, channel,
         name: text_or_null(entry[fields.name]),
         address: text_or_null(entry[fields.address]),
+        // In a team that shares its accounts, Reply lists teammates' accounts too; this says whose each one is.
+        owner_user_id: positive_integer(entry.ownerUserId),
         status: typeof word === 'string' && Object.prototype.hasOwnProperty.call(words, word) ? words[word] : 'other',
         reply_status: typeof word === 'string' ? word : null,
     };

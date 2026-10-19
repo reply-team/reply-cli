@@ -438,11 +438,14 @@ account_command.command('list')
     .option('--channel <channel>', 'email | linkedin: only the accounts of this channel')
     .description('The email and LinkedIn accounts a send can go from, and the state of each')
     .addHelpText('after', help([ex('account list'), ex('account list --channel linkedin')], ['account.list_incomplete'], false,
-        'Result: {"items":[{"id","channel","name","address","status","reply_status"}]}, the email accounts first: status is\n'
-            + 'active, inactive, disconnected or other, and reply_status is Reply\'s own word for it, null when it gives none. name\n'
-            + 'is the sender name or the LinkedIn name, and address the mailbox\'s email or the LinkedIn profile URL, each null when\n'
-            + 'Reply gives none. A LinkedIn account at its daily limit is active: a send that meets the limit answers\n'
-            + 'linkedin.limit_reached. Every page is read; account.list_incomplete means the email accounts did not end within 20000.\n'))
+        'Result: {"items":[{"id","channel","name","address","owner_user_id","status","reply_status"}]}, the email accounts\n'
+            + 'first: status is active, inactive, disconnected or other, and reply_status is Reply\'s own word for it. name is the\n'
+            + 'sender name or the LinkedIn name, and address the mailbox\'s email or the LinkedIn profile URL. In a team that shares\n'
+            + 'its accounts the list holds teammates\' accounts too, and owner_user_id is the Reply user whose each one is. Each is\n'
+            + 'null when Reply gives none. A LinkedIn account at its daily limit is active: a send that meets the limit answers\n'
+            + 'linkedin.limit_reached. Every page is read; account.list_incomplete means the email accounts did not end within 20000.\n'
+            + 'Without --channel both lists are read, and one the account\'s plan or role does not include fails the whole command\n'
+            + '(its reply_code says which); --channel reads one channel alone.\n'))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
         await handle_account_list(cmd.opts(), ctx, g);

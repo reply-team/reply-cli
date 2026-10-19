@@ -22,15 +22,17 @@ describe('account list', ()=>{
     it('lists the email accounts, every page of them, then the LinkedIn accounts, each in one shape', async()=>{
         answer(
             page([mailbox()], true),
-            page([mailbox({id: 4294967296, email: 'ann@example.com', senderName: 'Ann Example', connectionStatus: 'disconnected'})]),
+            // A teammate's mailbox, in a team that shares them.
+            page([mailbox({id: 4294967296, ownerUserId: 7, email: 'ann@example.com', senderName: 'Ann Example', connectionStatus: 'disconnected'})]),
             json([linkedin()]),
         );
         expect(await list()).toStrictEqual({items: [
-            {id: 12, channel: 'email', name: 'Marta Example', address: 'marta@example.com', status: 'active', reply_status: 'connected'},
-            {id: 4294967296, channel: 'email', name: 'Ann Example', address: 'ann@example.com', status: 'disconnected',
+            {id: 12, channel: 'email', name: 'Marta Example', address: 'marta@example.com', owner_user_id: 1, status: 'active',
+                reply_status: 'connected'},
+            {id: 4294967296, channel: 'email', name: 'Ann Example', address: 'ann@example.com', owner_user_id: 7, status: 'disconnected',
                 reply_status: 'disconnected'},
-            {id: 34, channel: 'linkedin', name: 'Marta Example', address: 'https://www.linkedin.com/in/marta-example', status: 'active',
-                reply_status: 'enabled'},
+            {id: 34, channel: 'linkedin', name: 'Marta Example', address: 'https://www.linkedin.com/in/marta-example', owner_user_id: 1,
+                status: 'active', reply_status: 'enabled'},
         ]});
         expect(sent()).toEqual([
             {method: 'GET', url: 'https://api/v3/email-accounts?top=1000&skip=0', body: undefined},
@@ -70,12 +72,13 @@ describe('account list', ()=>{
         expect(mock_fetch).not.toHaveBeenCalled();
     });
 
-    it('a name or address Reply leaves out or gives empty is null', async()=>{
+    it('a name, address or owner Reply leaves out, or gives empty or unusable, is null', async()=>{
         answer(
-            page([mailbox({senderName: '', email: undefined}), mailbox({id: 13, senderName: undefined, email: '  '})]),
-            json([linkedin({name: undefined, profileUrl: ''}), linkedin({id: 35, name: '', profileUrl: null})]),
+            page([mailbox({senderName: '', email: undefined, ownerUserId: undefined}), mailbox({id: 13, senderName: undefined, email: '  ', ownerUserId: '7'})]),
+            json([linkedin({name: undefined, profileUrl: '', ownerUserId: 0}), linkedin({id: 35, name: '', profileUrl: null, ownerUserId: null})]),
         );
-        expect((await list()).items.map(i=>[i.name, i.address])).toEqual([[null, null], [null, null], [null, null], [null, null]]);
+        expect((await list()).items.map(i=>[i.name, i.address, i.owner_user_id])).toEqual(
+            [[null, null, null], [null, null, null], [null, null, null], [null, null, null]]);
     });
 
     it('an account without a usable id is reply.unavailable, never a guess', async()=>{
