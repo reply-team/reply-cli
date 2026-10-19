@@ -136,6 +136,13 @@ describe('operations/commands', ()=>{
             'linkedin.missing_variables', 'linkedin.voice_profile_missing', 'linkedin.voice_too_long'], SENT_AT_AS_GIVEN],
     ];
 
+    it('the InMail help claims only what Reply says of an InMail: it reaches a contact the account is not connected with', ()=>{
+        const c = sub(contact_command, 'linkedin-inmail');
+        const text = help_of(c).replace(/\s+/g, ' ');
+        expect(c.description(), c.description()).toContain('a contact the account is not connected with');
+        expect(text, text).not.toContain('connected or not');
+    });
+
     it('each direct send takes ids by flag and its text only through --message -, and says a repeat may send it twice', ()=>{
         for (const [name, account_flag, codes, sent_at] of DIRECT_SENDS)
         {

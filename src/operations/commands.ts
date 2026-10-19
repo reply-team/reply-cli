@@ -321,7 +321,7 @@ linkedin_send('linkedin-message', 'Send a LinkedIn message to a contact the acco
         + '8000 characters.\n' + VARIABLES('body'),
     'message');
 
-linkedin_send('linkedin-inmail', 'Send a LinkedIn InMail to a contact, connected or not (needs Sales Navigator and InMail credits)',
+linkedin_send('linkedin-inmail', 'Send a LinkedIn InMail, which reaches a contact the account is not connected with (needs Sales Navigator and InMail credits)',
     'InMail {subject, body}',
     [`echo '{"subject":"Quick question","body":"Hi Ann, does Tuesday work?"}' | ${P} contact linkedin-inmail ${LINKEDIN_EXAMPLE} --message -`],
     ['linkedin.limit_reached', 'linkedin.message_too_long', 'linkedin.missing_variables', 'linkedin.sales_navigator_required',
