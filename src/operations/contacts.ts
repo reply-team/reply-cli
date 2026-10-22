@@ -199,13 +199,65 @@ const ensure_contact = async(s: Op_session, ref: Contact_ref): Promise<Ensured>=
 // The contact a command acts on: the id given; else the one Reply holds under the address the command
 // reaches the person by (by default the one a lookup uses); else the person imported as an add imports
 // them. Looking first means that a person Reply already holds needs no first name.
-const find_or_import = async(s: Op_session, ref: Contact_ref, by?: Channel): Promise<Ensured>=>{
+const find_or_import = async(s: Op_session, ref: Contact_ref, by?: Channel): Promise<Ensured & {imported: boolean}>=>{
     if (ref.kind === 'id')
     {
-        return {id: ref.id, created: false};
+        return {id: ref.id, created: false, imported: false};
     }
     const found = await find_contact_by_address(s, ref.person, by);
-    return found === null ? import_contact(s, ref.person) : {id: found, created: false};
+    return found === null ? {...await import_contact(s, ref.person), imported: true} : {id: found, created: false, imported: false};
+};
+
+// A profile compared as the lookup compares it, except that the scheme and a leading www do not count here:
+// a contact stored as linkedin.com/in/x is the profile www.linkedin.com/in/x names.
+const profile_of = (text: string): string | null=>{
+    const key = linkedin_key(text) ?? linkedin_key(`https://${text.trim()}`);
+    return key === null ? null : key.replace(/^https?:\/\/(www\.)?/i, '');
+};
+
+// An import that matched a contact fills only its empty fields, so the contact it returns may hold another
+// LinkedIn profile than the one asked for, or none. A send to it must not reach a profile other than the one
+// the caller named, an address is never changed, and a profile is given only where there is none: so the
+// contact is read, a different profile refuses the send, and an empty one is given the profile, and only that
+// field, before the send. A contact that can't be read is refused too.
+const hold_profile = async(s: Op_session, contact_id: number, linkedin_url: string): Promise<void>=>{
+    const a = await call_reply(s, 'GET', `/v3/contacts/${contact_id}`, 'read');
+    if (a.status === 404)
+    {
+        throw contact_not_found(contact_id, a);
+    }
+    if (a.status !== 200)
+    {
+        throw refusal(a, 'read');
+    }
+    const held = expect_object(a, 'read').linkedInUrl;
+    if (held !== undefined && held !== null && typeof held !== 'string')
+    {
+        throw unreadable(a, 'read');
+    }
+    if (typeof held === 'string' && held.trim() !== '')
+    {
+        const wanted = profile_of(linkedin_url);
+        if (wanted !== null && profile_of(held) === wanted)
+        {
+            return;
+        }
+        throw new Operation_error('contact.channel_conflict',
+            'The contact Reply holds under this email has another LinkedIn profile than the one given, so nothing was sent.', {
+                status: 200,
+                hint: 'Send to that contact with --contact-id if it is the same person, or change its linkedin_url with contact update '
+                    + 'first; or give the LinkedIn URL alone.',
+            });
+    }
+    const set = await call_reply(s, 'PATCH', `/v3/contacts/${contact_id}`, 'write', {linkedInUrl: linkedin_key(linkedin_url) ?? linkedin_url});
+    if (set.status === 404)
+    {
+        throw contact_not_found(contact_id, set);
+    }
+    if (set.status !== 200 && set.status !== 204)
+    {
+        throw refusal(set, 'write');
+    }
 };
 
 const find_contact = async(s: Op_session, ref: Contact_ref): Promise<number | null>=>
@@ -232,5 +284,5 @@ const read_opted_out = async(s: Op_session, contact_id: number): Promise<boolean
     return body.isOptedOut;
 };
 
-export {ensure_contact, find_or_import, import_contact, find_contact, find_contact_by_address, read_opted_out, contact_not_found};
+export {ensure_contact, find_or_import, hold_profile, import_contact, find_contact, find_contact_by_address, read_opted_out, contact_not_found};
 export type {Ensured, Channel};

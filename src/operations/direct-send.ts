@@ -4,7 +4,7 @@ import {parse_retry_after} from '../utils/client';
 import {call_reply, expect_object, refusal, reply_code_of, detail_of, open_session, type Answer} from './call';
 import {parse_id, LARGEST_SAFE_ID, type Op_globals} from './options';
 import {read_contact_input, type Contact_flags, type Contact_ref} from './contact-input';
-import {contact_not_found, find_or_import, type Channel, type Ensured} from './contacts';
+import {contact_not_found, find_or_import, hold_profile, type Channel, type Ensured} from './contacts';
 import {read_stdin_object, stdin_inputs} from './stdin-input';
 import {print_result, with_ids} from './result';
 import type {Cli_context} from '../context';
@@ -219,6 +219,11 @@ const handle_direct_send = async(
         // The contact first, found or imported as an add would; the send goes to the one this names.
         const ensured = await find_or_import(s, contact, by);
         ids.contact_id = ensured.id;
+        // A contact the import matched may hold another profile, or none: it carries the one asked for before a LinkedIn send.
+        if (!by_email && contact.kind === 'person' && ensured.imported && !ensured.created && contact.person.linkedin_url !== undefined)
+        {
+            await hold_profile(s, ensured.id, contact.person.linkedin_url);
+        }
         sending = true;
         const a = await call_reply(s, 'POST', `/v3/contacts/${ensured.id}/${send.path}`, 'write', send.body(account_id, text));
         if (name === 'linkedin-connect' && a.status === 409 && reply_code_of(a) === 'directLinkedIn.alreadyConnected')
@@ -239,7 +244,7 @@ const handle_direct_send = async(
         {
             e.hint = sending
                 ? `The ${send.what} may have been sent; running the command again may send it twice.`
-                : `Nothing was sent: no answer came back to the contact's import, so the ${send.what} was never made. `
+                : `Nothing was sent: the outcome of a step before the ${send.what} is unknown, so the ${send.what} was never made. `
                     + 'Running the command again is safe.';
         }
         throw with_ids(e, ids);
