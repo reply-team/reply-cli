@@ -271,22 +271,21 @@ add_contact_options(contact_command.command('opt-out'), true)
 const SEND_TWICE = (what: string): string=>
     `the ${what} may have been sent; running the command again may send it twice, unless the hint says nothing was sent`;
 
-// What a LinkedIn send does with a contact the import matched: the send goes only to the profile that was named.
-const LINKEDIN_PROFILE = 'A LinkedIn send needs the contact\'s linkedin_url in --contact (or --contact-id); --email alone is refused (usage.contact).\n'
-    + 'When the import matches a contact Reply already holds, for instance by the email also given, that contact is read\n'
-    + 'before the send. If it holds another LinkedIn profile than the one given, nothing is sent and its LinkedIn profile is not changed, and the\n'
-    + 'answer is contact.channel_conflict (exit 1, with ids.contact_id); if it holds none, only the given profile is set\n'
-    + 'on it before the send, never an email or any other field; if it holds the same profile, the send goes ahead. A\n'
-    + 'contact found by its LinkedIn URL, or created by the import, is not read.\n';
+const LINKEDIN_URL_NEEDED = 'A LinkedIn send needs the contact\'s linkedin_url in --contact (or --contact-id); --email alone is refused '
+    + '(usage.contact).\n';
 
-// How a send names its contact: looked up by the address it reaches them at, else imported as an add imports one.
+// How a send names its contact: looked up by the address it reaches them at, else imported as an add imports one; and
+// it sends only to a contact it created, naming one Reply already holds instead.
 const SENT_TO = (by: 'email' | 'linkedin', what: string): string=>CONTACT_FORMS
-    + `A contact given by its fields is looked up by ${by === 'email' ? 'its email' : 'its LinkedIn URL'}, where the ${what} goes, and imported only\n`
-    + 'when Reply holds nobody under it, as the add commands import one (matched by its email when it has one); only\n'
-    + 'then does Reply need a first name. A LinkedIn URL is matched by its lowercased slug, and the CLI stores it by\n'
-    + `that slug when it imports the contact. contact_id is the contact the ${what} went to, and contact_created says\n`
-    + 'whether this command created them.\n'
-    + (by === 'email' ? '' : LINKEDIN_PROFILE) + STDIN_PAIR('message');
+    + 'A send given a person\'s fields sends only to a contact it creates. The contact is looked up by\n'
+    + `${by === 'email' ? 'its email' : 'its LinkedIn URL'}, where the ${what} goes, and imported only when Reply holds nobody under it, as the add\n`
+    + 'commands import one (matched by its email when it has one), so Reply needs a first name. When the lookup finds a\n'
+    + 'contact, or the import matches one Reply already holds, nothing is sent: the answer is contact.already_held (exit 1)\n'
+    + 'with that contact\'s id in ids.contact_id. Read that contact first (contact get shows it, its opt-out included),\n'
+    + 'and send to it with --contact-id if it is the one to reach. A LinkedIn URL is matched by its lowercased slug, and\n'
+    + `the CLI stores it by that slug when it imports the contact. contact_id is the contact the ${what} went to, and\n`
+    + 'contact_created says whether this command created them.\n'
+    + (by === 'email' ? '' : LINKEDIN_URL_NEEDED) + STDIN_PAIR('message');
 
 // One send's example with the person and the text both on stdin.
 const piped_send = (command: string, contact: string, message: string, flags: string): string=>
@@ -301,7 +300,7 @@ add_contact_options(contact_command.command('send-email'), true)
     .addHelpText('after', help(
         [`echo '{"subject":"Quick question","body":"<p>Hi Ann, does Tuesday work?</p>"}' | ${P} contact send-email --contact-id 456 --email-account-id 12 --message -`,
             piped_send('send-email', ANN_EMAIL, '{"subject":"Quick question","body":"<p>Hi Ann</p>"}', '--email-account-id 12')],
-        ['contact.not_found', ...IMPORT_CODES, 'email_account.not_found', 'contact.blacklisted'], true,
+        ['contact.not_found', ...IMPORT_CODES, 'contact.already_held', 'email_account.not_found', 'contact.blacklisted'], true,
         'Result: {"status":"sent","contact_id","contact_created","message_id","sent_at","reply_status"}: sent means Reply\n'
             + 'accepted the email, and reply_status is Reply\'s own word for it (new or sent). message_id is Reply\'s messageId,\n'
             + 'null when it gives none. Reply\'s answer carries no time, so sent_at is always null; the CLI adds none of its own.\n'
@@ -316,8 +315,8 @@ add_contact_options(contact_command.command('send-email'), true)
 
 // The four LinkedIn sends share their flags, their first codes and the shape of their result.
 const LINKEDIN_SEND_CODES = [
-    'contact.not_found', ...IMPORT_CODES, 'contact.channel_conflict', 'contact.no_linkedin_profile', 'linkedin.account_not_found', 'linkedin.feature_disabled',
-    'linkedin.account_inactive', 'linkedin.invalid_cookie',
+    'contact.not_found', ...IMPORT_CODES, 'contact.already_held', 'contact.no_linkedin_profile', 'linkedin.account_not_found',
+    'linkedin.feature_disabled', 'linkedin.account_inactive', 'linkedin.invalid_cookie',
 ];
 const LINKEDIN_SENT = '"contact_id","contact_created","activity_id","sent_at"}:\n'
     + 'activity_id and sent_at are Reply\'s linkedInActivityId and sentAtUtc as Reply gives them, each null when it gives\n'

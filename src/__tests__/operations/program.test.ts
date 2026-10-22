@@ -139,6 +139,19 @@ describe('the program', ()=>{
         ]);
     });
 
+    it('a send to a person Reply already holds exits 1, sends nothing, and names the contact', async()=>{
+        pipe_stdin(JSON.stringify({contact: {email: 'marta@example.com', first_name: 'Marta'},
+            message: {subject: 'Hi Marta', body: 'Tuesday works'}}));
+        // Were the send made, this refusal would answer it: a send Reply took ends without the exit this run waits for.
+        answer(json({items: [{id: 456, email: 'marta@example.com'}], hasMore: false}), json({code: 'contact.contactInBlackList'}, 400));
+        const {code, err} = await run_program(['--json', '-k', 'key-1', 'contact', 'send-email', '--contact', '-', '--email-account-id', '12',
+            '--message', '-']);
+        expect(code).toBe(1);
+        expect(JSON.parse(err)).toMatchObject({error: {code: 'contact.already_held', ids: {contact_id: 456, email_account_id: 12}}});
+        expect(err, err).not.toMatch(PERSONAL);
+        expect(requests().map(r=>r.method)).toEqual(['GET']);
+    });
+
     it('contact update of a person Reply holds takes the person and the fields from stdin, and changes only the fields', async()=>{
         pipe_stdin(JSON.stringify({contact: {email: 'marta@example.com', linkedin_url: 'https://www.linkedin.com/in/marta-other'},
             fields: {title: 'CTO'}}));

@@ -83,7 +83,6 @@ describe('operations/commands', ()=>{
             const flat = text.replace(/\s+/g, ' ');
             const input = name === 'update' ? 'fields' : 'message';
             expect(flat, text).toContain('imported only when Reply holds nobody under');
-            expect(flat, text).toContain('only then does Reply need a first name');
             expect(flat, text).toContain('contact_created says whether this command created');
             expect(flat, text).toContain(`With --contact - and --${input} - both, stdin holds one object: {"contact": {…}, "${input}": {…}}`);
             expect(text, text).toContain(`--contact - `);
@@ -97,6 +96,8 @@ describe('operations/commands', ()=>{
         }
         const update = help_of(sub(contact_command, 'update')).replace(/\s+/g, ' ');
         expect(update, update).toContain('looked up as the add commands look one up');
+        // An update acts on a contact it finds, so only an import needs a first name.
+        expect(update, update).toContain('only then does Reply need a first name');
         expect(update, update).toContain('only what --fields names is changed');
         expect(update, update).toContain('contact update 456 is contact update --contact-id 456');
     });
@@ -169,11 +170,11 @@ describe('operations/commands', ()=>{
     // Each direct send: the flag naming the account it goes from, the codes its endpoint publishes, and what its help
     // says sent_at is.
     const IMPORT = ['contact.not_unique', 'contact.invalid_email', 'contact.invalid_linkedin_url', 'account.contact_limit_reached'];
-    const LINKEDIN = ['contact.not_found', ...IMPORT, 'contact.channel_conflict', 'contact.no_linkedin_profile', 'linkedin.account_not_found', 'linkedin.feature_disabled',
-        'linkedin.account_inactive', 'linkedin.invalid_cookie'];
+    const LINKEDIN = ['contact.not_found', ...IMPORT, 'contact.already_held', 'contact.no_linkedin_profile', 'linkedin.account_not_found',
+        'linkedin.feature_disabled', 'linkedin.account_inactive', 'linkedin.invalid_cookie'];
     const SENT_AT_AS_GIVEN = 'sentAtUtc as Reply gives them, each null when it gives none; the CLI adds no time of its own';
     const DIRECT_SENDS: [string, string, string[], string][] = [
-        ['send-email', '--email-account-id', ['contact.not_found', ...IMPORT, 'email_account.not_found', 'contact.blacklisted'],
+        ['send-email', '--email-account-id', ['contact.not_found', ...IMPORT, 'contact.already_held', 'email_account.not_found', 'contact.blacklisted'],
             'sent_at is always null; the CLI adds none of its own'],
         ['linkedin-connect', '--linkedin-account-id', [...LINKEDIN, 'linkedin.not_connected', 'linkedin.limit_reached',
             'linkedin.message_too_long', 'linkedin.missing_variables'], SENT_AT_AS_GIVEN],
@@ -204,15 +205,12 @@ describe('operations/commands', ()=>{
             expect(text, text).toContain('--message -');
             expect(flat, text).toContain('may send it twice, unless the hint says nothing was sent');
             expect(text, text).not.toContain('re-running is safe');
-            // A LinkedIn send says what happens to a contact the import matched; an email send has no such step.
-            const says_conflict = flat.includes('another LinkedIn profile than the one given, nothing is sent and its LinkedIn profile is not changed, and the answer');
-            expect(says_conflict, text).toBe(name !== 'send-email');
-            if (name !== 'send-email')
-            {
-                expect(flat, text).toContain('contact.channel_conflict (exit 1, with ids.contact_id)');
-                expect(flat, text).toContain('only the given profile is set on it before the send, never an email or any other field');
-                expect(flat, text).toContain('--email alone is refused (usage.contact)');
-            }
+            // A send given a person's fields sends only to a contact it creates, and names one Reply already holds.
+            expect(flat, text).toContain('A send given a person\'s fields sends only to a contact it creates');
+            expect(flat, text).toContain('the lookup finds a contact, or the import matches one Reply already holds, nothing is sent');
+            expect(flat, text).toContain('the answer is contact.already_held (exit 1) with that contact\'s id in ids.contact_id');
+            expect(flat, text).toContain('send to it with --contact-id');
+            expect(flat.includes('--email alone is refused (usage.contact)'), text).toBe(name !== 'send-email');
             expect(flat, text).toContain(sent_at);
             expect(flat, text).toContain('read from stdin only');
             // Exactly the codes its endpoint publishes, then the shared ones, as the help lists them.

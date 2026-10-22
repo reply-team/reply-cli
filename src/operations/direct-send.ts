@@ -4,7 +4,7 @@ import {parse_retry_after} from '../utils/client';
 import {call_reply, expect_object, refusal, reply_code_of, detail_of, open_session, type Answer} from './call';
 import {parse_id, LARGEST_SAFE_ID, type Op_globals} from './options';
 import {read_contact_input, type Contact_flags, type Contact_ref} from './contact-input';
-import {contact_not_found, find_or_import, hold_profile, type Channel, type Ensured} from './contacts';
+import {contact_not_found, find_or_import, type Channel, type Ensured} from './contacts';
 import {read_stdin_object, stdin_inputs} from './stdin-input';
 import {print_result, with_ids} from './result';
 import type {Cli_context} from '../context';
@@ -196,6 +196,19 @@ const require_address = (name: Direct_send_name, contact: Contact_ref, by: Chann
     }
 };
 
+// INTERIM (API gap): Reply does not refuse a direct send to a contact it holds as opted out, so the only guard on that
+// opt-out is a caller that reads the contact before it sends.
+// Needed: a direct send that refuses a contact Reply holds as opted out.
+// Workaround: a send given a person's fields acts only on a contact it created. One Reply already holds, found by the
+// lookup or matched by the import, is refused before anything is sent, and named, for the caller to read and then send
+// to by its id.
+const already_held = (contact_id: number): Operation_error=>
+    new Operation_error('contact.already_held',
+        `Reply already holds contact ${contact_id} under what was given, so nothing was sent: a send given a person's fields goes only to a contact it creates.`, {
+            status: 200,
+            hint: `Read it first with ${PROGRAM_NAME} contact get ${contact_id}; if it is the one to reach, send to it with --contact-id ${contact_id}.`,
+        });
+
 const handle_direct_send = async(
     name: Direct_send_name, opts: Direct_send_opts, ctx: Cli_context, g: Op_globals, read_stdin?: () => string,
 ): Promise<void>=>{
@@ -216,13 +229,13 @@ const handle_direct_send = async(
     const s = await open_session(ctx, g);
     let sending = false;
     try {
-        // The contact first, found or imported as an add would; the send goes to the one this names.
+        // The contact first, found or imported as an add would; a person given by their fields is sent to only when
+        // this import created them.
         const ensured = await find_or_import(s, contact, by);
         ids.contact_id = ensured.id;
-        // A contact the import matched may hold another profile, or none: it carries the one asked for before a LinkedIn send.
-        if (!by_email && contact.kind === 'person' && ensured.imported && !ensured.created && contact.person.linkedin_url !== undefined)
+        if (contact.kind === 'person' && !ensured.created)
         {
-            await hold_profile(s, ensured.id, contact.person.linkedin_url);
+            throw already_held(ensured.id);
         }
         sending = true;
         const a = await call_reply(s, 'POST', `/v3/contacts/${ensured.id}/${send.path}`, 'write', send.body(account_id, text));
@@ -244,8 +257,8 @@ const handle_direct_send = async(
         {
             e.hint = sending
                 ? `The ${send.what} may have been sent; running the command again may send it twice.`
-                : `Nothing was sent: the outcome of a step before the ${send.what} is unknown, so the ${send.what} was never made. `
-                    + 'Running the command again is safe.';
+                : `Nothing was sent: the outcome of the contact's import is unknown, so the ${send.what} was never made. `
+                    + 'Running the command again is safe: if the import did create the contact, it answers contact.already_held with its id.';
         }
         throw with_ids(e, ids);
     }
