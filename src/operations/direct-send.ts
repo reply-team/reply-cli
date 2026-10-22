@@ -3,13 +3,14 @@ import {Operation_error, Unknown_outcome_error, UsageError, type Ids} from '../u
 import {parse_retry_after} from '../utils/client';
 import {call_reply, expect_object, refusal, reply_code_of, detail_of, open_session, type Answer} from './call';
 import {parse_id, LARGEST_SAFE_ID, type Op_globals} from './options';
-import {contact_not_found} from './contacts';
-import {read_stdin_object} from './stdin-input';
+import {read_contact_input, type Contact_flags, type Contact_ref} from './contact-input';
+import {contact_not_found, find_contact_by_address, import_contact, type Channel, type Ensured} from './contacts';
+import {read_stdin_object, stdin_inputs} from './stdin-input';
 import {print_result, with_ids} from './result';
 import type {Cli_context} from '../context';
 
 type Direct_send_name = 'send-email' | 'linkedin-connect' | 'linkedin-message' | 'linkedin-inmail' | 'linkedin-voice';
-type Direct_send_opts = {contactId?: string; emailAccountId?: string; linkedinAccountId?: string; message?: string};
+type Direct_send_opts = Contact_flags & {emailAccountId?: string; linkedinAccountId?: string; message?: string};
 type Text = Record<string, string>;
 
 type Direct_send = {
@@ -165,53 +166,124 @@ const send_refusal = (a: Answer, contact_id: number): Operation_error=>{
 const positive_integer = (v: unknown): number | null=>
     typeof v === 'number' && Number.isSafeInteger(v) && v > 0 ? v : null;
 
-// What the CLI answers for a send Reply took. Neither adds a time of its own: Reply's answer to a
-// direct email carries none, and a LinkedIn send's sentAtUtc is given as Reply gives it.
-const result_of = (name: Direct_send_name, contact_id: number, sent: Record<string, unknown>): Record<string, unknown>=>
+// What the CLI answers for a send Reply took: the contact it went to, as the add commands name it, so
+// a caller can keep its id. Neither adds a time of its own: Reply's answer to a direct email carries
+// none, and a LinkedIn send's sentAtUtc is given as Reply gives it.
+const result_of = (name: Direct_send_name, contact: Ensured, sent: Record<string, unknown>): Record<string, unknown>=>
     name === 'send-email'
         ? {
-            status: 'sent', contact_id,
+            status: 'sent', contact_id: contact.id, contact_created: contact.created,
             message_id: typeof sent.messageId === 'string' ? sent.messageId : null,
             sent_at: null,
             reply_status: typeof sent.status === 'string' ? sent.status : null,
         }
         : {
-            status: 'sent', contact_id,
+            status: 'sent', contact_id: contact.id, contact_created: contact.created,
             activity_id: positive_integer(sent.linkedInActivityId),
             sent_at: typeof sent.sentAtUtc === 'string' ? sent.sentAtUtc : null,
         };
+
+// A person given by their fields is looked up by the address the send reaches them at, so one who
+// lacks it is refused before anything is asked. The address is never repeated.
+const require_address = (name: Direct_send_name, contact: Contact_ref, by: Channel): void=>{
+    if (contact.kind === 'person' && (by === 'email' ? contact.person.email : contact.person.linkedin_url) === undefined)
+    {
+        throw new UsageError(by === 'email'
+            ? `contact ${name} needs the contact's email: the email goes to it.`
+            : `contact ${name} needs the contact's linkedin_url: the send goes to that profile.`, {
+            code: 'usage.contact', hint: 'Give it in --contact, or name a contact Reply holds with --contact-id.',
+        });
+    }
+};
+
+// INTERIM (API gap): Reply does not refuse a direct send to a contact it holds as opted out, so the only guard on that
+// opt-out is a caller that reads the contact before it sends.
+// Needed: a direct send that refuses a contact Reply holds as opted out.
+// Workaround: a send given a person's fields acts only on a contact it created. One Reply already holds, found by the
+// lookup or matched by the import, is refused before anything is sent, and named, for the caller to read and then send
+// to by its id.
+const already_held = (contact_id: number): Operation_error=>
+    new Operation_error('contact.already_held',
+        `Reply already holds contact ${contact_id} under what was given, so nothing was sent: a send given a person's fields goes only to a contact it creates.`, {
+            status: 200,
+            hint: `Read it first with ${PROGRAM_NAME} contact get ${contact_id}; if it is the one to reach, send to it with --contact-id ${contact_id}.`,
+        });
 
 const handle_direct_send = async(
     name: Direct_send_name, opts: Direct_send_opts, ctx: Cli_context, g: Op_globals, read_stdin?: () => string,
 ): Promise<void>=>{
     const send = DIRECT_SENDS[name];
-    const contact_id = required_id(opts.contactId, '--contact-id');
+    const stdin = stdin_inputs({contact: opts.contact, message: opts.message}, {
+        code: 'usage.stdin', hint: `Pipe both in one object: echo '{"contact":{…},"message":{…}}' | ${PROGRAM_NAME} contact ${name} --contact - … --message -`,
+    }, read_stdin);
+    const contact = read_contact_input(opts, stdin.contact);
     // A send always names the account it goes from: Reply would send an email from the default mailbox.
     const by_email = name === 'send-email';
+    const by: Channel = by_email ? 'email' : 'linkedin';
+    require_address(name, contact, by);
     const account_id = by_email
         ? required_id(opts.emailAccountId, '--email-account-id', LARGEST_SAFE_ID)
         : required_id(opts.linkedinAccountId, '--linkedin-account-id');
-    const ids: Ids = by_email ? {contact_id, email_account_id: account_id} : {contact_id, linkedin_account_id: account_id};
-    const text = read_text(name, send, opts.message, read_stdin);
+    const ids: Ids = by_email ? {email_account_id: account_id} : {linkedin_account_id: account_id};
+    const text = read_text(name, send, opts.message, stdin.message);
     const s = await open_session(ctx, g);
+    let sending = false;
     try {
-        const a = await call_reply(s, 'POST', `/v3/contacts/${contact_id}/${send.path}`, 'write', send.body(account_id, text));
+        // The contact first, found or imported as an add would; a person given by their fields is sent to only when
+        // this import created them.
+        let ensured: Ensured;
+        if (contact.kind === 'person')
+        {
+            // A person is looked up by every address given, the one the send reaches them at first: a hit under any of
+            // them is a contact Reply holds, and the first one found is the one named.
+            const other: Channel = by === 'email' ? 'linkedin' : 'email';
+            for (const channel of [by, other])
+            {
+                if ((channel === 'email' ? contact.person.email : contact.person.linkedin_url) === undefined)
+                {
+                    continue;
+                }
+                const held = await find_contact_by_address(s, contact.person, channel);
+                if (held !== null)
+                {
+                    ids.contact_id = held;
+                    throw already_held(held);
+                }
+            }
+            ensured = await import_contact(s, contact.person);
+            ids.contact_id = ensured.id;
+            if (!ensured.created)
+            {
+                throw already_held(ensured.id);
+            }
+        }
+        else
+        {
+            ensured = {id: contact.id, created: false};
+            ids.contact_id = ensured.id;
+        }
+        sending = true;
+        const a = await call_reply(s, 'POST', `/v3/contacts/${ensured.id}/${send.path}`, 'write', send.body(account_id, text));
         if (name === 'linkedin-connect' && a.status === 409 && reply_code_of(a) === 'directLinkedIn.alreadyConnected')
         {
             // Nothing was sent, and nothing needs to be: the contact is already a connection.
-            print_result({status: 'already_connected', contact_id, activity_id: null, sent_at: null}, g);
+            print_result({status: 'already_connected', contact_id: ensured.id, contact_created: ensured.created, activity_id: null, sent_at: null}, g);
             return;
         }
         if (a.status !== 200)
         {
-            throw send_refusal(a, contact_id);
+            throw send_refusal(a, ensured.id);
         }
-        print_result(result_of(name, contact_id, expect_object(a, 'write')), g);
+        print_result(result_of(name, ensured, expect_object(a, 'write')), g);
     } catch (e) {
-        // Unlike most work commands, a send is not safe to repeat: the same text would go twice.
+        // Unlike most work commands, a send is not safe to repeat: the same text would go twice. Before
+        // the send was made, only the contact's import can have been lost, and that is safe to repeat.
         if (e instanceof Unknown_outcome_error)
         {
-            e.hint = `The ${send.what} may have been sent; running the command again may send it twice.`;
+            e.hint = sending
+                ? `The ${send.what} may have been sent; running the command again may send it twice.`
+                : `Nothing was sent: the outcome of the contact's import is unknown, so the ${send.what} was never made. `
+                    + 'Running the command again is safe: if the import did create the contact, it answers contact.already_held with its id.';
         }
         throw with_ids(e, ids);
     }

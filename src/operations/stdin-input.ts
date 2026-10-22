@@ -39,5 +39,46 @@ const read_stdin_object = (source: string | undefined, o: Stdin_object_opts, rea
     return value;
 };
 
-export {read_stdin_object};
+// The person and their text, each read from stdin by its own flag. When both flags take '-', stdin
+// holds one object with each input under its flag's name, {"contact": {…}, "message": {…}}; it is
+// read once, and each flag is handed its member as the text it would have read alone. When at most
+// one does, that one reads stdin as ever. No message here repeats any of it: an unknown member is
+// named, never its value.
+const stdin_inputs = <K extends string>(
+    sources: Record<K, string | undefined>, o: {code: string; hint: string}, read_stdin?: () => string,
+): Record<K, () => string>=>{
+    const read = read_stdin ?? read_all_stdin;
+    const names = Object.keys(sources) as K[];
+    const piped = names.filter(n=>sources[n] === '-');
+    if (piped.length < 2)
+    {
+        return Object.fromEntries(names.map(n=>[n, read])) as Record<K, () => string>;
+    }
+    const flags = piped.map(n=>`--${n} -`).join(' and ');
+    const shape = `{${piped.map(n=>`"${n}": {…}`).join(', ')}}`;
+    let value: unknown;
+    try {
+        value = JSON.parse(read());
+    } catch {
+        throw new UsageError(`With ${flags} both, stdin must be JSON: ${shape}.`, {code: o.code, hint: o.hint});
+    }
+    if (!is_object(value))
+    {
+        throw new UsageError(`With ${flags} both, stdin must be one JSON object: ${shape}.`, {code: o.code, hint: o.hint});
+    }
+    const input = value;
+    const unknown_field = Object.keys(input).find(k=>!(piped as string[]).includes(k));
+    if (unknown_field !== undefined)
+    {
+        throw new UsageError(`Stdin has an unknown field '${unknown_field}'.`, {code: o.code, hint: `Fields: ${piped.join(', ')}.`});
+    }
+    const missing = piped.find(n=>input[n] === undefined);
+    if (missing !== undefined)
+    {
+        throw new UsageError(`Stdin has no ${missing}: with ${flags} both, it holds ${shape}.`, {code: o.code, hint: o.hint});
+    }
+    return Object.fromEntries(names.map(n=>[n, sources[n] === '-' ? ()=>JSON.stringify(input[n]) : read])) as Record<K, () => string>;
+};
+
+export {read_stdin_object, stdin_inputs};
 export type {Stdin_object_opts};

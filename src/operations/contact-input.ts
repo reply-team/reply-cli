@@ -20,23 +20,27 @@ const PERSON_FIELDS = ['email', 'linkedin_url', 'first_name', 'last_name', 'comp
 const CODE = 'usage.contact';
 const ONE_WAY_HINT = 'Use exactly one of --contact-id, --email (with its name flags), or --contact (which also takes linkedin_url).';
 
-const add_contact_options = (cmd: Command): Command=>cmd
+// `found_first`: the command looks the contact up before it imports one, so the names only matter for a contact
+// Reply doesn't hold yet and are otherwise unused.
+const add_contact_options = (cmd: Command, found_first = false): Command=>cmd
     .option('--contact-id <id>', 'The contact by its Reply id')
     .option('--email <address>', 'The contact by email; with --first-name, --last-name, --company, --title')
-    .option('--first-name <name>', 'First name (with --email; Reply refuses to import a contact without one)')
-    .option('--last-name <name>', 'Last name (with --email)')
-    .option('--company <name>', 'Company (with --email)')
-    .option('--title <title>', 'Job title (with --email)')
+    .option('--first-name <name>', `First name (with --email; Reply refuses to import a contact without one)`)
+    .option('--last-name <name>', `Last name (with --email${found_first ? '; used only if the contact is imported' : ''})`)
+    .option('--company <name>', `Company (with --email${found_first ? '; used only if the contact is imported' : ''})`)
+    .option('--title <title>', `Job title (with --email${found_first ? '; used only if the contact is imported' : ''})`)
     .option('--contact <json>', 'The contact as JSON {email, linkedin_url, first_name, last_name, company, title}: inline, @file, or - for stdin');
 
-const CONTACT_HELP = `
+const CONTACT_FORMS = `
 A contact is given exactly one way:
   --contact <json>|@file|-           {email, linkedin_url, first_name, last_name, company, title},
                                      with an email, a LinkedIn URL or both; '-' reads stdin, which
                                      keeps personal data out of the argument list
   --email <address> [--first-name <name>] [--last-name <name>] [--company <name>] [--title <title>]
   --contact-id <id>                  a contact Reply already holds
-Reply is asked about a contact by its email; one with only a LinkedIn URL, by that. A LinkedIn URL is
+`;
+
+const CONTACT_HELP = `${CONTACT_FORMS}Reply is asked about a contact by its email; one with only a LinkedIn URL, by that. A LinkedIn URL is
 matched by its lowercased slug, and the CLI stores it by that slug when it imports the contact.
 
 `;
@@ -150,5 +154,5 @@ const read_contact_input = (f: Contact_flags, read_stdin?: () => string): Contac
     })};
 };
 
-export {read_contact_input, add_contact_options, person_of, CONTACT_HELP, linkedin_key, is_email};
+export {read_contact_input, add_contact_options, person_of, CONTACT_FORMS, CONTACT_HELP, linkedin_key, is_email};
 export type {Person, Contact_ref, Contact_flags};

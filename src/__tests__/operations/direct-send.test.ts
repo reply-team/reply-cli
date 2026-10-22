@@ -1,3 +1,6 @@
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import {describe, it, expect, beforeEach} from 'vitest';
 import {mock_fetch, json, ctx, sent, answer, capture} from './helpers';
 import {handle_direct_send, type Direct_send_name, type Direct_send_opts} from '../../operations/direct-send';
@@ -34,7 +37,7 @@ describe('contact send-email', ()=>{
     it('sends one email from the mailbox named, with the subject and body from stdin, and adds no time of its own', async()=>{
         answer(json({status: 'sent', messageId: '<m1@example.com>'}));
         expect(await run('send-email', {subject: SUBJECT, body: BODY}, EMAIL_OPTS)).toStrictEqual({
-            status: 'sent', contact_id: 456, message_id: '<m1@example.com>', sent_at: null, reply_status: 'sent',
+            status: 'sent', contact_id: 456, contact_created: false, message_id: '<m1@example.com>', sent_at: null, reply_status: 'sent',
         });
         expect(sent()).toEqual([{
             method: 'POST', url: 'https://api/v3/contacts/456/send-direct-email', body: {emailAccountId: 12, subject: SUBJECT, body: BODY},
@@ -44,12 +47,12 @@ describe('contact send-email', ()=>{
     it('keeps Reply\'s own word as reply_status, gives a null messageId as null, and never takes a time from the answer', async()=>{
         answer(json({status: 'new', messageId: null, sentAtUtc: '2026-10-19T10:00:00Z', date: '2026-10-19T10:00:00Z'}));
         expect(await run('send-email', {subject: SUBJECT, body: BODY}, EMAIL_OPTS)).toStrictEqual({
-            status: 'sent', contact_id: 456, message_id: null, sent_at: null, reply_status: 'new',
+            status: 'sent', contact_id: 456, contact_created: false, message_id: null, sent_at: null, reply_status: 'new',
         });
         mock_fetch.mockReset();
         answer(json({}));
         expect(await run('send-email', {subject: SUBJECT, body: BODY}, EMAIL_OPTS)).toStrictEqual({
-            status: 'sent', contact_id: 456, message_id: null, sent_at: null, reply_status: null,
+            status: 'sent', contact_id: 456, contact_created: false, message_id: null, sent_at: null, reply_status: null,
         });
     });
 
@@ -99,7 +102,7 @@ describe('the LinkedIn sends', ()=>{
             mock_fetch.mockReset();
             answer(activity(action));
             expect(await run(name, message, LINKEDIN_OPTS), name).toStrictEqual({
-                status: 'sent', contact_id: 456, activity_id: 1042, sent_at: '2026-10-19T10:30:00Z',
+                status: 'sent', contact_id: 456, contact_created: false, activity_id: 1042, sent_at: '2026-10-19T10:30:00Z',
             });
             const requests = sent();
             expect(requests.map(r=>[r.method, r.url]), name).toEqual([['POST', `https://api/v3/contacts/456/${path}`]]);
@@ -113,7 +116,7 @@ describe('the LinkedIn sends', ()=>{
         mock_fetch.mockReset();
         answer(json({actionType: 'message', linkedInActivityId: '1042'}));
         expect(await run('linkedin-message', {body: TEXT}, LINKEDIN_OPTS)).toStrictEqual({
-            status: 'sent', contact_id: 456, activity_id: null, sent_at: null,
+            status: 'sent', contact_id: 456, contact_created: false, activity_id: null, sent_at: null,
         });
     });
 
@@ -127,7 +130,7 @@ describe('the LinkedIn sends', ()=>{
     it('an invitation to someone already connected is already_connected, exit 0, sent once; on a message it is a refusal', async()=>{
         answer(json({title: 'Conflict', status: 409, code: 'directLinkedIn.alreadyConnected'}, 409));
         expect(await run('linkedin-connect', {note: NOTE}, LINKEDIN_OPTS)).toStrictEqual({
-            status: 'already_connected', contact_id: 456, activity_id: null, sent_at: null,
+            status: 'already_connected', contact_id: 456, contact_created: false, activity_id: null, sent_at: null,
         });
         expect(mock_fetch).toHaveBeenCalledTimes(1);
         mock_fetch.mockReset();
@@ -328,16 +331,292 @@ describe('every direct send', ()=>{
         expect(mock_fetch).not.toHaveBeenCalled();
     });
 
-    it('refuses a missing or malformed contact or account id before any call', async()=>{
+    it('refuses a missing contact, or a malformed contact or account id, before any call', async()=>{
         for (const [name, message, opts] of SENDS)
         {
             const account_flag = Object.keys(opts).find(k=>k.endsWith('AccountId')) as keyof Direct_send_opts;
-            for (const bad of [{contactId: undefined}, {contactId: 'abc'}, {contactId: '0'}, {[account_flag]: undefined}, {[account_flag]: '-3'}])
+            const cases: [Direct_send_opts, string][] = [
+                [{contactId: undefined}, 'usage.contact'], [{contactId: 'abc'}, 'usage.id'], [{contactId: '0'}, 'usage.id'],
+                [{[account_flag]: undefined}, 'usage.id'], [{[account_flag]: '-3'}, 'usage.id'],
+            ];
+            for (const [bad, code] of cases)
             {
                 const e = await failure(name, message, {...opts, ...bad});
-                expect(e, `${name} ${JSON.stringify(bad)}`).toMatchObject({code: 'usage.id', exit_code: 2});
+                expect(e, `${name} ${JSON.stringify(bad)}`).toMatchObject({code, exit_code: 2});
             }
         }
         expect(mock_fetch).not.toHaveBeenCalled();
+    });
+});
+
+describe('a direct send to a person given by their fields', ()=>{
+    const MARTA = {email: 'marta@example.com', first_name: 'Marta', last_name: 'Example'};
+    const PROFILE = 'https://www.linkedin.com/in/marta-example';
+    const EMAIL_LOOKUP = 'GET https://api/v3/contacts?email=marta%40example.com&top=100&skip=0';
+    const PROFILE_LOOKUP = `GET https://api/v3/contacts?linkedIn=${encodeURIComponent(PROFILE)}&top=100&skip=0`;
+    const IMPORT = 'POST https://api/v3/contacts/import';
+    const nobody = ()=>json({items: [], hasMore: false});
+    const held = (entry: Record<string, unknown>)=>json({items: [entry], hasMore: false});
+    const imported = (id: number, status = 'created')=>json({items: [{id, status}]});
+    const by_fields = (opts: Direct_send_opts): Direct_send_opts=>({...opts, contactId: undefined, contact: '-'});
+    const lines = ()=>sent().map(r=>`${r.method} ${r.url}`);
+
+    // The person and the text both come on stdin, so the argument list carries neither: it is checked on every run.
+    const PERSONAL = /marta|example\.com|tuesday|meetup/i;
+    const send_by_fields = (name: Direct_send_name, input: unknown, opts: Direct_send_opts)=>{
+        expect(JSON.stringify(opts), JSON.stringify(opts)).not.toMatch(PERSONAL);
+        return send(name, input, opts);
+    };
+    const run_by_fields = async(name: Direct_send_name, input: unknown, opts: Direct_send_opts)=>
+        JSON.parse((await capture(()=>send_by_fields(name, input, opts))).out);
+    const fail_by_fields = (name: Direct_send_name, input: unknown, opts: Direct_send_opts)=>
+        send_by_fields(name, input, opts).catch((x: unknown)=>x);
+
+    const LINKEDIN_SENDS: [Direct_send_name, unknown, string, string][] = [
+        ['linkedin-connect', {note: NOTE}, 'send-direct-linkedin-connect', 'connect'],
+        ['linkedin-message', {body: TEXT}, 'send-direct-linkedin-message', 'message'],
+        ['linkedin-inmail', {subject: SUBJECT, body: TEXT}, 'send-direct-linkedin-inmail', 'inMail'],
+        ['linkedin-voice', {script: SCRIPT}, 'send-direct-linkedin-ai-voice', 'aiVoice'],
+    ];
+
+    it('send-email: Reply holds nobody under the email, so it is looked up, imported with the person\'s names, then sent, '
+        + 'and the answer names the contact it went to', async()=>{
+        answer(nobody(), imported(457), json({status: 'sent', messageId: '<m1@example.com>'}));
+        const message = {subject: SUBJECT, body: BODY};
+        expect(await run_by_fields('send-email', {contact: MARTA, message}, by_fields(EMAIL_OPTS))).toStrictEqual({
+            status: 'sent', contact_id: 457, contact_created: true, message_id: '<m1@example.com>', sent_at: null, reply_status: 'sent',
+        });
+        expect(lines()).toEqual([EMAIL_LOOKUP, IMPORT, 'POST https://api/v3/contacts/457/send-direct-email']);
+        expect(sent()[1].body).toStrictEqual({items: [{email: 'marta@example.com', firstName: 'Marta', lastName: 'Example'}]});
+        expect(sent()[2].body).toStrictEqual({emailAccountId: 12, subject: SUBJECT, body: BODY});
+    });
+
+    it('each LinkedIn send: Reply holds nobody under the profile, so it is looked up by it, the person imported keyed by it '
+        + 'with no email, then sent', async()=>{
+        for (const [name, message, path, action] of LINKEDIN_SENDS)
+        {
+            mock_fetch.mockReset();
+            answer(nobody(), imported(458), activity(action));
+            const person = {linkedin_url: PROFILE, first_name: 'Marta'};
+            expect(await run_by_fields(name, {contact: person, message}, by_fields(LINKEDIN_OPTS)), name).toStrictEqual({
+                status: 'sent', contact_id: 458, contact_created: true, activity_id: 1042, sent_at: '2026-10-19T10:30:00Z',
+            });
+            expect(lines(), name).toEqual([PROFILE_LOOKUP, IMPORT, `POST https://api/v3/contacts/458/${path}`]);
+            expect(sent()[1].body, name).toStrictEqual({items: [{linkedInUrl: PROFILE, firstName: 'Marta'}], options: {keys: {linkedInUrl: true}}});
+        }
+    });
+
+    it('a send looks the person up by every address it was given, the one it reaches them at first, and the import matches by '
+        + 'the email as an add\'s does', async()=>{
+        const both = {...MARTA, linkedin_url: PROFILE};
+        answer(nobody(), nobody(), imported(457), activity('message'));
+        expect(await run_by_fields('linkedin-message', {contact: both, message: {body: TEXT}}, by_fields(LINKEDIN_OPTS)))
+            .toMatchObject({contact_id: 457, contact_created: true});
+        expect(lines()).toEqual([PROFILE_LOOKUP, EMAIL_LOOKUP, IMPORT, 'POST https://api/v3/contacts/457/send-direct-linkedin-message']);
+        expect(sent()[2].body).toStrictEqual({items: [{email: 'marta@example.com', linkedInUrl: PROFILE, firstName: 'Marta', lastName: 'Example'}]});
+        mock_fetch.mockReset();
+        answer(nobody(), nobody(), imported(457), json({status: 'sent'}));
+        await run_by_fields('send-email', {contact: both, message: {subject: SUBJECT, body: BODY}}, by_fields(EMAIL_OPTS));
+        expect(lines()).toEqual([EMAIL_LOOKUP, PROFILE_LOOKUP, IMPORT, 'POST https://api/v3/contacts/457/send-direct-email']);
+    });
+
+    // Reply does not refuse a direct send to a contact it holds as opted out, so a send given a person's fields acts only
+    // on a contact it created: one Reply already holds, found by the lookup or matched by the import, is refused before
+    // anything is sent and named, for the caller to read before sending to it by its id.
+    describe('a send given a person\'s fields acts only on a contact it created', ()=>{
+        type Case = {name: Direct_send_name; message: unknown; opts: Direct_send_opts; lookup: string; other: string; path: string; holder: object; other_holder: object; done: () => Response};
+        const FIVE: Case[] = [
+            {name: 'send-email', message: {subject: SUBJECT, body: BODY}, opts: EMAIL_OPTS, lookup: EMAIL_LOOKUP, other: PROFILE_LOOKUP,
+                path: 'send-direct-email', holder: {email: 'Marta@Example.com'}, other_holder: {linkedInUrl: `${PROFILE}/`}, done: ()=>json({status: 'sent'})},
+            ...LINKEDIN_SENDS.map(([name, message, path, action]): Case=>({name, message, opts: LINKEDIN_OPTS, lookup: PROFILE_LOOKUP, other: EMAIL_LOOKUP,
+                path, holder: {linkedInUrl: `${PROFILE}/`}, other_holder: {email: 'Marta@Example.com'}, done: ()=>activity(action)})),
+        ];
+        const PERSON = {...MARTA, linkedin_url: PROFILE};
+        const refused = (e: unknown, label: string)=>{
+            expect(e, label).toMatchObject({code: 'contact.already_held', exit_code: 1, ids: {contact_id: 456}});
+            const hint = (e as {hint?: string}).hint ?? '';
+            expect(hint, `${label}: ${hint}`).toContain('contact get 456');
+            expect(hint, `${label}: ${hint}`).toContain('--contact-id 456');
+            expect(shown(e), shown(e)).toContain('nothing was sent');
+            expect(shown(e), shown(e)).not.toMatch(PERSONAL);
+            expect(lines().filter(l=>l.includes('send-direct')), label).toEqual([]);
+        };
+
+        it('refuses a person the lookup finds: nothing is imported or sent, and the contact is named', async()=>{
+            for (const c of FIVE)
+            {
+                mock_fetch.mockReset();
+                answer(held({id: 456, ...c.holder}), c.done());
+                refused(await fail_by_fields(c.name, {contact: PERSON, message: c.message}, by_fields(c.opts)), c.name);
+                expect(lines(), c.name).toEqual([c.lookup]);
+            }
+        });
+
+        it('refuses a person the import matches to a contact Reply already holds, a teammate\'s too: nothing is sent, and the '
+            + 'contact is named', async()=>{
+            for (const c of FIVE)
+            {
+                for (const status of ['updated', 'skipped'])
+                {
+                    mock_fetch.mockReset();
+                    answer(nobody(), nobody(), imported(456, status), c.done());
+                    refused(await fail_by_fields(c.name, {contact: PERSON, message: c.message}, by_fields(c.opts)), `${c.name} ${status}`);
+                    expect(lines(), `${c.name} ${status}`).toEqual([c.lookup, c.other, IMPORT]);
+                }
+            }
+        });
+
+        it('sends to a person the import creates', async()=>{
+            for (const c of FIVE)
+            {
+                mock_fetch.mockReset();
+                answer(nobody(), nobody(), imported(457), c.done());
+                expect(await run_by_fields(c.name, {contact: PERSON, message: c.message}, by_fields(c.opts)), c.name)
+                    .toMatchObject({status: 'sent', contact_id: 457, contact_created: true});
+                expect(lines(), c.name).toEqual([c.lookup, c.other, IMPORT, `POST https://api/v3/contacts/457/${c.path}`]);
+            }
+        });
+
+        it('refuses a person held only under the other address it was given: the lookup by the address it reaches them at '
+            + 'finds nobody, the one by the other finds the contact, and nothing is imported or sent', async()=>{
+            for (const c of FIVE)
+            {
+                mock_fetch.mockReset();
+                answer(nobody(), held({id: 456, ...c.other_holder}), c.done());
+                refused(await fail_by_fields(c.name, {contact: PERSON, message: c.message}, by_fields(c.opts)), c.name);
+                expect(lines(), c.name).toEqual([c.lookup, c.other]);
+            }
+        });
+
+        it('names the first contact found when two are held, one under each address: the address it reaches them at is asked '
+            + 'first, and the second is never asked', async()=>{
+            for (const c of FIVE)
+            {
+                mock_fetch.mockReset();
+                answer(held({id: 456, ...c.holder}), held({id: 789, ...c.other_holder}), c.done());
+                refused(await fail_by_fields(c.name, {contact: PERSON, message: c.message}, by_fields(c.opts)), c.name);
+                expect(lines(), c.name).toEqual([c.lookup]);
+            }
+        });
+    });
+
+    it('a person without the address the send reaches them at is refused before any call, the address not repeated', async()=>{
+        const cases: [Direct_send_name, unknown, Direct_send_opts][] = [
+            ['send-email', {contact: {linkedin_url: PROFILE, first_name: 'Marta'}, message: {subject: SUBJECT, body: BODY}}, by_fields(EMAIL_OPTS)],
+            ...LINKEDIN_SENDS.map(([name, message]): [Direct_send_name, unknown, Direct_send_opts]=>
+                [name, {contact: MARTA, message}, by_fields(LINKEDIN_OPTS)]),
+        ];
+        for (const [name, input, opts] of cases)
+        {
+            const e = await fail_by_fields(name, input, opts);
+            expect(e, name).toMatchObject({code: 'usage.contact', exit_code: 2});
+            expect(shown(e), shown(e)).not.toMatch(PERSONAL);
+        }
+        expect(mock_fetch).not.toHaveBeenCalled();
+    });
+
+    it('refuses as the add commands do: two contacts held, an address or a profile Reply will not import, the plan\'s limit, '
+        + 'an item the import failed; and nothing is sent', async()=>{
+        const two = json({items: [{id: 1, email: 'marta@example.com'}, {id: 2, email: 'marta@example.com'}], hasMore: false});
+        const cases: [Response[], string, number][] = [
+            [[two], 'contact.not_unique', 1],
+            [[nobody(), nobody(), json({status: 400, errors: [{pointer: '/items/0/email', detail: '\'marta@example\' is not valid'}]}, 400)],
+                'contact.invalid_email', 1],
+            [[nobody(), nobody(), json({status: 400, errors: [{pointer: '/items/0/linkedInUrl', detail: 'not valid'}]}, 400)],
+                'contact.invalid_linkedin_url', 1],
+            [[nobody(), nobody(), json({code: 'contact.limitExceeded', detail: 'Contact limit reached.'}, 400)], 'account.contact_limit_reached', 1],
+            [[nobody(), nobody(), json({items: [{id: null, status: 'failed', error: 'Invalid data'}]})], 'reply.refused', 1],
+        ];
+        for (const [answers, code, exit_code] of cases)
+        {
+            mock_fetch.mockReset();
+            answer(...answers);
+            const e = await fail_by_fields('send-email', {contact: {...MARTA, linkedin_url: PROFILE}, message: {subject: SUBJECT, body: BODY}},
+                by_fields(EMAIL_OPTS));
+            expect(e, code).toMatchObject({code, exit_code, ids: {email_account_id: 12}});
+            expect((e as {ids?: Record<string, unknown>}).ids, code).not.toHaveProperty('contact_id');
+            expect(shown(e), shown(e)).not.toMatch(PERSONAL);
+            expect(lines().filter(l=>l.includes('send-direct')), code).toEqual([]);
+        }
+    });
+
+    it('a lost answer to the import is outcome.unknown (exit 3) that says nothing was sent; one to the send says it may go '
+        + 'twice, and names the contact', async()=>{
+        mock_fetch.mockResolvedValueOnce(nobody()).mockRejectedValueOnce(lost_connection());
+        const input = {contact: MARTA, message: {subject: SUBJECT, body: BODY}};
+        const before = await fail_by_fields('send-email', input, by_fields(EMAIL_OPTS)) as {hint?: string; ids?: object};
+        expect(before).toMatchObject({code: 'outcome.unknown', exit_code: 3});
+        expect(before.hint, before.hint).toContain('Nothing was sent');
+        expect(before.hint, before.hint).toContain('contact.already_held');
+        expect(before.hint, before.hint).not.toContain('may send it twice');
+        expect(before.ids, JSON.stringify(before.ids)).not.toHaveProperty('contact_id');
+        expect(lines()).toEqual([EMAIL_LOOKUP, IMPORT]);
+        mock_fetch.mockReset();
+        mock_fetch.mockResolvedValueOnce(nobody()).mockResolvedValueOnce(imported(457)).mockRejectedValueOnce(lost_connection());
+        const after = await fail_by_fields('send-email', input, by_fields(EMAIL_OPTS)) as {hint?: string};
+        expect(after).toMatchObject({code: 'outcome.unknown', exit_code: 3, ids: {contact_id: 457, email_account_id: 12}});
+        expect(after.hint, after.hint).toContain('may send it twice');
+        expect(shown(after), shown(after)).not.toMatch(PERSONAL);
+    });
+
+    it('a refusal of the send after an import carries the contact it created, and an invitation to someone already connected '
+        + 'names them too', async()=>{
+        answer(nobody(), imported(457), json({code: 'contact.contactInBlackList'}, 400));
+        const e = await fail_by_fields('send-email', {contact: MARTA, message: {subject: SUBJECT, body: BODY}}, by_fields(EMAIL_OPTS));
+        expect(e).toMatchObject({code: 'contact.blacklisted', exit_code: 1, ids: {contact_id: 457, email_account_id: 12}});
+        mock_fetch.mockReset();
+        answer(nobody(), imported(458), json({code: 'directLinkedIn.alreadyConnected'}, 409));
+        expect(await run_by_fields('linkedin-connect', {contact: {linkedin_url: PROFILE, first_name: 'Marta'}, message: {note: NOTE}},
+            by_fields(LINKEDIN_OPTS))).toStrictEqual({
+            status: 'already_connected', contact_id: 458, contact_created: true, activity_id: null, sent_at: null,
+        });
+    });
+
+    it('an invitation without a note reads the person alone from stdin', async()=>{
+        answer(nobody(), imported(458), activity('connect'));
+        const opts = {...by_fields(LINKEDIN_OPTS), message: undefined};
+        await run_by_fields('linkedin-connect', {linkedin_url: PROFILE, first_name: 'Marta'}, opts);
+        expect(sent()[2].body).toStrictEqual({linkedInAccountId: 34});
+    });
+
+    it('with --contact - and --message - both, stdin is one object holding each, read once', async()=>{
+        answer(nobody(), imported(457), json({status: 'sent'}));
+        let reads = 0;
+        const input = JSON.stringify({contact: MARTA, message: {subject: SUBJECT, body: BODY}});
+        await capture(()=>handle_direct_send('send-email', by_fields(EMAIL_OPTS), ctx(), {json: true}, ()=>{ reads++; return input; }));
+        expect(reads).toBe(1);
+        expect(sent()[2].body).toMatchObject({subject: SUBJECT, body: BODY});
+    });
+
+    it('refuses stdin that is not that object, without repeating any of it and before any call', async()=>{
+        const message = {subject: SUBJECT, body: BODY};
+        const cases: [unknown, string][] = [
+            ['not json, Marta', 'usage.stdin'], [[MARTA, message], 'usage.stdin'], [{contact: MARTA}, 'usage.stdin'],
+            [{message}, 'usage.stdin'], [{contact: MARTA, message, cc: 'marta@example.com'}, 'usage.stdin'],
+            [{...MARTA, ...message}, 'usage.stdin'],
+            [{contact: 'marta@example.com', message}, 'usage.contact'], [{contact: {...MARTA, phone: '1'}, message}, 'usage.contact'],
+            [{contact: MARTA, message: {subject: SUBJECT}}, 'usage.message'], [{contact: MARTA, message: 'Hi Marta'}, 'usage.message'],
+        ];
+        for (const [input, code] of cases)
+        {
+            const e = await fail_by_fields('send-email', input, by_fields(EMAIL_OPTS));
+            expect(e, JSON.stringify(input)).toMatchObject({code, exit_code: 2});
+            expect(shown(e), shown(e)).not.toMatch(PERSONAL);
+        }
+        expect(mock_fetch).not.toHaveBeenCalled();
+    });
+
+    it('a person from a file leaves stdin to the text alone', async()=>{
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'reply-send-'));
+        const file = path.join(dir, 'person.json');
+        fs.writeFileSync(file, JSON.stringify(MARTA));
+        try {
+            answer(nobody(), imported(457), json({status: 'sent'}));
+            await run_by_fields('send-email', {subject: SUBJECT, body: BODY}, {...EMAIL_OPTS, contactId: undefined, contact: `@${file}`});
+            expect(lines()).toEqual([EMAIL_LOOKUP, IMPORT, 'POST https://api/v3/contacts/457/send-direct-email']);
+            expect(sent()[2].body).toMatchObject({subject: SUBJECT, body: BODY});
+        } finally {
+            fs.rmSync(dir, {recursive: true, force: true});
+        }
     });
 });

@@ -99,17 +99,18 @@ const import_contact = async(s: Op_session, person: Person): Promise<Ensured>=>{
 };
 
 type Lookup = {param: 'email' | 'linkedIn'; values: string[]; holds: (entry: Record<string, unknown>) => boolean};
+type Channel = 'email' | 'linkedin';
 
-// What a person is looked up by: the email when there is one, else the LinkedIn URL. An entry
-// counts only when it carries the same address: an email equal ignoring case, a LinkedIn URL equal
-// under linkedin_key.
+// What a person is looked up by: the channel named, which the person carries, or else the email when
+// there is one, else the LinkedIn URL. An entry counts only when it carries the same address: an email
+// equal ignoring case, a LinkedIn URL equal under linkedin_key.
 // INTERIM (API gap): the document does not say whether the exact lookup by LinkedIn URL ignores case.
 // Needed: a lookup that matches a LinkedIn URL by its slug whatever its case, or a word that it does.
 // Workaround: ask with the URL in the form it is written in (its lowercased slug) first, then as
 // given, and count the matches of both together, so one slug held under two spellings is refused
 // rather than half seen.
-const lookup_of = (p: Person): Lookup=>{
-    if (p.email !== undefined)
+const lookup_of = (p: Person, by?: Channel): Lookup=>{
+    if (p.email !== undefined && by !== 'linkedin')
     {
         const wanted = p.email.toLowerCase();
         return {param: 'email', values: [p.email], holds: entry=>typeof entry.email === 'string' && entry.email.toLowerCase() === wanted};
@@ -162,8 +163,8 @@ const read_lookup = async(s: Op_session, lookup: Lookup, value: string, found_be
     throw new Operation_error('reply.unavailable', 'Reply answered the exact lookup with more pages than one address can fill.', {status: 200});
 };
 
-const find_contact_by_address = async(s: Op_session, person: Person): Promise<number | null>=>{
-    const lookup = lookup_of(person);
+const find_contact_by_address = async(s: Op_session, person: Person, by?: Channel): Promise<number | null>=>{
+    const lookup = lookup_of(person, by);
     let found: number | null = null;
     for (const value of lookup.values)
     {
@@ -195,6 +196,18 @@ const ensure_contact = async(s: Op_session, ref: Contact_ref): Promise<Ensured>=
     return import_contact(s, ref.person);
 };
 
+// The contact a command acts on: the id given; else the one Reply holds under the address a lookup uses;
+// else the person imported as an add imports them. Looking first means that a person Reply already holds needs
+// no first name.
+const find_or_import = async(s: Op_session, ref: Contact_ref): Promise<Ensured>=>{
+    if (ref.kind === 'id')
+    {
+        return {id: ref.id, created: false};
+    }
+    const found = await find_contact_by_address(s, ref.person);
+    return found === null ? import_contact(s, ref.person) : {id: found, created: false};
+};
+
 const find_contact = async(s: Op_session, ref: Contact_ref): Promise<number | null>=>
     ref.kind === 'id' ? ref.id : find_contact_by_address(s, ref.person);
 
@@ -219,5 +232,5 @@ const read_opted_out = async(s: Op_session, contact_id: number): Promise<boolean
     return body.isOptedOut;
 };
 
-export {ensure_contact, import_contact, find_contact, find_contact_by_address, read_opted_out, contact_not_found};
-export type {Ensured};
+export {ensure_contact, find_or_import, import_contact, find_contact, find_contact_by_address, read_opted_out, contact_not_found};
+export type {Ensured, Channel};

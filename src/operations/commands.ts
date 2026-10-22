@@ -2,7 +2,7 @@ import {Command} from 'commander';
 import {PROGRAM_NAME} from '../config';
 import {build_context} from '../context';
 import {read_op_globals} from './options';
-import {add_contact_options, CONTACT_HELP} from './contact-input';
+import {add_contact_options, CONTACT_FORMS, CONTACT_HELP} from './contact-input';
 import {handle_sequence_get, handle_sequence_contacts, handle_sequence_stats} from './sequence-read';
 import {handle_sequence_list, handle_sequence_create} from './sequence-by-name';
 import {handle_sequence_add_contact, handle_sequence_remove_contact} from './sequence-membership';
@@ -41,6 +41,13 @@ const piped = (command: string, contact = '{"email":"ann@example.com","first_nam
 
 const ALWAYS_IMPORTED = 'A contact given by email is always imported, so Reply needs a first name, even for one it already holds.\n'
     + 'One given only by LinkedIn URL is looked up first and imported only when Reply holds nobody under it.\n';
+
+// The codes a command that finds or imports a contact shares with the add commands.
+const IMPORT_CODES = ['contact.not_unique', 'contact.invalid_email', 'contact.invalid_linkedin_url', 'account.contact_limit_reached'];
+
+// Both inputs on stdin, the person and the one the command acts with.
+const STDIN_PAIR = (input: string): string=>
+    `With --contact - and --${input} - both, stdin holds one object: {"contact": {…}, "${input}": {…}}.\n`;
 
 const run = (fn: (cmd: Command) => Promise<void>)=>async function(this: Command): Promise<void>
 {
@@ -212,19 +219,27 @@ contact_command.command('get')
         await handle_contact_get(cmd.args[0], ctx, g);
     }));
 
-contact_command.command('update')
-    .argument('<contact-id>', 'Contact id')
+add_contact_options(contact_command.command('update')
+    .argument('[contact-id]', 'Contact id (or give the contact by the flags below)'), true)
     .option('--fields <stdin>', 'Only -: the fields to change as JSON on stdin')
     .description('Change some of a contact\'s fields and custom fields; the rest stay as they are')
     .addHelpText('after', help(
         [`echo '{"title":"CTO","company":"Acme"}' | ${P} contact update 456 --fields -`,
-            `echo '{"last_name":null,"custom_fields":[{"name":"leadSource","value":"Event"}]}' | ${P} contact update 456 --fields -`],
-        ['contact.not_found', 'contact.field_not_found'], true,
-        'Result: {"status":"updated","contact_id"}\n'
+            `echo '{"last_name":null,"custom_fields":[{"name":"leadSource","value":"Event"}]}' | ${P} contact update 456 --fields -`,
+            `echo '{"contact":{"email":"ann@example.com","first_name":"Ann"},"fields":{"title":"CTO"}}' | ${P} contact update --contact - --fields -`],
+        ['contact.not_found', ...IMPORT_CODES, 'contact.field_not_found'], true,
+        'Result: {"status":"updated","contact_id","contact_created"}\n'
             + 'Fields: {first_name, last_name, company, title, linkedin_url, custom_fields: [{name, value}]}; a field left out stays as\n'
             + 'it is, and null clears one. They are read from stdin only, so no value ever sits in the argument list. The CLI stores\n'
             + 'a LinkedIn URL by its lowercased slug, the form contacts are looked up by. A custom field is named as the account\n'
-            + 'names it (ignoring case); a name the account has none of is contact.field_not_found, and then nothing is changed.\n'))
+            + 'names it (ignoring case); a name the account has none of is contact.field_not_found, and then nothing is changed.\n'
+            + CONTACT_FORMS
+            + 'contact update 456 is contact update --contact-id 456. A contact given by its fields is looked up as the add commands\n'
+            + 'look one up, by its email, or one with only a LinkedIn URL by that, and imported only when Reply holds nobody under\n'
+            + 'it, as they import one; only then does Reply need a first name. A LinkedIn URL is matched by its lowercased slug,\n'
+            + 'and the CLI stores it by that slug when it imports the contact. Those fields only find or import the contact: on\n'
+            + 'one Reply holds, only what --fields names is changed. contact_created says whether this command created it.\n'
+            + STDIN_PAIR('fields')))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
         await handle_contact_update(cmd.args[0], cmd.opts(), ctx, g);
@@ -241,7 +256,7 @@ contact_command.command('delete')
         await handle_contact_delete(cmd.args[0], ctx, g);
     }));
 
-add_contact_options(contact_command.command('opt-out'))
+add_contact_options(contact_command.command('opt-out'), true)
     .description('Mark the contact as opted out at Reply, creating them only if Reply has nobody under the address')
     .addHelpText('after', help([piped('contact opt-out'), ex('contact opt-out --contact-id 456')],
         ['contact.not_found', 'contact.not_unique', 'contact.invalid_email', 'contact.invalid_linkedin_url', 'account.contact_limit_reached'], true,
@@ -253,21 +268,47 @@ add_contact_options(contact_command.command('opt-out'))
         await handle_contact_opt_out(cmd.opts(), ctx, g);
     }));
 
-const SEND_TWICE = (what: string): string=>`the ${what} may have been sent; running the command again may send it twice`;
+const SEND_TWICE = (what: string): string=>
+    `the ${what} may have been sent; running the command again may send it twice, unless the hint says nothing was sent`;
 
-contact_command.command('send-email')
-    .option('--contact-id <id>', 'The contact by its Reply id')
+const LINKEDIN_URL_NEEDED = 'A LinkedIn send needs the contact\'s linkedin_url in --contact (or --contact-id); --email alone is refused '
+    + '(usage.contact).\n';
+
+// How a send names its contact: looked up by every address it was given, else imported as an add imports one; and
+// it sends only to a contact it created, naming one Reply already holds instead.
+const SENT_TO = (by: 'email' | 'linkedin', what: string): string=>CONTACT_FORMS
+    + 'A send given a person\'s fields sends only to a contact it creates. The contact is looked up by\n'
+    + `${by === 'email' ? 'its email' : 'its LinkedIn URL'}, where the ${what} goes, then by its ${by === 'email' ? 'LinkedIn URL' : 'email'} when it was given one, and imported only when\n`
+    + 'Reply holds nobody under any address given, as the add commands import one (matched by its email when it has\n'
+    + 'one), so Reply needs a first name. When a lookup finds a contact,\n'
+    + 'or the import matches one Reply already holds, nothing is sent: the answer is contact.already_held (exit 1)\n'
+    + 'with that contact\'s id in ids.contact_id. Read that contact first (contact get shows it, its opt-out included),\n'
+    + 'and send to it with --contact-id if it is the one to reach. A LinkedIn URL is matched by its lowercased slug, and\n'
+    + `the CLI stores it by that slug when it imports the contact. contact_id is the contact the ${what} went to, and\n`
+    + 'contact_created is kept for consistency with the add commands: given a person\'s fields it is always true, and with\n'
+    + '--contact-id it is always false; in both cases a successful answer says the send was made.\n'
+    + (by === 'email' ? '' : LINKEDIN_URL_NEEDED) + STDIN_PAIR('message');
+
+// One send's example with the person and the text both on stdin.
+const piped_send = (command: string, contact: string, message: string, flags: string): string=>
+    `echo '{"contact":${contact},"message":${message}}' | ${P} contact ${command} --contact - ${flags} --message -`;
+const ANN_EMAIL = '{"email":"ann@example.com","first_name":"Ann"}';
+const ANN_PROFILE = '{"linkedin_url":"https://www.linkedin.com/in/ann-example","first_name":"Ann"}';
+
+add_contact_options(contact_command.command('send-email'), true)
     .option('--email-account-id <id>', 'The mailbox to send from (see `account list`)')
     .option('--message <stdin>', 'Only -: the email {subject, body} as JSON on stdin')
     .description('Send one email to a contact now, outside any sequence, from the mailbox you name')
     .addHelpText('after', help(
-        [`echo '{"subject":"Quick question","body":"<p>Hi Ann, does Tuesday work?</p>"}' | ${P} contact send-email --contact-id 456 --email-account-id 12 --message -`],
-        ['contact.not_found', 'email_account.not_found', 'contact.blacklisted'], true,
-        'Result: {"status":"sent","contact_id","message_id","sent_at","reply_status"}: sent means Reply accepted the email, and\n'
-            + 'reply_status is Reply\'s own word for it (new or sent). message_id is Reply\'s messageId, null when it gives none.\n'
-            + 'Reply\'s answer carries no time, so sent_at is always null; the CLI adds none of its own.\n'
+        [`echo '{"subject":"Quick question","body":"<p>Hi Ann, does Tuesday work?</p>"}' | ${P} contact send-email --contact-id 456 --email-account-id 12 --message -`,
+            piped_send('send-email', ANN_EMAIL, '{"subject":"Quick question","body":"<p>Hi Ann</p>"}', '--email-account-id 12')],
+        ['contact.not_found', ...IMPORT_CODES, 'contact.already_held', 'email_account.not_found', 'contact.blacklisted'], true,
+        'Result: {"status":"sent","contact_id","contact_created","message_id","sent_at","reply_status"}: sent means Reply\n'
+            + 'accepted the email, and reply_status is Reply\'s own word for it (new or sent). message_id is Reply\'s messageId,\n'
+            + 'null when it gives none. Reply\'s answer carries no time, so sent_at is always null; the CLI adds none of its own.\n'
             + 'The email is read from stdin only, so its text never sits in the argument list. The body is HTML. Reply sends a\n'
-            + 'direct email at once, outside the mailbox\'s daily limit and sending delay.\n',
+            + 'direct email at once, outside the mailbox\'s daily limit and sending delay.\n'
+            + SENT_TO('email', 'email'),
         SEND_TWICE('email')))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
@@ -276,10 +317,10 @@ contact_command.command('send-email')
 
 // The four LinkedIn sends share their flags, their first codes and the shape of their result.
 const LINKEDIN_SEND_CODES = [
-    'contact.not_found', 'contact.no_linkedin_profile', 'linkedin.account_not_found', 'linkedin.feature_disabled',
-    'linkedin.account_inactive', 'linkedin.invalid_cookie',
+    'contact.not_found', ...IMPORT_CODES, 'contact.already_held', 'contact.no_linkedin_profile', 'linkedin.account_not_found',
+    'linkedin.feature_disabled', 'linkedin.account_inactive', 'linkedin.invalid_cookie',
 ];
-const LINKEDIN_SENT = '"contact_id","activity_id","sent_at"}:\n'
+const LINKEDIN_SENT = '"contact_id","contact_created","activity_id","sent_at"}:\n'
     + 'activity_id and sent_at are Reply\'s linkedInActivityId and sentAtUtc as Reply gives them, each null when it gives\n'
     + 'none; the CLI adds no time of its own.\n';
 const VARIABLES = (where: string): string=>
@@ -290,12 +331,11 @@ const linkedin_send = (
     name: Exclude<Direct_send_name, 'send-email'>, description: string, message: string, examples: string[], codes: string[],
     extra: string, what: string,
 ): void=>{
-    contact_command.command(name)
-        .option('--contact-id <id>', 'The contact by its Reply id')
+    add_contact_options(contact_command.command(name), true)
         .option('--linkedin-account-id <id>', 'The LinkedIn account to send from (see `account list`)')
         .option('--message <stdin>', `Only -: the ${message} as JSON on stdin`)
         .description(description)
-        .addHelpText('after', help(examples, [...LINKEDIN_SEND_CODES, ...codes], true, extra, SEND_TWICE(what)))
+        .addHelpText('after', help(examples, [...LINKEDIN_SEND_CODES, ...codes], true, extra + SENT_TO('linkedin', what), SEND_TWICE(what)))
         .action(run(async(cmd)=>{
             const {g, ctx} = ctx_of(cmd);
             await handle_direct_send(name, cmd.opts(), ctx, g);
@@ -304,17 +344,21 @@ const linkedin_send = (
 
 linkedin_send('linkedin-connect', 'Invite a contact to connect on LinkedIn, with or without a note', 'note {note}',
     [`echo '{"note":"Hi Ann, we met at the meetup."}' | ${P} contact linkedin-connect ${LINKEDIN_EXAMPLE} --message -`,
-        ex(`contact linkedin-connect ${LINKEDIN_EXAMPLE}`)],
+        ex(`contact linkedin-connect ${LINKEDIN_EXAMPLE}`),
+        piped_send('linkedin-connect', ANN_PROFILE, '{"note":"Hi Ann, we met at the meetup."}', '--linkedin-account-id 34'),
+        `echo '${ANN_PROFILE}' | ${P} contact linkedin-connect --contact - --linkedin-account-id 34`],
     ['linkedin.not_connected', 'linkedin.limit_reached', 'linkedin.message_too_long', 'linkedin.missing_variables'],
     'Result: {"status":"sent"|"already_connected",' + LINKEDIN_SENT
         + 'already_connected means the contact is already a connection: nothing is sent, and activity_id and sent_at are null.\n'
         + 'The note is read from stdin only, so its text never sits in the argument list; without --message the invitation\n'
-        + 'carries no note. Reply publishes no limit for a note, and one it finds too long is linkedin.message_too_long.\n'
+        + 'carries no note, and stdin holds the contact alone. Reply publishes no limit for a note, and one it finds too long\n'
+        + 'is linkedin.message_too_long.\n'
         + VARIABLES('note'),
     'invitation');
 
 linkedin_send('linkedin-message', 'Send a LinkedIn message to a contact the account is connected with', 'message {body}',
-    [`echo '{"body":"Thanks for connecting, Ann."}' | ${P} contact linkedin-message ${LINKEDIN_EXAMPLE} --message -`],
+    [`echo '{"body":"Thanks for connecting, Ann."}' | ${P} contact linkedin-message ${LINKEDIN_EXAMPLE} --message -`,
+        piped_send('linkedin-message', ANN_PROFILE, '{"body":"Thanks for connecting, Ann."}', '--linkedin-account-id 34')],
     ['linkedin.not_connected', 'linkedin.limit_reached', 'linkedin.message_too_long', 'linkedin.missing_variables'],
     'Result: {"status":"sent",' + LINKEDIN_SENT
         + 'The message is read from stdin only, so its text never sits in the argument list. Reply takes a body of at most\n'
@@ -323,7 +367,8 @@ linkedin_send('linkedin-message', 'Send a LinkedIn message to a contact the acco
 
 linkedin_send('linkedin-inmail', 'Send a LinkedIn InMail, which reaches a contact the account is not connected with (needs Sales Navigator and InMail credits)',
     'InMail {subject, body}',
-    [`echo '{"subject":"Quick question","body":"Hi Ann, does Tuesday work?"}' | ${P} contact linkedin-inmail ${LINKEDIN_EXAMPLE} --message -`],
+    [`echo '{"subject":"Quick question","body":"Hi Ann, does Tuesday work?"}' | ${P} contact linkedin-inmail ${LINKEDIN_EXAMPLE} --message -`,
+        piped_send('linkedin-inmail', ANN_PROFILE, '{"subject":"Quick question","body":"Hi Ann, does Tuesday work?"}', '--linkedin-account-id 34')],
     ['linkedin.limit_reached', 'linkedin.message_too_long', 'linkedin.missing_variables', 'linkedin.sales_navigator_required',
         'linkedin.sales_navigator_disconnected', 'linkedin.no_inmail_credits'],
     'Result: {"status":"sent",' + LINKEDIN_SENT
@@ -332,7 +377,8 @@ linkedin_send('linkedin-inmail', 'Send a LinkedIn InMail, which reaches a contac
     'InMail');
 
 linkedin_send('linkedin-voice', 'Send a LinkedIn voice message that Reply speaks from a script in the account\'s voice', 'script {script}',
-    [`echo '{"script":"Hi Ann, a quick hello about Tuesday."}' | ${P} contact linkedin-voice ${LINKEDIN_EXAMPLE} --message -`],
+    [`echo '{"script":"Hi Ann, a quick hello about Tuesday."}' | ${P} contact linkedin-voice ${LINKEDIN_EXAMPLE} --message -`,
+        piped_send('linkedin-voice', ANN_PROFILE, '{"script":"Hi Ann, a quick hello about Tuesday."}', '--linkedin-account-id 34')],
     ['linkedin.not_connected', 'linkedin.limit_reached', 'linkedin.missing_variables', 'linkedin.voice_profile_missing',
         'linkedin.voice_too_long'],
     'Result: {"status":"sent",' + LINKEDIN_SENT
