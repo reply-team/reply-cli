@@ -223,11 +223,21 @@ The two `add-contact` commands always import a contact given by email, and Reply
 without a first name, even for a contact it already holds; a contact given only by LinkedIn URL is
 looked up first and imported only when Reply holds nobody under it. `contact opt-out`, `contact
 update` and the direct sends look first and import only someone Reply doesn't hold yet, so only then
-is a first name needed; `sequence remove-contact` never imports. Each of them answers the
-`contact_id` it acted on and `contact_created`, so a caller can keep the id. A send looks the person
+is a first name needed; `sequence remove-contact` never imports. Each of these except `sequence remove-contact`
+answers the `contact_id` it acted on and `contact_created`, so a caller can keep the id. A send looks the person
 up by the address it reaches them at: the email for `contact send-email`, the LinkedIn URL for the
 LinkedIn sends. Otherwise a contact is looked up by its email, and one with only a LinkedIn URL by
-that; an import is matched by the email when there is one. The lookup is Reply's exact
+that; an import is matched by the email when there is one.
+
+A LinkedIn send never reaches a profile other than the one it was given. A contact found by the LinkedIn URL is
+sent to as it is. When the person is given with an email and nobody is found by the LinkedIn URL, the import is
+matched by the email and may return a contact Reply already holds, so that contact is read before the send:
+if it holds another LinkedIn profile, nothing is sent or changed and the answer is `contact.channel_conflict`
+(exit 1, the contact in `ids.contact_id`; send to it with `--contact-id` if it is the same person, or change its
+`linkedin_url` with `contact update` first); if it holds none, only the given profile is set on it before the
+send, never an email or any other field; if it holds the same profile (compared ignoring the scheme and `www`),
+the send goes ahead. A contact the import created is not read. A LinkedIn send needs a `linkedin_url` in
+`--contact` (or `--contact-id`): `--email` alone is refused. The lookup is Reply's exact
 one: an email matches ignoring case, and a LinkedIn URL is matched by its lowercased slug — on
 linkedin.com the path's case does not count, nor the scheme's or host's, a default port, one trailing
 slash or a fragment, while `www` and the query do. Reply is asked for a LinkedIn URL in that form
@@ -291,7 +301,8 @@ variables, and refuses one it cannot fill with `linkedin.missing_variables`.
 
 `inbox reply`, `sequence create` and the five direct sends are the work commands that are not safe to
 re-run. On exit 3 (outcome unknown) a reply or a send may already have gone, and running it again may
-send it twice; a send whose contact's import lost its answer was never made, and its hint says so.
+send it twice, unless the hint says nothing was sent: a send whose contact's import, read or profile update lost its
+answer was never made, and its hint says so.
 For `inbox reply`, read the thread with `reply inbox get` before trying again. For
 `sequence create`, Reply allows two sequences of one name, so after exit 3 look the name up with
 `sequence list --name -` first. Every other work command can simply be run again; a `contact delete`

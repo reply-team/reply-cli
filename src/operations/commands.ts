@@ -220,7 +220,7 @@ contact_command.command('get')
     }));
 
 add_contact_options(contact_command.command('update')
-    .argument('[contact-id]', 'Contact id (or give the contact by the flags below)'))
+    .argument('[contact-id]', 'Contact id (or give the contact by the flags below)'), true)
     .option('--fields <stdin>', 'Only -: the fields to change as JSON on stdin')
     .description('Change some of a contact\'s fields and custom fields; the rest stay as they are')
     .addHelpText('after', help(
@@ -256,7 +256,7 @@ contact_command.command('delete')
         await handle_contact_delete(cmd.args[0], ctx, g);
     }));
 
-add_contact_options(contact_command.command('opt-out'))
+add_contact_options(contact_command.command('opt-out'), true)
     .description('Mark the contact as opted out at Reply, creating them only if Reply has nobody under the address')
     .addHelpText('after', help([piped('contact opt-out'), ex('contact opt-out --contact-id 456')],
         ['contact.not_found', 'contact.not_unique', 'contact.invalid_email', 'contact.invalid_linkedin_url', 'account.contact_limit_reached'], true,
@@ -268,7 +268,16 @@ add_contact_options(contact_command.command('opt-out'))
         await handle_contact_opt_out(cmd.opts(), ctx, g);
     }));
 
-const SEND_TWICE = (what: string): string=>`the ${what} may have been sent; running the command again may send it twice`;
+const SEND_TWICE = (what: string): string=>
+    `the ${what} may have been sent; running the command again may send it twice, unless the hint says nothing was sent`;
+
+// What a LinkedIn send does with a contact the import matched: the send goes only to the profile that was named.
+const LINKEDIN_PROFILE = 'A LinkedIn send needs the contact\'s linkedin_url in --contact (or --contact-id); --email alone is refused (usage.contact).\n'
+    + 'When the import matches a contact Reply already holds, for instance by the email also given, that contact is read\n'
+    + 'before the send. If it holds another LinkedIn profile than the one given, nothing is sent or changed and the\n'
+    + 'answer is contact.channel_conflict (exit 1, with ids.contact_id); if it holds none, only the given profile is set\n'
+    + 'on it before the send, never an email or any other field; if it holds the same profile, the send goes ahead. A\n'
+    + 'contact found by its LinkedIn URL, or created by the import, is not read.\n';
 
 // How a send names its contact: looked up by the address it reaches them at, else imported as an add imports one.
 const SENT_TO = (by: 'email' | 'linkedin', what: string): string=>CONTACT_FORMS
@@ -276,7 +285,8 @@ const SENT_TO = (by: 'email' | 'linkedin', what: string): string=>CONTACT_FORMS
     + 'when Reply holds nobody under it, as the add commands import one (matched by its email when it has one); only\n'
     + 'then does Reply need a first name. A LinkedIn URL is matched by its lowercased slug, and the CLI stores it by\n'
     + `that slug when it imports the contact. contact_id is the contact the ${what} went to, and contact_created says\n`
-    + 'whether this command created them.\n' + STDIN_PAIR('message');
+    + 'whether this command created them.\n'
+    + (by === 'email' ? '' : LINKEDIN_PROFILE) + STDIN_PAIR('message');
 
 // One send's example with the person and the text both on stdin.
 const piped_send = (command: string, contact: string, message: string, flags: string): string=>
@@ -284,7 +294,7 @@ const piped_send = (command: string, contact: string, message: string, flags: st
 const ANN_EMAIL = '{"email":"ann@example.com","first_name":"Ann"}';
 const ANN_PROFILE = '{"linkedin_url":"https://www.linkedin.com/in/ann-example","first_name":"Ann"}';
 
-add_contact_options(contact_command.command('send-email'))
+add_contact_options(contact_command.command('send-email'), true)
     .option('--email-account-id <id>', 'The mailbox to send from (see `account list`)')
     .option('--message <stdin>', 'Only -: the email {subject, body} as JSON on stdin')
     .description('Send one email to a contact now, outside any sequence, from the mailbox you name')
@@ -306,7 +316,7 @@ add_contact_options(contact_command.command('send-email'))
 
 // The four LinkedIn sends share their flags, their first codes and the shape of their result.
 const LINKEDIN_SEND_CODES = [
-    'contact.not_found', ...IMPORT_CODES, 'contact.no_linkedin_profile', 'linkedin.account_not_found', 'linkedin.feature_disabled',
+    'contact.not_found', ...IMPORT_CODES, 'contact.channel_conflict', 'contact.no_linkedin_profile', 'linkedin.account_not_found', 'linkedin.feature_disabled',
     'linkedin.account_inactive', 'linkedin.invalid_cookie',
 ];
 const LINKEDIN_SENT = '"contact_id","contact_created","activity_id","sent_at"}:\n'
@@ -320,7 +330,7 @@ const linkedin_send = (
     name: Exclude<Direct_send_name, 'send-email'>, description: string, message: string, examples: string[], codes: string[],
     extra: string, what: string,
 ): void=>{
-    add_contact_options(contact_command.command(name))
+    add_contact_options(contact_command.command(name), true)
         .option('--linkedin-account-id <id>', 'The LinkedIn account to send from (see `account list`)')
         .option('--message <stdin>', `Only -: the ${message} as JSON on stdin`)
         .description(description)

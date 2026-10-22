@@ -150,10 +150,26 @@ describe('operations/commands', ()=>{
         expect(text.replace(/\s+/g, ' '), text).toContain('matched by its lowercased slug');
     });
 
+    it('the commands that look a contact up first say the name flags are used only if it is imported; the add commands do not', ()=>{
+        const described = (c: Command, flag: string)=>c.options.find(o=>o.long === flag)?.description as string;
+        const lookups = ['update', 'opt-out', 'send-email', 'linkedin-connect', 'linkedin-message', 'linkedin-inmail', 'linkedin-voice'];
+        for (const name of lookups)
+        {
+            for (const flag of ['--last-name', '--company', '--title'])
+            {
+                expect(described(sub(contact_command, name), flag), `${name} ${flag}`).toContain('used only if the contact is imported');
+            }
+        }
+        for (const flag of ['--last-name', '--company', '--title'])
+        {
+            expect(described(sub(sequence_command, 'add-contact'), flag), flag).not.toContain('used only if');
+        }
+    });
+
     // Each direct send: the flag naming the account it goes from, the codes its endpoint publishes, and what its help
     // says sent_at is.
     const IMPORT = ['contact.not_unique', 'contact.invalid_email', 'contact.invalid_linkedin_url', 'account.contact_limit_reached'];
-    const LINKEDIN = ['contact.not_found', ...IMPORT, 'contact.no_linkedin_profile', 'linkedin.account_not_found', 'linkedin.feature_disabled',
+    const LINKEDIN = ['contact.not_found', ...IMPORT, 'contact.channel_conflict', 'contact.no_linkedin_profile', 'linkedin.account_not_found', 'linkedin.feature_disabled',
         'linkedin.account_inactive', 'linkedin.invalid_cookie'];
     const SENT_AT_AS_GIVEN = 'sentAtUtc as Reply gives them, each null when it gives none; the CLI adds no time of its own';
     const DIRECT_SENDS: [string, string, string[], string][] = [
@@ -186,8 +202,17 @@ describe('operations/commands', ()=>{
             const text = help_of(c);
             const flat = text.replace(/\s+/g, ' ');
             expect(text, text).toContain('--message -');
-            expect(flat, text).toContain('may send it twice');
+            expect(flat, text).toContain('may send it twice, unless the hint says nothing was sent');
             expect(text, text).not.toContain('re-running is safe');
+            // A LinkedIn send says what happens to a contact the import matched; an email send has no such step.
+            const says_conflict = flat.includes('another LinkedIn profile than the one given, nothing is sent or changed');
+            expect(says_conflict, text).toBe(name !== 'send-email');
+            if (name !== 'send-email')
+            {
+                expect(flat, text).toContain('contact.channel_conflict (exit 1, with ids.contact_id)');
+                expect(flat, text).toContain('only the given profile is set on it before the send, never an email or any other field');
+                expect(flat, text).toContain('--email alone is refused (usage.contact)');
+            }
             expect(flat, text).toContain(sent_at);
             expect(flat, text).toContain('read from stdin only');
             // Exactly the codes its endpoint publishes, then the shared ones, as the help lists them.
