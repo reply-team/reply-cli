@@ -232,7 +232,7 @@ that; an import is matched by the email when there is one.
 A LinkedIn send never reaches a profile other than the one it was given. A contact found by the LinkedIn URL is
 sent to as it is. When the person is given with an email and nobody is found by the LinkedIn URL, the import is
 matched by the email and may return a contact Reply already holds, so that contact is read before the send:
-if it holds another LinkedIn profile, nothing is sent or changed and the answer is `contact.channel_conflict`
+if it holds another LinkedIn profile, nothing is sent and its LinkedIn profile is not changed, and the answer is `contact.channel_conflict`
 (exit 1, the contact in `ids.contact_id`; send to it with `--contact-id` if it is the same person, or change its
 `linkedin_url` with `contact update` first); if it holds none, only the given profile is set on it before the
 send, never an email or any other field; if it holds the same profile (compared ignoring the scheme and `www`),

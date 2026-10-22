@@ -205,7 +205,7 @@ describe('operations/commands', ()=>{
             expect(flat, text).toContain('may send it twice, unless the hint says nothing was sent');
             expect(text, text).not.toContain('re-running is safe');
             // A LinkedIn send says what happens to a contact the import matched; an email send has no such step.
-            const says_conflict = flat.includes('another LinkedIn profile than the one given, nothing is sent or changed');
+            const says_conflict = flat.includes('another LinkedIn profile than the one given, nothing is sent and its LinkedIn profile is not changed, and the answer');
             expect(says_conflict, text).toBe(name !== 'send-email');
             if (name !== 'send-email')
             {

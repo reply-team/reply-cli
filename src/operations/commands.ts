@@ -274,7 +274,7 @@ const SEND_TWICE = (what: string): string=>
 // What a LinkedIn send does with a contact the import matched: the send goes only to the profile that was named.
 const LINKEDIN_PROFILE = 'A LinkedIn send needs the contact\'s linkedin_url in --contact (or --contact-id); --email alone is refused (usage.contact).\n'
     + 'When the import matches a contact Reply already holds, for instance by the email also given, that contact is read\n'
-    + 'before the send. If it holds another LinkedIn profile than the one given, nothing is sent or changed and the\n'
+    + 'before the send. If it holds another LinkedIn profile than the one given, nothing is sent and its LinkedIn profile is not changed, and the\n'
     + 'answer is contact.channel_conflict (exit 1, with ids.contact_id); if it holds none, only the given profile is set\n'
     + 'on it before the send, never an email or any other field; if it holds the same profile, the send goes ahead. A\n'
     + 'contact found by its LinkedIn URL, or created by the import, is not read.\n';

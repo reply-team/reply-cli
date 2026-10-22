@@ -243,10 +243,10 @@ const hold_profile = async(s: Op_session, contact_id: number, linkedin_url: stri
             return;
         }
         throw new Operation_error('contact.channel_conflict',
-            'The contact Reply holds under this email has another LinkedIn profile than the one given, so nothing was sent.', {
+            'A contact Reply already holds carries another LinkedIn profile than the one given, so nothing was sent and its LinkedIn profile was not changed.', {
                 status: 200,
                 hint: 'Send to that contact with --contact-id if it is the same person, or change its linkedin_url with contact update '
-                    + 'first; or give the LinkedIn URL alone.',
+                    + 'first; or, if it is a different person, give the LinkedIn URL alone.',
             });
     }
     const set = await call_reply(s, 'PATCH', `/v3/contacts/${contact_id}`, 'write', {linkedInUrl: linkedin_key(linkedin_url) ?? linkedin_url});
