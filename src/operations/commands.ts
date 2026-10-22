@@ -42,6 +42,13 @@ const piped = (command: string, contact = '{"email":"ann@example.com","first_nam
 const ALWAYS_IMPORTED = 'A contact given by email is always imported, so Reply needs a first name, even for one it already holds.\n'
     + 'One given only by LinkedIn URL is looked up first and imported only when Reply holds nobody under it.\n';
 
+// The codes a command that finds or imports a contact shares with the add commands.
+const IMPORT_CODES = ['contact.not_unique', 'contact.invalid_email', 'contact.invalid_linkedin_url', 'account.contact_limit_reached'];
+
+// Both inputs on stdin, the person and the one the command acts with.
+const STDIN_PAIR = (input: string): string=>
+    `With --contact - and --${input} - both, stdin holds one object: {"contact": {…}, "${input}": {…}}.\n`;
+
 const run = (fn: (cmd: Command) => Promise<void>)=>async function(this: Command): Promise<void>
 {
     await fn(this);
@@ -212,19 +219,27 @@ contact_command.command('get')
         await handle_contact_get(cmd.args[0], ctx, g);
     }));
 
-contact_command.command('update')
-    .argument('<contact-id>', 'Contact id')
+add_contact_options(contact_command.command('update')
+    .argument('[contact-id]', 'Contact id (or give the contact by the flags below)'))
     .option('--fields <stdin>', 'Only -: the fields to change as JSON on stdin')
     .description('Change some of a contact\'s fields and custom fields; the rest stay as they are')
     .addHelpText('after', help(
         [`echo '{"title":"CTO","company":"Acme"}' | ${P} contact update 456 --fields -`,
-            `echo '{"last_name":null,"custom_fields":[{"name":"leadSource","value":"Event"}]}' | ${P} contact update 456 --fields -`],
-        ['contact.not_found', 'contact.field_not_found'], true,
-        'Result: {"status":"updated","contact_id"}\n'
+            `echo '{"last_name":null,"custom_fields":[{"name":"leadSource","value":"Event"}]}' | ${P} contact update 456 --fields -`,
+            `echo '{"contact":{"email":"ann@example.com","first_name":"Ann"},"fields":{"title":"CTO"}}' | ${P} contact update --contact - --fields -`],
+        ['contact.not_found', ...IMPORT_CODES, 'contact.field_not_found'], true,
+        'Result: {"status":"updated","contact_id","contact_created"}\n'
             + 'Fields: {first_name, last_name, company, title, linkedin_url, custom_fields: [{name, value}]}; a field left out stays as\n'
             + 'it is, and null clears one. They are read from stdin only, so no value ever sits in the argument list. The CLI stores\n'
             + 'a LinkedIn URL by its lowercased slug, the form contacts are looked up by. A custom field is named as the account\n'
-            + 'names it (ignoring case); a name the account has none of is contact.field_not_found, and then nothing is changed.\n'))
+            + 'names it (ignoring case); a name the account has none of is contact.field_not_found, and then nothing is changed.\n'
+            + CONTACT_FORMS
+            + 'contact update 456 is contact update --contact-id 456. A contact given by its fields is looked up as the add commands\n'
+            + 'look one up, by its email, or one with only a LinkedIn URL by that, and imported only when Reply holds nobody under\n'
+            + 'it, as they import one; only then does Reply need a first name. A LinkedIn URL is matched by its lowercased slug,\n'
+            + 'and the CLI stores it by that slug when it imports the contact. Those fields only find or import the contact: on\n'
+            + 'one Reply holds, only what --fields names is changed. contact_created says whether this command created it.\n'
+            + STDIN_PAIR('fields')))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
         await handle_contact_update(cmd.args[0], cmd.opts(), ctx, g);
@@ -254,13 +269,6 @@ add_contact_options(contact_command.command('opt-out'))
     }));
 
 const SEND_TWICE = (what: string): string=>`the ${what} may have been sent; running the command again may send it twice`;
-
-// The codes a command that finds or imports a contact shares with the add commands.
-const IMPORT_CODES = ['contact.not_unique', 'contact.invalid_email', 'contact.invalid_linkedin_url', 'account.contact_limit_reached'];
-
-// Both inputs on stdin, the person and the one the command acts with.
-const STDIN_PAIR = (input: string): string=>
-    `With --contact - and --${input} - both, stdin holds one object: {"contact": {…}, "${input}": {…}}.\n`;
 
 // How a send names its contact: looked up by the address it reaches them at, else imported as an add imports one.
 const SENT_TO = (by: 'email' | 'linkedin', what: string): string=>CONTACT_FORMS

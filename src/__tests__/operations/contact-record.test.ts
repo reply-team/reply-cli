@@ -129,7 +129,7 @@ describe('contact update', ()=>{
         answer(json([{id: 1, title: 'leadSource', fieldType: 'text'}, {id: 2, title: 'budget', fieldType: 'text'}]), json({id: 456}));
         const {out} = await update('-', {first_name: ' Marta ', title: null, linkedin_url: URL_,
             custom_fields: [{name: 'leadSource', value: 'Event'}, {name: 'Budget', value: null}]});
-        expect(JSON.parse(out)).toEqual({status: 'updated', contact_id: 456});
+        expect(JSON.parse(out)).toEqual({status: 'updated', contact_id: 456, contact_created: false});
         expect(sent()).toEqual([
             {method: 'GET', url: FIELDS_URL, body: undefined},
             {method: 'PATCH', url: 'https://api/v3/contacts/456', body: {firstName: 'Marta', title: null, linkedInUrl: URL_,
@@ -146,7 +146,7 @@ describe('contact update', ()=>{
     it('without custom fields there is no read before the PATCH', async()=>{
         answer(json({id: 456}));
         const {out} = await update('-', {company: 'Acme', last_name: null});
-        expect(JSON.parse(out)).toEqual({status: 'updated', contact_id: 456});
+        expect(JSON.parse(out)).toEqual({status: 'updated', contact_id: 456, contact_created: false});
         expect(sent()).toEqual([{method: 'PATCH', url: 'https://api/v3/contacts/456', body: {company: 'Acme', lastName: null}}]);
     });
 
@@ -218,6 +218,129 @@ describe('contact update', ()=>{
             const e = await update('-', input).catch(x=>x);
             expect(e, JSON.stringify(input)).toMatchObject({code: 'usage.fields', exit_code: 2});
             expect(shown(e), JSON.stringify(input)).not.toContain(SECRET);
+        }
+        expect(mock_fetch).not.toHaveBeenCalled();
+    });
+});
+
+describe('contact update of a person given by their fields', ()=>{
+    const OTHER_PROFILE = 'https://www.linkedin.com/in/marta-other';
+    const EMAIL_LOOKUP = 'GET https://api/v3/contacts?email=marta%40example.com&top=100&skip=0';
+    const PROFILE_LOOKUP = `GET https://api/v3/contacts?linkedIn=${encodeURIComponent(URL_)}&top=100&skip=0`;
+    const IMPORT = 'POST https://api/v3/contacts/import';
+    const nobody = ()=>json({items: [], hasMore: false});
+    const held = (entry: Record<string, unknown>)=>json({items: [entry], hasMore: false});
+    const lines = ()=>sent().map(r=>`${r.method} ${r.url}`);
+    type Update_opts = Parameters<typeof handle_contact_update>[1];
+
+    // The person and the fields both come on stdin, so the argument list carries neither: it is checked on every run.
+    const PERSONAL = /marta|example\.com|cto|acme|secret/i;
+    const update_by_fields = (input: unknown, opts: Update_opts = {contact: '-', fields: '-'}, id?: string)=>{
+        expect(JSON.stringify([id, opts]), JSON.stringify(opts)).not.toMatch(PERSONAL);
+        return capture(()=>handle_contact_update(id, opts, ctx(), {json: true}, stdin(input)));
+    };
+    const fail_by_fields = (input: unknown, opts?: Update_opts, id?: string)=>update_by_fields(input, opts, id).catch((x: unknown)=>x);
+
+    it('a person Reply holds is found as the add commands find one and changed only by --fields: never their email or '
+        + 'LinkedIn URL from the fields that found them', async()=>{
+        answer(held({id: 456, email: 'marta@example.com'}), json({id: 456}));
+        const contact = {email: EMAIL, linkedin_url: OTHER_PROFILE, first_name: 'Marta', last_name: 'Example', company: 'Old Co', title: 'Old'};
+        const {out} = await update_by_fields({contact, fields: {title: 'CTO'}});
+        expect(JSON.parse(out)).toStrictEqual({status: 'updated', contact_id: 456, contact_created: false});
+        expect(lines()).toEqual([EMAIL_LOOKUP, 'PATCH https://api/v3/contacts/456']);
+        expect(sent()[1].body).toStrictEqual({title: 'CTO'});
+    });
+
+    it('a person given only by LinkedIn URL is found by it, and only a linkedin_url in --fields changes it', async()=>{
+        answer(held({id: 456, linkedInUrl: URL_}), json({id: 456}));
+        await update_by_fields({contact: {linkedin_url: URL_}, fields: {company: 'Acme'}});
+        expect(lines()).toEqual([PROFILE_LOOKUP, 'PATCH https://api/v3/contacts/456']);
+        expect(sent()[1].body).toStrictEqual({company: 'Acme'});
+        mock_fetch.mockReset();
+        answer(held({id: 456, linkedInUrl: URL_}), json({id: 456}));
+        await update_by_fields({contact: {linkedin_url: URL_}, fields: {linkedin_url: OTHER_PROFILE}});
+        expect(sent()[1].body).toStrictEqual({linkedInUrl: OTHER_PROFILE});
+    });
+
+    it('a person Reply holds nobody under is imported with their names as an add imports them, then changed', async()=>{
+        answer(nobody(), json({items: [{id: 457, status: 'created'}]}), json({id: 457}));
+        const {out} = await update_by_fields({contact: {email: EMAIL, first_name: 'Marta'}, fields: {title: 'CTO'}});
+        expect(JSON.parse(out)).toStrictEqual({status: 'updated', contact_id: 457, contact_created: true});
+        expect(lines()).toEqual([EMAIL_LOOKUP, IMPORT, 'PATCH https://api/v3/contacts/457']);
+        expect(sent()[1].body).toStrictEqual({items: [{email: EMAIL, firstName: 'Marta'}]});
+        expect(sent()[2].body).toStrictEqual({title: 'CTO'});
+        mock_fetch.mockReset();
+        answer(nobody(), json({items: [{id: 458, status: 'created'}]}), json({id: 458}));
+        await update_by_fields({contact: {linkedin_url: URL_, first_name: 'Marta'}, fields: {title: 'CTO'}});
+        expect(lines()).toEqual([PROFILE_LOOKUP, IMPORT, 'PATCH https://api/v3/contacts/458']);
+        expect(sent()[1].body).toStrictEqual({items: [{linkedInUrl: URL_, firstName: 'Marta'}], options: {keys: {linkedInUrl: true}}});
+    });
+
+    it('custom fields are read before the person is found or imported, so a name the account lacks imports nobody', async()=>{
+        answer(json([{id: 1, title: 'leadSource', fieldType: 'text'}]));
+        const e = await fail_by_fields({contact: {email: EMAIL, first_name: 'Marta'}, fields: {custom_fields: [{name: 'Tier', value: SECRET}]}});
+        expect(e).toMatchObject({code: 'contact.field_not_found', exit_code: 1});
+        expect(lines()).toEqual([`GET ${FIELDS_URL}`]);
+    });
+
+    it('refuses as the add commands do, and changes nothing: two contacts held, the plan\'s limit, an item the import failed', async()=>{
+        const two = json({items: [{id: 1, email: EMAIL}, {id: 2, email: EMAIL}], hasMore: false});
+        const cases: [Response[], string][] = [
+            [[two], 'contact.not_unique'],
+            [[nobody(), json({code: 'contact.limitExceeded', detail: 'Contact limit reached.'}, 400)], 'account.contact_limit_reached'],
+            [[nobody(), json({items: [{id: null, status: 'failed', error: 'Invalid data'}]})], 'reply.refused'],
+        ];
+        for (const [answers, code] of cases)
+        {
+            mock_fetch.mockReset();
+            answer(...answers);
+            const e = await fail_by_fields({contact: {email: EMAIL}, fields: {title: 'CTO'}});
+            expect(e, code).toMatchObject({code, exit_code: 1});
+            expect(shown(e), shown(e)).not.toMatch(PERSONAL);
+            expect(lines().filter(l=>l.startsWith('PATCH')), code).toEqual([]);
+        }
+    });
+
+    it('a lost answer to the import is outcome.unknown (exit 3), and nothing is changed; a lost PATCH names the contact', async()=>{
+        const lost = Object.assign(new TypeError('fetch failed'), {cause: Object.assign(new Error('ECONNRESET'), {code: 'ECONNRESET'})});
+        mock_fetch.mockResolvedValueOnce(nobody()).mockRejectedValueOnce(lost);
+        const before = await fail_by_fields({contact: {email: EMAIL, first_name: 'Marta'}, fields: {title: 'CTO'}});
+        expect(before).toMatchObject({code: 'outcome.unknown', exit_code: 3});
+        expect(lines()).toEqual([EMAIL_LOOKUP, IMPORT]);
+        mock_fetch.mockReset();
+        answer(nobody(), json({items: [{id: 457, status: 'created'}]}), json('', 503));
+        const after = await fail_by_fields({contact: {email: EMAIL, first_name: 'Marta'}, fields: {title: 'CTO'}});
+        expect(after).toMatchObject({code: 'outcome.unknown', exit_code: 3, ids: {contact_id: 457}});
+    });
+
+    it('the contact is given one way only: the id argument with a contact flag, or none at all, is refused before any call', async()=>{
+        const cases: [Update_opts, string | undefined][] = [
+            [{contactId: '457', fields: '-'}, '456'], [{contact: '-', fields: '-'}, '456'], [{fields: '-'}, undefined],
+        ];
+        for (const [opts, id] of cases)
+        {
+            const e = await fail_by_fields({contact: {email: EMAIL}, fields: {title: 'CTO'}}, opts, id);
+            expect(e, JSON.stringify([id, opts])).toMatchObject({code: 'usage.contact', exit_code: 2});
+        }
+        expect(mock_fetch).not.toHaveBeenCalled();
+        answer(json({id: 457}));
+        const {out} = await update_by_fields({title: 'CTO'}, {contactId: '457', fields: '-'});
+        expect(JSON.parse(out)).toStrictEqual({status: 'updated', contact_id: 457, contact_created: false});
+        expect(lines()).toEqual(['PATCH https://api/v3/contacts/457']);
+    });
+
+    it('with --contact - and --fields - both, stdin must be one object holding each; nothing is repeated or called otherwise', async()=>{
+        const cases: [unknown, string][] = [
+            ['not json, Marta', 'usage.stdin'], [{contact: {email: EMAIL}}, 'usage.stdin'], [{fields: {title: 'CTO'}}, 'usage.stdin'],
+            [{contact: {email: EMAIL}, fields: {title: 'CTO'}, message: {body: SECRET}}, 'usage.stdin'],
+            [{contact: {email: EMAIL}, fields: {email: 'marta@example.org'}}, 'usage.fields'],
+            [{contact: {first_name: 'Marta'}, fields: {title: 'CTO'}}, 'usage.contact'],
+        ];
+        for (const [input, code] of cases)
+        {
+            const e = await fail_by_fields(input);
+            expect(e, JSON.stringify(input)).toMatchObject({code, exit_code: 2});
+            expect(shown(e), shown(e)).not.toMatch(PERSONAL);
         }
         expect(mock_fetch).not.toHaveBeenCalled();
     });

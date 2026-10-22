@@ -1,10 +1,10 @@
 import {PROGRAM_NAME} from '../config';
-import {Operation_error, Unknown_outcome_error, UsageError} from '../utils/errors';
+import {Operation_error, Unknown_outcome_error, UsageError, type Ids} from '../utils/errors';
 import {call_reply, expect_object, is_object, refusal, unreadable, open_session, type Op_session} from './call';
 import {parse_id, type Op_globals} from './options';
-import {person_of, linkedin_key} from './contact-input';
-import {find_contact_by_address, contact_not_found} from './contacts';
-import {read_stdin_object} from './stdin-input';
+import {person_of, linkedin_key, read_contact_input, type Contact_flags, type Contact_ref} from './contact-input';
+import {find_contact_by_address, find_or_import, contact_not_found} from './contacts';
+import {read_stdin_object, stdin_inputs} from './stdin-input';
 import {print_result, with_ids} from './result';
 import type {Cli_context} from '../context';
 
@@ -161,27 +161,55 @@ const resolve_custom_fields = async(s: Op_session, custom: Custom_value[]): Prom
     return custom.map(c=>({name: title_of(c.name) as string, value: c.value}));
 };
 
+type Update_opts = Contact_flags & {fields?: string};
+
+// The contact id as the argument, as it always was, or the contact flags; never both.
+const contact_to_update = (id_arg: string | undefined, opts: Update_opts, read_stdin: () => string): Contact_ref=>{
+    if (id_arg === undefined)
+    {
+        return read_contact_input(opts, read_stdin);
+    }
+    if ([opts.contactId, opts.email, opts.firstName, opts.lastName, opts.company, opts.title, opts.contact].some(v=>v !== undefined))
+    {
+        throw new UsageError('The contact was given more than one way.', {
+            code: 'usage.contact', hint: 'Give the contact id as the argument, or the contact by its flags, not both.',
+        });
+    }
+    return {kind: 'id', id: parse_id(id_arg, 'Contact id')};
+};
+
 const handle_contact_update = async(
-    id_arg: string, opts: {fields?: string}, ctx: Cli_context, g: Op_globals, read_stdin?: () => string,
+    id_arg: string | undefined, opts: Update_opts, ctx: Cli_context, g: Op_globals, read_stdin?: () => string,
 ): Promise<void>=>{
-    const id = parse_id(id_arg, 'Contact id');
-    const {patch, custom} = read_contact_update(opts.fields, read_stdin);
+    const stdin = stdin_inputs({contact: opts.contact, fields: opts.fields}, {
+        code: 'usage.stdin', hint: `Pipe both in one object: echo '{"contact":{…},"fields":{…}}' | ${PROGRAM_NAME} contact update --contact - --fields -`,
+    }, read_stdin);
+    const contact = contact_to_update(id_arg, opts, stdin.contact);
+    const {patch, custom} = read_contact_update(opts.fields, stdin.fields);
     const s = await open_session(ctx, g);
+    const ids: Ids = contact.kind === 'id' ? {contact_id: contact.id} : {};
     try {
-        // Absent fields stay as they are; a null clears one. Custom fields go by name.
-        const body = custom === undefined ? patch : {...patch, customFields: await resolve_custom_fields(s, custom)};
-        const a = await call_reply(s, 'PATCH', `/v3/contacts/${id}`, 'write', body);
+        // Custom fields go by name, read before the contact is found or imported, so a name the account
+        // lacks changes nothing at all.
+        const custom_fields = custom === undefined ? undefined : await resolve_custom_fields(s, custom);
+        // The contact's fields only find the contact, or import it as an add would; the change is the
+        // --fields alone, so a contact Reply holds keeps the address it was found by.
+        const ensured = await find_or_import(s, contact);
+        ids.contact_id = ensured.id;
+        // Absent fields stay as they are; a null clears one.
+        const body = custom_fields === undefined ? patch : {...patch, customFields: custom_fields};
+        const a = await call_reply(s, 'PATCH', `/v3/contacts/${ensured.id}`, 'write', body);
         if (a.status === 404)
         {
-            throw contact_not_found(id, a);
+            throw contact_not_found(ensured.id, a);
         }
         if (a.status !== 200 && a.status !== 204)
         {
             throw refusal(a, 'write');
         }
-        print_result({status: 'updated', contact_id: id}, g);
+        print_result({status: 'updated', contact_id: ensured.id, contact_created: ensured.created}, g);
     } catch (e) {
-        throw with_ids(e, {contact_id: id});
+        throw with_ids(e, ids);
     }
 };
 
@@ -210,3 +238,4 @@ const handle_contact_delete = async(id_arg: string, ctx: Cli_context, g: Op_glob
 };
 
 export {handle_contact_find, handle_contact_get, handle_contact_update, handle_contact_delete};
+export type {Update_opts};

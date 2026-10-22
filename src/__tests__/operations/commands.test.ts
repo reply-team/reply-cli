@@ -43,7 +43,7 @@ describe('operations/commands', ()=>{
     });
 
     // The sends and contact update find or import the person as the add commands do.
-    const SENDS_AND_UPDATE = ['send-email', 'linkedin-connect', 'linkedin-message', 'linkedin-inmail', 'linkedin-voice'];
+    const SENDS_AND_UPDATE = ['update', 'send-email', 'linkedin-connect', 'linkedin-message', 'linkedin-inmail', 'linkedin-voice'];
     const CONTACT_FLAGS = ['--contact-id', '--email', '--first-name', '--last-name', '--company', '--title', '--contact'];
 
     it('the commands about a person take the contact flags', ()=>{
@@ -95,6 +95,10 @@ describe('operations/commands', ()=>{
             const text = help_of(sub(contact_command, name)).replace(/\s+/g, ' ');
             expect(text, text).toContain('looked up by its LinkedIn URL');
         }
+        const update = help_of(sub(contact_command, 'update')).replace(/\s+/g, ' ');
+        expect(update, update).toContain('looked up as the add commands look one up');
+        expect(update, update).toContain('only what --fields names is changed');
+        expect(update, update).toContain('contact update 456 is contact update --contact-id 456');
     });
 
     it('carries each command\'s own flags', ()=>{
@@ -127,7 +131,7 @@ describe('operations/commands', ()=>{
 
     it('contact update takes its values only through --fields -, and contact delete says what a re-run answers', ()=>{
         const update = sub(contact_command, 'update');
-        expect(flags(update)).toEqual(['--fields']);
+        expect(flags(update)).toEqual([...CONTACT_FLAGS, '--fields']);
         const text = help_of(update);
         expect(text, text).toContain('--fields -');
         expect(text, text).toContain('contact.field_not_found');
