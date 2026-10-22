@@ -42,17 +42,21 @@ describe('operations/commands', ()=>{
         expect(text, text).not.toContain('outcome.unknown');
     });
 
+    // The sends and contact update find or import the person as the add commands do.
+    const SENDS_AND_UPDATE = ['send-email', 'linkedin-connect', 'linkedin-message', 'linkedin-inmail', 'linkedin-voice'];
+    const CONTACT_FLAGS = ['--contact-id', '--email', '--first-name', '--last-name', '--company', '--title', '--contact'];
+
     it('the commands about a person take the contact flags', ()=>{
         for (const c of [sub(sequence_command, 'add-contact'), sub(sequence_command, 'remove-contact'),
-            sub(contact_list_command, 'add-contact'), sub(contact_command, 'opt-out')])
+            sub(contact_list_command, 'add-contact'), sub(contact_command, 'opt-out'), ...SENDS_AND_UPDATE.map(n=>sub(contact_command, n))])
         {
-            expect(flags(c)).toEqual(expect.arrayContaining(['--contact-id', '--email', '--contact']));
+            expect(flags(c), c.name()).toEqual(expect.arrayContaining(CONTACT_FLAGS));
         }
     });
 
     it('the commands about a person say their JSON takes linkedin_url, and a lookup is never left incomplete', ()=>{
         for (const c of [sub(sequence_command, 'add-contact'), sub(sequence_command, 'remove-contact'),
-            sub(contact_list_command, 'add-contact'), sub(contact_command, 'opt-out')])
+            sub(contact_list_command, 'add-contact'), sub(contact_command, 'opt-out'), ...SENDS_AND_UPDATE.map(n=>sub(contact_command, n))])
         {
             const text = help_of(c);
             expect(text, text).toContain('linkedin_url');
@@ -61,10 +65,35 @@ describe('operations/commands', ()=>{
             // Each of them looks a contact up by address, and two contacts under one address is refused.
             expect(text, text).toContain('  contact.not_unique\n');
         }
-        for (const c of [sub(sequence_command, 'add-contact'), sub(contact_list_command, 'add-contact'), sub(contact_command, 'opt-out')])
+        for (const c of [sub(sequence_command, 'add-contact'), sub(contact_list_command, 'add-contact'), sub(contact_command, 'opt-out'),
+            ...SENDS_AND_UPDATE.map(n=>sub(contact_command, n))])
         {
             const text = help_of(c);
-            expect(text, text).toContain('contact.invalid_linkedin_url');
+            for (const code of ['contact.invalid_email', 'contact.invalid_linkedin_url', 'account.contact_limit_reached'])
+            {
+                expect(text, `${c.name()} ${code}`).toContain(`  ${code}\n`);
+            }
+        }
+    });
+
+    it('the sends and contact update say a contact is imported only when Reply holds nobody, and how stdin holds both inputs', ()=>{
+        for (const name of SENDS_AND_UPDATE)
+        {
+            const text = help_of(sub(contact_command, name));
+            const flat = text.replace(/\s+/g, ' ');
+            const input = name === 'update' ? 'fields' : 'message';
+            expect(flat, text).toContain('imported only when Reply holds nobody under');
+            expect(flat, text).toContain('only then does Reply need a first name');
+            expect(flat, text).toContain('contact_created says whether this command created');
+            expect(flat, text).toContain(`With --contact - and --${input} - both, stdin holds one object: {"contact": {…}, "${input}": {…}}`);
+            expect(text, text).toContain(`--contact - `);
+        }
+        const email = help_of(sub(contact_command, 'send-email')).replace(/\s+/g, ' ');
+        expect(email, email).toContain('looked up by its email');
+        for (const name of ['linkedin-connect', 'linkedin-message', 'linkedin-inmail', 'linkedin-voice'])
+        {
+            const text = help_of(sub(contact_command, name)).replace(/\s+/g, ' ');
+            expect(text, text).toContain('looked up by its LinkedIn URL');
         }
     });
 
@@ -119,11 +148,12 @@ describe('operations/commands', ()=>{
 
     // Each direct send: the flag naming the account it goes from, the codes its endpoint publishes, and what its help
     // says sent_at is.
-    const LINKEDIN = ['contact.not_found', 'contact.no_linkedin_profile', 'linkedin.account_not_found', 'linkedin.feature_disabled',
+    const IMPORT = ['contact.not_unique', 'contact.invalid_email', 'contact.invalid_linkedin_url', 'account.contact_limit_reached'];
+    const LINKEDIN = ['contact.not_found', ...IMPORT, 'contact.no_linkedin_profile', 'linkedin.account_not_found', 'linkedin.feature_disabled',
         'linkedin.account_inactive', 'linkedin.invalid_cookie'];
     const SENT_AT_AS_GIVEN = 'sentAtUtc as Reply gives them, each null when it gives none; the CLI adds no time of its own';
     const DIRECT_SENDS: [string, string, string[], string][] = [
-        ['send-email', '--email-account-id', ['contact.not_found', 'email_account.not_found', 'contact.blacklisted'],
+        ['send-email', '--email-account-id', ['contact.not_found', ...IMPORT, 'email_account.not_found', 'contact.blacklisted'],
             'sent_at is always null; the CLI adds none of its own'],
         ['linkedin-connect', '--linkedin-account-id', [...LINKEDIN, 'linkedin.not_connected', 'linkedin.limit_reached',
             'linkedin.message_too_long', 'linkedin.missing_variables'], SENT_AT_AS_GIVEN],
@@ -143,11 +173,12 @@ describe('operations/commands', ()=>{
         expect(text, text).not.toContain('connected or not');
     });
 
-    it('each direct send takes ids by flag and its text only through --message -, and says a repeat may send it twice', ()=>{
+    it('each direct send takes the contact flags, the account by flag and its text only through --message -, and says a '
+        + 'repeat may send it twice', ()=>{
         for (const [name, account_flag, codes, sent_at] of DIRECT_SENDS)
         {
             const c = sub(contact_command, name);
-            expect(flags(c), name).toEqual(['--contact-id', account_flag, '--message']);
+            expect(flags(c), name).toEqual([...CONTACT_FLAGS, account_flag, '--message']);
             const text = help_of(c);
             const flat = text.replace(/\s+/g, ' ');
             expect(text, text).toContain('--message -');

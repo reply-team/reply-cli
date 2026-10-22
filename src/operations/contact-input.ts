@@ -29,14 +29,16 @@ const add_contact_options = (cmd: Command): Command=>cmd
     .option('--title <title>', 'Job title (with --email)')
     .option('--contact <json>', 'The contact as JSON {email, linkedin_url, first_name, last_name, company, title}: inline, @file, or - for stdin');
 
-const CONTACT_HELP = `
+const CONTACT_FORMS = `
 A contact is given exactly one way:
   --contact <json>|@file|-           {email, linkedin_url, first_name, last_name, company, title},
                                      with an email, a LinkedIn URL or both; '-' reads stdin, which
                                      keeps personal data out of the argument list
   --email <address> [--first-name <name>] [--last-name <name>] [--company <name>] [--title <title>]
   --contact-id <id>                  a contact Reply already holds
-Reply is asked about a contact by its email; one with only a LinkedIn URL, by that. A LinkedIn URL is
+`;
+
+const CONTACT_HELP = `${CONTACT_FORMS}Reply is asked about a contact by its email; one with only a LinkedIn URL, by that. A LinkedIn URL is
 matched by its lowercased slug, and the CLI stores it by that slug when it imports the contact.
 
 `;
@@ -150,5 +152,5 @@ const read_contact_input = (f: Contact_flags, read_stdin?: () => string): Contac
     })};
 };
 
-export {read_contact_input, add_contact_options, person_of, CONTACT_HELP, linkedin_key, is_email};
+export {read_contact_input, add_contact_options, person_of, CONTACT_FORMS, CONTACT_HELP, linkedin_key, is_email};
 export type {Person, Contact_ref, Contact_flags};
