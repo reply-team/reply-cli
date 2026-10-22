@@ -195,11 +195,11 @@ prints JSON (indented; compact with `--json`) and says what happened in a stable
 | `reply contact-list add-contact <list-id> <contact> [--refuse-opted-out]` | → `added` |
 | `reply contact find --contact -` | the id of the contact under an email or a LinkedIn URL, or null; never creates one |
 | `reply contact get <id>` | the contact as Reply holds it |
-| `reply contact update <id> --fields -` | change some fields and custom fields; null clears one → `updated` |
+| `reply contact update (<id> \| <contact>) --fields -` | change some fields and custom fields; null clears one → `updated` |
 | `reply contact delete <id>` | → `deleted` |
 | `reply contact opt-out <contact>` | → `opted_out` |
-| `reply contact send-email --contact-id N --email-account-id N --message -` | one email now, outside any sequence → `sent` |
-| `reply contact linkedin-connect --contact-id N --linkedin-account-id N [--message -]` | a LinkedIn invitation, with or without a note → `sent` / `already_connected` |
+| `reply contact send-email <contact> --email-account-id N --message -` | one email now, outside any sequence → `sent` |
+| `reply contact linkedin-connect <contact> --linkedin-account-id N [--message -]` | a LinkedIn invitation, with or without a note → `sent` / `already_connected` |
 | `reply contact linkedin-message …` · `linkedin-inmail …` · `linkedin-voice …` | a LinkedIn message, an InMail, or an AI voice message spoken from a script → `sent` |
 | `reply inbox list (--contact-id \| --sequence-id) [--source] [--channel] [--category-id] [--since]` | one page of threads |
 | `reply inbox get <thread-id>` | a thread with its subject, and one page of its messages |
@@ -221,9 +221,13 @@ echo '{"linkedin_url":"https://www.linkedin.com/in/ann-example","first_name":"An
 
 The two `add-contact` commands always import a contact given by email, and Reply refuses an import
 without a first name, even for a contact it already holds; a contact given only by LinkedIn URL is
-looked up first and imported only when Reply holds nobody under it. `contact opt-out` imports only
-someone Reply doesn't hold yet; `sequence remove-contact` never imports. A contact is looked up, and
-an import matched, by its email; one with only a LinkedIn URL, by that. The lookup is Reply's exact
+looked up first and imported only when Reply holds nobody under it. `contact opt-out`, `contact
+update` and the direct sends look first and import only someone Reply doesn't hold yet, so only then
+is a first name needed; `sequence remove-contact` never imports. Each of them answers the
+`contact_id` it acted on and `contact_created`, so a caller can keep the id. A send looks the person
+up by the address it reaches them at: the email for `contact send-email`, the LinkedIn URL for the
+LinkedIn sends. Otherwise a contact is looked up by its email, and one with only a LinkedIn URL by
+that; an import is matched by the email when there is one. The lookup is Reply's exact
 one: an email matches ignoring case, and a LinkedIn URL is matched by its lowercased slug — on
 linkedin.com the path's case does not count, nor the scheme's or host's, a default port, one trailing
 slash or a fragment, while `www` and the query do. Reply is asked for a LinkedIn URL in that form
@@ -242,7 +246,18 @@ echo '{"name":"Q4 outreach"}' | reply sequence list --name -
 ```
 
 `contact update` refuses a custom field the account has none of, `contact.field_not_found`, before
-it changes anything.
+it changes or imports anything. Given the contact by its flags rather than its id, it changes only
+what `--fields` names: the contact's own fields find the contact, or import it, and never change one
+Reply already holds.
+
+When `--contact -` and the command's own input (`--message -` or `--fields -`) both read stdin, it
+holds one object with each under its flag's name, so neither the person nor the text ever sits in
+the argument list:
+
+```sh
+echo '{"contact":{"email":"ann@example.com","first_name":"Ann"},"fields":{"title":"CTO"}}' | reply contact update --contact - --fields -
+echo '{"contact":{"linkedin_url":"https://www.linkedin.com/in/ann-example","first_name":"Ann"},"message":{"body":"Thanks for connecting, Ann."}}' | reply contact linkedin-message --contact - --linkedin-account-id 34 --message -
+```
 
 `inbox reply` takes its message, `{body, reply_to_message_id}`, from stdin only, and refuses it on
 the argument list. The reply goes to the thread's contact from the account that owns the thread;
@@ -276,7 +291,8 @@ variables, and refuses one it cannot fill with `linkedin.missing_variables`.
 
 `inbox reply`, `sequence create` and the five direct sends are the work commands that are not safe to
 re-run. On exit 3 (outcome unknown) a reply or a send may already have gone, and running it again may
-send it twice; for `inbox reply`, read the thread with `reply inbox get` before trying again. For
+send it twice; a send whose contact's import lost its answer was never made, and its hint says so.
+For `inbox reply`, read the thread with `reply inbox get` before trying again. For
 `sequence create`, Reply allows two sequences of one name, so after exit 3 look the name up with
 `sequence list --name -` first. Every other work command can simply be run again; a `contact delete`
 repeated after its first one took effect answers `contact.not_found`.
