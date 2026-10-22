@@ -109,6 +109,49 @@ describe('the program', ()=>{
         }
     });
 
+    // Stdin as the program reads it: descriptor 0 answers the text piped in, every other read goes to the disk.
+    const pipe_stdin = (text: string): void=>{
+        const real = fs.readFileSync;
+        vi.spyOn(fs, 'readFileSync').mockImplementation(((file: fs.PathOrFileDescriptor, ...rest: unknown[])=>
+            (file === 0 ? text : (real as (...a: unknown[]) => unknown)(file, ...rest))) as typeof fs.readFileSync);
+    };
+    const requests = ()=>(mock_fetch.mock.calls as [string, RequestInit][]).map(([url, init])=>
+        ({method: String(init.method), url, body: typeof init.body === 'string' ? JSON.parse(init.body) : undefined}));
+    const PERSONAL = /marta|example\.com|tuesday|cto/i;
+
+    it('a send to a person Reply does not hold takes the person and the text from stdin: the argument list carries '
+        + 'neither, and Reply gets both', async()=>{
+        pipe_stdin(JSON.stringify({contact: {email: 'marta@example.com', first_name: 'Marta'},
+            message: {subject: 'Hi Marta', body: 'Tuesday works'}}));
+        answer(json({items: [], hasMore: false}), json({items: [{id: 457, status: 'created'}]}),
+            json({code: 'contact.contactInBlackList'}, 400));
+        const args = ['--json', '-k', 'key-1', 'contact', 'send-email', '--contact', '-', '--email-account-id', '12', '--message', '-'];
+        const {code, err} = await run_program(args);
+        expect(args.join(' '), args.join(' ')).not.toMatch(PERSONAL);
+        expect(code).toBe(1);
+        expect(JSON.parse(err)).toMatchObject({error: {code: 'contact.blacklisted', ids: {contact_id: 457, email_account_id: 12}}});
+        expect(err, err).not.toMatch(PERSONAL);
+        expect(requests()).toEqual([
+            {method: 'GET', url: 'https://api.reply.io/v3/contacts?email=marta%40example.com&top=100&skip=0', body: undefined},
+            {method: 'POST', url: 'https://api.reply.io/v3/contacts/import', body: {items: [{email: 'marta@example.com', firstName: 'Marta'}]}},
+            {method: 'POST', url: 'https://api.reply.io/v3/contacts/457/send-direct-email',
+                body: {emailAccountId: 12, subject: 'Hi Marta', body: 'Tuesday works'}},
+        ]);
+    });
+
+    it('contact update of a person Reply holds takes the person and the fields from stdin, and changes only the fields', async()=>{
+        pipe_stdin(JSON.stringify({contact: {email: 'marta@example.com', linkedin_url: 'https://www.linkedin.com/in/marta-other'},
+            fields: {title: 'CTO'}}));
+        answer(json({items: [{id: 456, email: 'marta@example.com'}], hasMore: false}), json('', 503));
+        const args = ['--json', '-k', 'key-1', 'contact', 'update', '--contact', '-', '--fields', '-'];
+        const {code, err} = await run_program(args);
+        expect(args.join(' '), args.join(' ')).not.toMatch(PERSONAL);
+        expect(code).toBe(3);
+        expect(JSON.parse(err)).toMatchObject({error: {code: 'outcome.unknown', ids: {contact_id: 456}}});
+        expect(requests().map(r=>[r.method, r.body])).toEqual([['GET', undefined], ['PATCH', {title: 'CTO'}]]);
+        expect(requests()[1].url).toBe('https://api.reply.io/v3/contacts/456');
+    });
+
     it('account list is a work command of its own: a channel it does not know exits 2 before any request', async()=>{
         const {code, err} = await run_program(['--json', '-k', 'key-1', 'account', 'list', '--channel', 'sms']);
         expect(code).toBe(2);
