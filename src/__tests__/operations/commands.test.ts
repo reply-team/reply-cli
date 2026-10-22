@@ -83,7 +83,8 @@ describe('operations/commands', ()=>{
             const flat = text.replace(/\s+/g, ' ');
             const input = name === 'update' ? 'fields' : 'message';
             expect(flat, text).toContain('imported only when Reply holds nobody under');
-            expect(flat, text).toContain('contact_created says whether this command created');
+            expect(flat, text).toContain(name === 'update' ? 'contact_created says whether this command created'
+                : 'contact_created is kept for consistency with the add commands: on a send it is always true when something was sent');
             expect(flat, text).toContain(`With --contact - and --${input} - both, stdin holds one object: {"contact": {…}, "${input}": {…}}`);
             expect(text, text).toContain(`--contact - `);
         }
@@ -207,7 +208,9 @@ describe('operations/commands', ()=>{
             expect(text, text).not.toContain('re-running is safe');
             // A send given a person's fields sends only to a contact it creates, and names one Reply already holds.
             expect(flat, text).toContain('A send given a person\'s fields sends only to a contact it creates');
-            expect(flat, text).toContain('the lookup finds a contact, or the import matches one Reply already holds, nothing is sent');
+            expect(flat, text).toContain('a lookup finds a contact, or the import matches one Reply already holds, nothing is sent');
+            expect(flat, text).toContain(`then by its ${name === 'send-email' ? 'LinkedIn URL' : 'email'} when it was given one`);
+            expect(flat, text).toContain('imported only when Reply holds nobody under any address given');
             expect(flat, text).toContain('the answer is contact.already_held (exit 1) with that contact\'s id in ids.contact_id');
             expect(flat, text).toContain('send to it with --contact-id');
             expect(flat.includes('--email alone is refused (usage.contact)'), text).toBe(name !== 'send-email');

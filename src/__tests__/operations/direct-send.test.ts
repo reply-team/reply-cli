@@ -406,30 +406,30 @@ describe('a direct send to a person given by their fields', ()=>{
         }
     });
 
-    it('a send looks the person up by the address it reaches them at, whatever else is given, and the import matches by '
+    it('a send looks the person up by every address it was given, the one it reaches them at first, and the import matches by '
         + 'the email as an add\'s does', async()=>{
         const both = {...MARTA, linkedin_url: PROFILE};
-        answer(nobody(), imported(457), activity('message'));
+        answer(nobody(), nobody(), imported(457), activity('message'));
         expect(await run_by_fields('linkedin-message', {contact: both, message: {body: TEXT}}, by_fields(LINKEDIN_OPTS)))
             .toMatchObject({contact_id: 457, contact_created: true});
-        expect(lines()).toEqual([PROFILE_LOOKUP, IMPORT, 'POST https://api/v3/contacts/457/send-direct-linkedin-message']);
-        expect(sent()[1].body).toStrictEqual({items: [{email: 'marta@example.com', linkedInUrl: PROFILE, firstName: 'Marta', lastName: 'Example'}]});
+        expect(lines()).toEqual([PROFILE_LOOKUP, EMAIL_LOOKUP, IMPORT, 'POST https://api/v3/contacts/457/send-direct-linkedin-message']);
+        expect(sent()[2].body).toStrictEqual({items: [{email: 'marta@example.com', linkedInUrl: PROFILE, firstName: 'Marta', lastName: 'Example'}]});
         mock_fetch.mockReset();
-        answer(nobody(), imported(457), json({status: 'sent'}));
+        answer(nobody(), nobody(), imported(457), json({status: 'sent'}));
         await run_by_fields('send-email', {contact: both, message: {subject: SUBJECT, body: BODY}}, by_fields(EMAIL_OPTS));
-        expect(lines()).toEqual([EMAIL_LOOKUP, IMPORT, 'POST https://api/v3/contacts/457/send-direct-email']);
+        expect(lines()).toEqual([EMAIL_LOOKUP, PROFILE_LOOKUP, IMPORT, 'POST https://api/v3/contacts/457/send-direct-email']);
     });
 
     // Reply does not refuse a direct send to a contact it holds as opted out, so a send given a person's fields acts only
     // on a contact it created: one Reply already holds, found by the lookup or matched by the import, is refused before
     // anything is sent and named, for the caller to read before sending to it by its id.
     describe('a send given a person\'s fields acts only on a contact it created', ()=>{
-        type Case = {name: Direct_send_name; message: unknown; opts: Direct_send_opts; lookup: string; path: string; holder: object; done: () => Response};
+        type Case = {name: Direct_send_name; message: unknown; opts: Direct_send_opts; lookup: string; other: string; path: string; holder: object; other_holder: object; done: () => Response};
         const FIVE: Case[] = [
-            {name: 'send-email', message: {subject: SUBJECT, body: BODY}, opts: EMAIL_OPTS, lookup: EMAIL_LOOKUP, path: 'send-direct-email',
-                holder: {email: 'Marta@Example.com'}, done: ()=>json({status: 'sent'})},
-            ...LINKEDIN_SENDS.map(([name, message, path, action]): Case=>({name, message, opts: LINKEDIN_OPTS, lookup: PROFILE_LOOKUP, path,
-                holder: {linkedInUrl: `${PROFILE}/`}, done: ()=>activity(action)})),
+            {name: 'send-email', message: {subject: SUBJECT, body: BODY}, opts: EMAIL_OPTS, lookup: EMAIL_LOOKUP, other: PROFILE_LOOKUP,
+                path: 'send-direct-email', holder: {email: 'Marta@Example.com'}, other_holder: {linkedInUrl: `${PROFILE}/`}, done: ()=>json({status: 'sent'})},
+            ...LINKEDIN_SENDS.map(([name, message, path, action]): Case=>({name, message, opts: LINKEDIN_OPTS, lookup: PROFILE_LOOKUP, other: EMAIL_LOOKUP,
+                path, holder: {linkedInUrl: `${PROFILE}/`}, other_holder: {email: 'Marta@Example.com'}, done: ()=>activity(action)})),
         ];
         const PERSON = {...MARTA, linkedin_url: PROFILE};
         const refused = (e: unknown, label: string)=>{
@@ -459,9 +459,9 @@ describe('a direct send to a person given by their fields', ()=>{
                 for (const status of ['updated', 'skipped'])
                 {
                     mock_fetch.mockReset();
-                    answer(nobody(), imported(456, status), c.done());
+                    answer(nobody(), nobody(), imported(456, status), c.done());
                     refused(await fail_by_fields(c.name, {contact: PERSON, message: c.message}, by_fields(c.opts)), `${c.name} ${status}`);
-                    expect(lines(), `${c.name} ${status}`).toEqual([c.lookup, IMPORT]);
+                    expect(lines(), `${c.name} ${status}`).toEqual([c.lookup, c.other, IMPORT]);
                 }
             }
         });
@@ -470,10 +470,32 @@ describe('a direct send to a person given by their fields', ()=>{
             for (const c of FIVE)
             {
                 mock_fetch.mockReset();
-                answer(nobody(), imported(457), c.done());
+                answer(nobody(), nobody(), imported(457), c.done());
                 expect(await run_by_fields(c.name, {contact: PERSON, message: c.message}, by_fields(c.opts)), c.name)
                     .toMatchObject({status: 'sent', contact_id: 457, contact_created: true});
-                expect(lines(), c.name).toEqual([c.lookup, IMPORT, `POST https://api/v3/contacts/457/${c.path}`]);
+                expect(lines(), c.name).toEqual([c.lookup, c.other, IMPORT, `POST https://api/v3/contacts/457/${c.path}`]);
+            }
+        });
+
+        it('refuses a person held only under the other address it was given: the lookup by the address it reaches them at '
+            + 'finds nobody, the one by the other finds the contact, and nothing is imported or sent', async()=>{
+            for (const c of FIVE)
+            {
+                mock_fetch.mockReset();
+                answer(nobody(), held({id: 456, ...c.other_holder}), c.done());
+                refused(await fail_by_fields(c.name, {contact: PERSON, message: c.message}, by_fields(c.opts)), c.name);
+                expect(lines(), c.name).toEqual([c.lookup, c.other]);
+            }
+        });
+
+        it('names the first contact found when two are held, one under each address: the address it reaches them at is asked '
+            + 'first, and the second is never asked', async()=>{
+            for (const c of FIVE)
+            {
+                mock_fetch.mockReset();
+                answer(held({id: 456, ...c.holder}), held({id: 789, ...c.other_holder}), c.done());
+                refused(await fail_by_fields(c.name, {contact: PERSON, message: c.message}, by_fields(c.opts)), c.name);
+                expect(lines(), c.name).toEqual([c.lookup]);
             }
         });
     });
@@ -498,12 +520,12 @@ describe('a direct send to a person given by their fields', ()=>{
         const two = json({items: [{id: 1, email: 'marta@example.com'}, {id: 2, email: 'marta@example.com'}], hasMore: false});
         const cases: [Response[], string, number][] = [
             [[two], 'contact.not_unique', 1],
-            [[nobody(), json({status: 400, errors: [{pointer: '/items/0/email', detail: '\'marta@example\' is not valid'}]}, 400)],
+            [[nobody(), nobody(), json({status: 400, errors: [{pointer: '/items/0/email', detail: '\'marta@example\' is not valid'}]}, 400)],
                 'contact.invalid_email', 1],
-            [[nobody(), json({status: 400, errors: [{pointer: '/items/0/linkedInUrl', detail: 'not valid'}]}, 400)],
+            [[nobody(), nobody(), json({status: 400, errors: [{pointer: '/items/0/linkedInUrl', detail: 'not valid'}]}, 400)],
                 'contact.invalid_linkedin_url', 1],
-            [[nobody(), json({code: 'contact.limitExceeded', detail: 'Contact limit reached.'}, 400)], 'account.contact_limit_reached', 1],
-            [[nobody(), json({items: [{id: null, status: 'failed', error: 'Invalid data'}]})], 'reply.refused', 1],
+            [[nobody(), nobody(), json({code: 'contact.limitExceeded', detail: 'Contact limit reached.'}, 400)], 'account.contact_limit_reached', 1],
+            [[nobody(), nobody(), json({items: [{id: null, status: 'failed', error: 'Invalid data'}]})], 'reply.refused', 1],
         ];
         for (const [answers, code, exit_code] of cases)
         {

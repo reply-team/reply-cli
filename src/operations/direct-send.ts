@@ -4,7 +4,7 @@ import {parse_retry_after} from '../utils/client';
 import {call_reply, expect_object, refusal, reply_code_of, detail_of, open_session, type Answer} from './call';
 import {parse_id, LARGEST_SAFE_ID, type Op_globals} from './options';
 import {read_contact_input, type Contact_flags, type Contact_ref} from './contact-input';
-import {contact_not_found, find_or_import, type Channel, type Ensured} from './contacts';
+import {contact_not_found, find_contact_by_address, find_or_import, import_contact, type Channel, type Ensured} from './contacts';
 import {read_stdin_object, stdin_inputs} from './stdin-input';
 import {print_result, with_ids} from './result';
 import type {Cli_context} from '../context';
@@ -231,11 +231,36 @@ const handle_direct_send = async(
     try {
         // The contact first, found or imported as an add would; a person given by their fields is sent to only when
         // this import created them.
-        const ensured = await find_or_import(s, contact, by);
-        ids.contact_id = ensured.id;
-        if (contact.kind === 'person' && !ensured.created)
+        let ensured: Ensured;
+        if (contact.kind === 'person')
         {
-            throw already_held(ensured.id);
+            // A person is looked up by every address given, the one the send reaches them at first: a hit under any of
+            // them is a contact Reply holds, and the first one found is the one named.
+            const other: Channel = by === 'email' ? 'linkedin' : 'email';
+            for (const channel of [by, other])
+            {
+                if ((channel === 'email' ? contact.person.email : contact.person.linkedin_url) === undefined)
+                {
+                    continue;
+                }
+                const held = await find_contact_by_address(s, contact.person, channel);
+                if (held !== null)
+                {
+                    ids.contact_id = held;
+                    throw already_held(held);
+                }
+            }
+            ensured = await import_contact(s, contact.person);
+            ids.contact_id = ensured.id;
+            if (!ensured.created)
+            {
+                throw already_held(ensured.id);
+            }
+        }
+        else
+        {
+            ensured = await find_or_import(s, contact, by);
+            ids.contact_id = ensured.id;
         }
         sending = true;
         const a = await call_reply(s, 'POST', `/v3/contacts/${ensured.id}/${send.path}`, 'write', send.body(account_id, text));
