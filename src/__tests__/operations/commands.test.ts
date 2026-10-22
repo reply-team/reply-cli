@@ -84,7 +84,7 @@ describe('operations/commands', ()=>{
             const input = name === 'update' ? 'fields' : 'message';
             expect(flat, text).toContain('imported only when Reply holds nobody under');
             expect(flat, text).toContain(name === 'update' ? 'contact_created says whether this command created'
-                : 'contact_created is kept for consistency with the add commands: on a send it is always true when something was sent');
+                : 'contact_created is kept for consistency with the add commands: given a person\'s fields it is always true, and with --contact-id it is always false; in both cases a successful answer says the send was made');
             expect(flat, text).toContain(`With --contact - and --${input} - both, stdin holds one object: {"contact": {…}, "${input}": {…}}`);
             expect(text, text).toContain(`--contact - `);
         }

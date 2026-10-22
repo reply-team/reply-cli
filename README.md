@@ -227,8 +227,9 @@ is a first name needed, and a direct send sends only to a contact it created (be
 remove-contact` never imports. Each of these except `sequence remove-contact` answers the
 `contact_id` it acted on and `contact_created`, so a caller can keep the id. A send looks the person
 up by every address it was given, the one it reaches them at first (the email for `contact send-email`,
-the LinkedIn URL for the LinkedIn sends), then the other when there is one. Otherwise a contact is looked up by its email, and one with only a LinkedIn URL by
-that; an import is matched by the email when there is one.
+the LinkedIn URL for the LinkedIn sends), then the other when there is one. Otherwise a contact is
+looked up by its email, and one with only a LinkedIn URL by that; an import is matched by the email
+when there is one.
 
 A direct send given a person's fields sends only to a contact it creates. When a lookup by any address
 it was given finds a contact, or its import matches one Reply already holds (by the email, say, or a teammate's), nothing
@@ -237,7 +238,8 @@ Read that contact first with `reply contact get`, its opt-out included, and send
 `--contact-id` if it is the one to reach. Reply does not refuse a direct send to a contact it holds
 as opted out, so a send never reaches a contact Reply already held without that read. A LinkedIn
 send needs a `linkedin_url` in `--contact` (or `--contact-id`): `--email` alone is refused. On a send,
-`contact_created` is kept for consistency with the add commands and is always `true` when something was sent.
+`contact_created` is kept for consistency with the add commands: given a person's fields it is always `true`,
+and with `--contact-id` it is always `false`; in both cases a successful answer says the send was made.
 
 The lookup is Reply's exact
 one: an email matches ignoring case, and a LinkedIn URL is matched by its lowercased slug — on

@@ -196,15 +196,15 @@ const ensure_contact = async(s: Op_session, ref: Contact_ref): Promise<Ensured>=
     return import_contact(s, ref.person);
 };
 
-// The contact a command acts on: the id given; else the one Reply holds under the address the command
-// reaches the person by (by default the one a lookup uses); else the person imported as an add imports
-// them. Looking first means that a person Reply already holds needs no first name.
-const find_or_import = async(s: Op_session, ref: Contact_ref, by?: Channel): Promise<Ensured>=>{
+// The contact a command acts on: the id given; else the one Reply holds under the address a lookup uses;
+// else the person imported as an add imports them. Looking first means that a person Reply already holds needs
+// no first name.
+const find_or_import = async(s: Op_session, ref: Contact_ref): Promise<Ensured>=>{
     if (ref.kind === 'id')
     {
         return {id: ref.id, created: false};
     }
-    const found = await find_contact_by_address(s, ref.person, by);
+    const found = await find_contact_by_address(s, ref.person);
     return found === null ? import_contact(s, ref.person) : {id: found, created: false};
 };
 

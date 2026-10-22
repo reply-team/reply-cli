@@ -280,12 +280,13 @@ const SENT_TO = (by: 'email' | 'linkedin', what: string): string=>CONTACT_FORMS
     + 'A send given a person\'s fields sends only to a contact it creates. The contact is looked up by\n'
     + `${by === 'email' ? 'its email' : 'its LinkedIn URL'}, where the ${what} goes, then by its ${by === 'email' ? 'LinkedIn URL' : 'email'} when it was given one, and imported only when\n`
     + 'Reply holds nobody under any address given, as the add commands import one (matched by its email when it has\n'
-    + 'one), so Reply needs a first name. When a lookup finds a\n'
-    + 'contact, or the import matches one Reply already holds, nothing is sent: the answer is contact.already_held (exit 1)\n'
+    + 'one), so Reply needs a first name. When a lookup finds a contact,\n'
+    + 'or the import matches one Reply already holds, nothing is sent: the answer is contact.already_held (exit 1)\n'
     + 'with that contact\'s id in ids.contact_id. Read that contact first (contact get shows it, its opt-out included),\n'
     + 'and send to it with --contact-id if it is the one to reach. A LinkedIn URL is matched by its lowercased slug, and\n'
     + `the CLI stores it by that slug when it imports the contact. contact_id is the contact the ${what} went to, and\n`
-    + 'contact_created is kept for consistency with the add commands: on a send it is always true when something was sent.\n'
+    + 'contact_created is kept for consistency with the add commands: given a person\'s fields it is always true, and with\n'
+    + '--contact-id it is always false; in both cases a successful answer says the send was made.\n'
     + (by === 'email' ? '' : LINKEDIN_URL_NEEDED) + STDIN_PAIR('message');
 
 // One send's example with the person and the text both on stdin.

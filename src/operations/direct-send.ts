@@ -4,7 +4,7 @@ import {parse_retry_after} from '../utils/client';
 import {call_reply, expect_object, refusal, reply_code_of, detail_of, open_session, type Answer} from './call';
 import {parse_id, LARGEST_SAFE_ID, type Op_globals} from './options';
 import {read_contact_input, type Contact_flags, type Contact_ref} from './contact-input';
-import {contact_not_found, find_contact_by_address, find_or_import, import_contact, type Channel, type Ensured} from './contacts';
+import {contact_not_found, find_contact_by_address, import_contact, type Channel, type Ensured} from './contacts';
 import {read_stdin_object, stdin_inputs} from './stdin-input';
 import {print_result, with_ids} from './result';
 import type {Cli_context} from '../context';
@@ -259,7 +259,7 @@ const handle_direct_send = async(
         }
         else
         {
-            ensured = await find_or_import(s, contact, by);
+            ensured = {id: contact.id, created: false};
             ids.contact_id = ensured.id;
         }
         sending = true;
