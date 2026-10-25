@@ -208,6 +208,7 @@ prints JSON (indented; compact with `--json`) and says what happened in a stable
 | `reply inbox categorize <thread-id> (--category-id N \| --clear)` | → `categorized` / `cleared` |
 | `reply inbox mark-read <thread-id>` · `reply inbox mark-unread <thread-id>` | → `read` / `unread` |
 | `reply account list [--channel email\|linkedin]` | the email and LinkedIn accounts a send can go from, whose each is, and the state of each |
+| `reply schedule list` | the sending schedules the account can use, each with its time zone and its windows by weekday |
 
 `<contact>` is exactly one of `--contact <json>|@file|-`, `--email <address>` (with `--first-name`,
 `--last-name`, `--company`, `--title`), or `--contact-id <id>`. The JSON takes the same fields
@@ -302,6 +303,22 @@ answers no time, so its `sent_at` is null, and the CLI never puts its own clock 
 lengths Reply publishes (a LinkedIn message's 8000 characters, an InMail's 200 and 1900, a script's
 1000) are refused before anything is sent. Reply reads `{{…}}` in a LinkedIn text as its template
 variables, and refuses one it cannot fill with `linkedin.missing_variables`.
+
+`reply schedule list` gives every sending schedule the account can use, in one answer and in the
+order Reply gives them: its `time_zone_id` as Reply holds it, a Windows time zone identifier such as
+`Eastern Standard Time`, whether it reads its windows in each recipient's own time zone, whether it
+skips holidays, whether it is the default, and its windows by weekday, each day's `week_day` in lower
+case and each time of day as `HH:MM`. `follow_up_timings` are the windows of the later steps, used
+when `use_follow_up_schedule` is true, and `reply_status` is Reply's own word for how the schedule is
+used:
+
+```sh
+reply schedule list --json
+# {"items":[{"id":41,"name":"Business hours","time_zone_id":"Eastern Standard Time","use_recipient_time_zone":false,
+#   "exclude_holidays":true,"is_default":true,"main_timings":[{"week_day":"monday","active":true,
+#   "ranges":[{"from":"09:00","to":"17:00"}]}, …],"use_follow_up_schedule":false,"follow_up_timings":[],
+#   "reply_status":"isDefaultForCurrentUser"}]}
+```
 
 `inbox reply`, `sequence create` and the five direct sends are the work commands that are not safe to
 re-run. On exit 3 (outcome unknown) a reply or a send may already have gone, and running it again may
