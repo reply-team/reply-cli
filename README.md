@@ -307,10 +307,12 @@ variables, and refuses one it cannot fill with `linkedin.missing_variables`.
 `reply schedule list` gives every sending schedule the account can use, in one answer and in the
 order Reply gives them: its `time_zone_id` as Reply holds it, a Windows time zone identifier such as
 `Eastern Standard Time`, whether it reads its windows in each recipient's own time zone, whether it
-skips holidays, whether it is the default, and its windows by weekday, each day's `week_day` in lower
-case and each time of day as `HH:MM`. `follow_up_timings` are the windows of the later steps, used
-when `use_follow_up_schedule` is true, and `reply_status` is Reply's own word for how the schedule is
-used:
+skips holidays, whether it is your default, and its windows, one entry for each day Reply holds, in
+Reply's order, each day's `week_day` in lower case and each time of day as `HH:MM`.
+`follow_up_timings` are the windows of the later steps, used when `use_follow_up_schedule` is true,
+and `reply_status` is Reply's own word for how the schedule is used: `unknown`,
+`inCampaignTemplate`, `inCurrentUserSequence`, `inTeamMemberSequence`, `isDefaultForCurrentUser` or
+`isDefaultForTeamMember`, only the first of them that holds:
 
 ```sh
 reply schedule list --json

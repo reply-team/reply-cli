@@ -12,6 +12,11 @@ const schedule = (over: Record<string, unknown> = {})=>({
     status: 'isDefaultForCurrentUser', ...over,
 });
 
+// What Reply answers a key without the sequences read scope, the only thing that refuses the read: a problem with no code.
+const scope_refusal = ()=>json({
+    error: 'insufficient_scope', message: 'This endpoint requires scope \'…\'.', required_scope: '…',
+}, 403, {'Content-Type': 'application/problem+json'});
+
 const list = async()=>
     JSON.parse((await capture(()=>handle_schedule_list(ctx(), {json: true}))).out) as {items: Record<string, unknown>[]};
 const failure = ()=>handle_schedule_list(ctx(), {}).catch((x: unknown)=>x);
@@ -65,7 +70,7 @@ describe('schedule list', ()=>{
         expect((await list()).items.map(i=>[i.name, i.time_zone_id])).toEqual([[' Late shift ', 'UTC']]);
     });
 
-    it('follow-up windows Reply does not give as a list are null, and a day or range it gives unreadably is kept without a guess', async()=>{
+    it('follow-up windows Reply does not give as a list are null, a day or range it gives unreadably is kept without a guess, and an entry that is not a day at all is left out', async()=>{
         answer(json([schedule({
             followUpTimings: null,
             mainTimings: [
@@ -97,9 +102,7 @@ describe('schedule list', ()=>{
 
     it('a refused or unreadable read is the house refusal', async()=>{
         const cases: [Response, string][] = [
-            [json({code: 'schedule.forbidden', title: 'Forbidden'}, 403), 'access.feature_unavailable'],
-            // v3's own scope check answers a 403 with no code.
-            [json({title: 'Forbidden'}, 403), 'access.feature_unavailable'],
+            [scope_refusal(), 'access.feature_unavailable'],
             [json({title: 'Unauthorized'}, 401), 'access.denied'],
             [json('', 503), 'reply.unavailable'],
             [json({items: []}), 'reply.unavailable'],
@@ -111,7 +114,7 @@ describe('schedule list', ()=>{
             await expect(failure(), code).resolves.toMatchObject({code, exit_code: 1});
         }
         mock_fetch.mockReset();
-        answer(json({code: 'schedule.forbidden'}, 403));
-        await expect(failure()).resolves.toMatchObject({status: 403, reply_code: 'schedule.forbidden'});
+        answer(scope_refusal());
+        await expect(failure()).resolves.toMatchObject({status: 403, reply_code: undefined});
     });
 });

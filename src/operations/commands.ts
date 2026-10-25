@@ -506,11 +506,14 @@ schedule_command.command('list')
         'Result: {"items":[{"id","name","time_zone_id","use_recipient_time_zone","exclude_holidays","is_default","main_timings",\n'
             + '"use_follow_up_schedule","follow_up_timings","reply_status"}]}, in the order Reply gives them, all in one answer.\n'
             + 'time_zone_id is a Windows time zone identifier (e.g. "Eastern Standard Time"), as Reply holds it. main_timings has\n'
-            + 'one entry a weekday: {"week_day","active","ranges":[{"from","to"}]}, the weekday in lower case and each time of day\n'
-            + 'as HH:MM; a range may end at 24:00, the end of the day. follow_up_timings are the windows of the later steps, which\n'
-            + 'Reply uses when use_follow_up_schedule is true. reply_status is Reply\'s own word for how the schedule is used. A\n'
-            + 'name, time zone or time Reply gives none of is null. One the account\'s plan or role does not include fails the whole\n'
-            + 'command.\n'))
+            + 'one entry for each day Reply holds, in Reply\'s order: {"week_day","active","ranges":[{"from","to"}]}, the weekday\n'
+            + 'in lower case and each time of day as HH:MM; a range may end at 24:00, the end of the day. follow_up_timings are\n'
+            + 'the windows of the later steps, which Reply uses when use_follow_up_schedule is true. is_default says whether the\n'
+            + 'schedule is your default. reply_status is Reply\'s own word for how the schedule is used: unknown,\n'
+            + 'inCampaignTemplate, inCurrentUserSequence, inTeamMemberSequence, isDefaultForCurrentUser or isDefaultForTeamMember,\n'
+            + 'only the first of them that holds. A name, time zone, weekday, time or reply_status Reply gives none of is null;\n'
+            + 'follow_up_timings is null when Reply gives no list. A key without Reply\'s sequences read scope is\n'
+            + 'access.feature_unavailable.\n'))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
         await handle_schedule_list(ctx, g);

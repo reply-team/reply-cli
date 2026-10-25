@@ -179,10 +179,12 @@ describe('the program', ()=>{
             expect(code, extra.join(' ')).toBe(2);
         }
         expect(mock_fetch).not.toHaveBeenCalled();
-        answer(json({status: 403, code: 'schedule.forbidden', title: 'Forbidden'}, 403));
+        // What Reply answers a key without the sequences read scope: a problem with no code.
+        answer(json({error: 'insufficient_scope', message: 'This endpoint requires scope \'…\'.', required_scope: '…'}, 403,
+            {'Content-Type': 'application/problem+json'}));
         const {code, err} = await run_program(['--json', '-q', '-k', 'key-1', 'schedule', 'list']);
         expect(code).toBe(1);
-        expect(JSON.parse(err)).toMatchObject({error: {code: 'access.feature_unavailable', status: 403, reply_code: 'schedule.forbidden'}});
+        expect(JSON.parse(err)).toMatchObject({error: {code: 'access.feature_unavailable', status: 403}});
         expect((mock_fetch.mock.calls[0] as [string, RequestInit])[0]).toBe('https://api.reply.io/v3/schedules');
     });
 

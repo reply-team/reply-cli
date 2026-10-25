@@ -28,7 +28,7 @@ describe('operations/commands', ()=>{
         expect(schedule_command.commands.map(c=>c.name())).toEqual(['list']);
     });
 
-    it('schedule list takes no flag and no id, and says how a time zone, a weekday and a time are written', ()=>{
+    it('schedule list takes no flag and no id, and says how a time zone, a weekday, a time and a state are written', ()=>{
         const c = sub(schedule_command, 'list');
         expect(flags(c)).toEqual([]);
         expect(c.registeredArguments).toEqual([]);
@@ -38,7 +38,12 @@ describe('operations/commands', ()=>{
         expect(flat, text).toContain('the weekday in lower case and each time of day as HH:MM');
         expect(flat, text).toContain('follow_up_timings are the windows of the later steps');
         expect(flat, text).toContain('all in one answer');
-        expect(flat, text).toContain('One the account\'s plan or role does not include fails the whole command');
+        expect(flat, text).toContain('one entry for each day Reply holds, in Reply\'s order');
+        expect(flat, text).toContain('whether the schedule is your default');
+        expect(flat, text).toContain('unknown, inCampaignTemplate, inCurrentUserSequence, inTeamMemberSequence, '
+            + 'isDefaultForCurrentUser or isDefaultForTeamMember, only the first of them that holds');
+        expect(flat, text).toContain('A key without Reply\'s sequences read scope is access.feature_unavailable');
+        expect(flat, text).not.toContain('plan or role');
         expect(text, text).toContain('  access.feature_unavailable\n');
         expect(text, text).not.toContain('outcome.unknown');
     });
