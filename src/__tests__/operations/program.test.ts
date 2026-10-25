@@ -172,6 +172,22 @@ describe('the program', ()=>{
         expect(mock_fetch).not.toHaveBeenCalled();
     });
 
+    it('schedule list is a work command of its own: a flag or an id exits 2 before any request, a refusal exits 1', async()=>{
+        for (const extra of [['--name', 'Business hours'], ['41']])
+        {
+            const {code} = await run_program(['--json', '-q', '-k', 'key-1', 'schedule', 'list', ...extra]);
+            expect(code, extra.join(' ')).toBe(2);
+        }
+        expect(mock_fetch).not.toHaveBeenCalled();
+        // What Reply answers a key without the sequences read scope: a problem with no code.
+        answer(json({error: 'insufficient_scope', message: 'This endpoint requires scope \'…\'.', required_scope: '…'}, 403,
+            {'Content-Type': 'application/problem+json'}));
+        const {code, err} = await run_program(['--json', '-q', '-k', 'key-1', 'schedule', 'list']);
+        expect(code).toBe(1);
+        expect(JSON.parse(err)).toMatchObject({error: {code: 'access.feature_unavailable', status: 403}});
+        expect((mock_fetch.mock.calls[0] as [string, RequestInit])[0]).toBe('https://api.reply.io/v3/schedules');
+    });
+
     it('a usage error exits 2 before any request', async()=>{
         const {code, err} = await run_program(['--json', '-k', 'key-1', 'sequence', 'stats', '123', '--from', '2026-10-02', '--to', '2026-10-01']);
         expect(code).toBe(2);
