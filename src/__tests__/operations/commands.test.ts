@@ -1,6 +1,6 @@
 import {describe, it, expect} from 'vitest';
 import type {Command} from 'commander';
-import {sequence_command, contact_list_command, contact_command, inbox_command, account_command} from '../../operations/commands';
+import {sequence_command, contact_list_command, contact_command, inbox_command, account_command, schedule_command} from '../../operations/commands';
 
 const sub = (parent: Command, name: string): Command=>{
     const found = parent.commands.find(c=>c.name() === name);
@@ -25,6 +25,22 @@ describe('operations/commands', ()=>{
             'send-email', 'linkedin-connect', 'linkedin-message', 'linkedin-inmail', 'linkedin-voice']);
         expect(inbox_command.commands.map(c=>c.name())).toEqual(['list', 'get', 'reply', 'categories', 'categorize', 'mark-read', 'mark-unread']);
         expect(account_command.commands.map(c=>c.name())).toEqual(['list']);
+        expect(schedule_command.commands.map(c=>c.name())).toEqual(['list']);
+    });
+
+    it('schedule list takes no flag and no id, and says how a time zone, a weekday and a time are written', ()=>{
+        const c = sub(schedule_command, 'list');
+        expect(flags(c)).toEqual([]);
+        expect(c.registeredArguments).toEqual([]);
+        const text = help_of(c);
+        const flat = text.replace(/\s+/g, ' ');
+        expect(flat, text).toContain('time_zone_id is a Windows time zone identifier');
+        expect(flat, text).toContain('the weekday in lower case and each time of day as HH:MM');
+        expect(flat, text).toContain('follow_up_timings are the windows of the later steps');
+        expect(flat, text).toContain('all in one answer');
+        expect(flat, text).toContain('One the account\'s plan or role does not include fails the whole command');
+        expect(text, text).toContain('  access.feature_unavailable\n');
+        expect(text, text).not.toContain('outcome.unknown');
     });
 
     it('account list takes only --channel, and says what each status means and that every page is read', ()=>{

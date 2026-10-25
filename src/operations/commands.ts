@@ -16,6 +16,7 @@ import {handle_contact_opt_out} from './contact';
 import {handle_contact_find, handle_contact_get, handle_contact_update, handle_contact_delete} from './contact-record';
 import {handle_direct_send, type Direct_send_name} from './direct-send';
 import {handle_account_list} from './accounts';
+import {handle_schedule_list} from './schedules';
 
 const P = PROGRAM_NAME;
 const COMMON_ERRORS = [
@@ -497,4 +498,22 @@ account_command.command('list')
         await handle_account_list(cmd.opts(), ctx, g);
     }));
 
-export {sequence_command, contact_list_command, contact_command, inbox_command, account_command};
+const schedule_command = new Command('schedule').description('List the sending schedules a sequence can send within');
+
+schedule_command.command('list')
+    .description('Every sending schedule the account can use, with its time zone and its sending windows by weekday')
+    .addHelpText('after', help([ex('schedule list')], [], false,
+        'Result: {"items":[{"id","name","time_zone_id","use_recipient_time_zone","exclude_holidays","is_default","main_timings",\n'
+            + '"use_follow_up_schedule","follow_up_timings","reply_status"}]}, in the order Reply gives them, all in one answer.\n'
+            + 'time_zone_id is a Windows time zone identifier (e.g. "Eastern Standard Time"), as Reply holds it. main_timings has\n'
+            + 'one entry a weekday: {"week_day","active","ranges":[{"from","to"}]}, the weekday in lower case and each time of day\n'
+            + 'as HH:MM; a range may end at 24:00, the end of the day. follow_up_timings are the windows of the later steps, which\n'
+            + 'Reply uses when use_follow_up_schedule is true. reply_status is Reply\'s own word for how the schedule is used. A\n'
+            + 'name, time zone or time Reply gives none of is null. One the account\'s plan or role does not include fails the whole\n'
+            + 'command.\n'))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_schedule_list(ctx, g);
+    }));
+
+export {sequence_command, contact_list_command, contact_command, inbox_command, account_command, schedule_command};
