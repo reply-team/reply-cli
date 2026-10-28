@@ -38,7 +38,7 @@ const detail_of = (a: Answer): string | undefined=>{
 // One call to Reply for an operation. Every HTTP status comes back as an Answer for the command
 // to read. If Reply can't be reached, nothing happened, so that becomes reply.unavailable. A
 // write whose answer was lost passes through as outcome.unknown. Headers given here are this call's
-// own, on top of the session's.
+// own, added to the ones every call carries.
 const call_reply = async(
     s: Op_session, method: string, path: string, kind: Call_kind, body?: unknown, headers: Record<string, string> = {},
 ): Promise<Answer>=>{
