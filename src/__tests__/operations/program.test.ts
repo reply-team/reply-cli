@@ -139,6 +139,28 @@ describe('the program', ()=>{
         ]);
     });
 
+    const LATER_SEND = ['--json', '-k', 'key-1', 'contact', 'linkedin-message', '--contact-id', '456', '--linkedin-account-id', '34',
+        '--message', '-'];
+
+    it('a send for later takes --send-after, --schedule-id and --idempotency-key: the first two in the body, the key as a header', async()=>{
+        pipe_stdin(JSON.stringify({body: 'Thanks for connecting.'}));
+        answer(json({code: 'directLinkedIn.notConnected'}, 409));
+        const {code} = await run_program([...LATER_SEND,
+            '--send-after', '2026-11-03T14:00:00Z', '--schedule-id', '41', '--idempotency-key', 'send-456-1']);
+        expect(code).toBe(1);
+        expect(requests()).toEqual([{method: 'POST', url: 'https://api.reply.io/v3/contacts/456/send-direct-linkedin-message',
+            body: {linkedInAccountId: 34, message: 'Thanks for connecting.', sendAfter: '2026-11-03T14:00:00.000Z', scheduleId: 41}}]);
+        expect((mock_fetch.mock.calls[0] as [string, RequestInit])[1].headers).toMatchObject({'Idempotency-Key': 'send-456-1'});
+    });
+
+    it('a send for later at a moment without its offset exits 2 before any request', async()=>{
+        pipe_stdin(JSON.stringify({body: 'Thanks for connecting.'}));
+        const {code, err} = await run_program([...LATER_SEND, '--send-after', '2026-11-03T14:00:00']);
+        expect(code).toBe(2);
+        expect(JSON.parse(err)).toMatchObject({error: {code: 'usage.date'}});
+        expect(mock_fetch).not.toHaveBeenCalled();
+    });
+
     it('a send to a person Reply already holds exits 1, sends nothing, and names the contact', async()=>{
         pipe_stdin(JSON.stringify({contact: {email: 'marta@example.com', first_name: 'Marta'},
             message: {subject: 'Hi Marta', body: 'Tuesday works'}}));

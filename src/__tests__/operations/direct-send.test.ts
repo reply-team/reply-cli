@@ -620,3 +620,103 @@ describe('a direct send to a person given by their fields', ()=>{
         }
     });
 });
+
+describe('a send for later', ()=>{
+    const SENDS: [Direct_send_name, unknown, Direct_send_opts][] = [
+        ['send-email', {subject: SUBJECT, body: BODY}, EMAIL_OPTS],
+        ['linkedin-connect', {note: NOTE}, LINKEDIN_OPTS],
+        ['linkedin-message', {body: TEXT}, LINKEDIN_OPTS],
+        ['linkedin-inmail', {subject: SUBJECT, body: TEXT}, LINKEDIN_OPTS],
+        ['linkedin-voice', {script: SCRIPT}, LINKEDIN_OPTS],
+    ];
+    const LATER = {sendAfter: '2026-11-03T16:00:00+02:00', scheduleId: '41', idempotencyKey: 'send-456-step-2'};
+    const headers_of = (i: number): Record<string, string>=>
+        (mock_fetch.mock.calls[i] as [string, RequestInit])[1].headers as Record<string, string>;
+    const accepted = (name: Direct_send_name, extra: Record<string, unknown>)=>
+        json(name === 'send-email' ? {status: 'new', messageId: null, ...extra} : {linkedInActivityId: 1042, ...extra});
+
+    it('each send carries the moment in UTC, the schedule and the key only when given, the key as a header and never in the body', async()=>{
+        for (const [name, message, opts] of SENDS)
+        {
+            mock_fetch.mockReset();
+            answer(accepted(name, {}), accepted(name, {}));
+            await run(name, message, {...opts, ...LATER});
+            const body = sent()[0].body as Record<string, unknown>;
+            expect(body.sendAfter, name).toBe('2026-11-03T14:00:00.000Z');
+            expect(body.scheduleId, name).toBe(41);
+            expect(JSON.stringify(body), name).not.toContain('send-456-step-2');
+            expect(headers_of(0)['Idempotency-Key'], name).toBe('send-456-step-2');
+            await run(name, message, opts);
+            const plain = sent()[1].body as Record<string, unknown>;
+            expect('scheduleId' in plain, name).toBe(false);
+            expect('sendAfter' in plain, name).toBe(false);
+            expect('Idempotency-Key' in headers_of(1), name).toBe(false);
+        }
+    });
+
+    it('adds reference, send_after and state to the answer, each only when Reply gives it, and keeps status as sent', async()=>{
+        answer(accepted('send-email', {reference: 'email-1001', sendAfter: '2026-11-03T14:00:00Z', state: 'queued'}));
+        expect(await run('send-email', {subject: SUBJECT, body: BODY}, {...EMAIL_OPTS, ...LATER})).toStrictEqual({
+            status: 'sent', contact_id: 456, contact_created: false, message_id: null, sent_at: null, reply_status: 'new',
+            reference: 'email-1001', send_after: '2026-11-03T14:00:00Z', state: 'queued',
+        });
+        mock_fetch.mockReset();
+        answer(accepted('linkedin-message', {reference: 'linkedin-1042', state: 'sending', sendAfter: null}));
+        expect(await run('linkedin-message', {body: TEXT}, LINKEDIN_OPTS)).toStrictEqual({
+            status: 'sent', contact_id: 456, contact_created: false, activity_id: 1042, sent_at: null,
+            reference: 'linkedin-1042', state: 'sending',
+        });
+    });
+
+    it('an answer without them prints exactly what it prints today, even when the flags were given', async()=>{
+        answer(accepted('linkedin-voice', {sentAtUtc: '2026-10-19T10:30:00Z'}));
+        expect(await run('linkedin-voice', {script: SCRIPT}, {...LINKEDIN_OPTS, ...LATER})).toStrictEqual({
+            status: 'sent', contact_id: 456, contact_created: false, activity_id: 1042, sent_at: '2026-10-19T10:30:00Z',
+        });
+    });
+
+    it('refuses a moment without its offset, a schedule id that is not one and a key Reply cannot take, before any call', async()=>{
+        const cases: [Partial<Direct_send_opts>, string][] = [
+            [{sendAfter: '2026-11-03T14:00:00'}, 'usage.date'],
+            [{sendAfter: '2026-11-03'}, 'usage.date'],
+            [{scheduleId: '0'}, 'usage.id'],
+            [{scheduleId: 'business'}, 'usage.id'],
+            [{idempotencyKey: ''}, 'usage.idempotency_key'],
+            [{idempotencyKey: 'k'.repeat(256)}, 'usage.idempotency_key'],
+        ];
+        for (const [name, message, opts] of SENDS)
+        {
+            for (const [extra, code] of cases)
+            {
+                const e = await failure(name, message, {...opts, ...extra});
+                expect(e, `${name} ${JSON.stringify(extra)}`).toMatchObject({code, exit_code: 2});
+            }
+        }
+        expect(mock_fetch).not.toHaveBeenCalled();
+    });
+
+    it('a key does not make a lost answer safe to repeat: a Reply that ignores the header would send it twice', async()=>{
+        mock_fetch.mockRejectedValueOnce(lost_connection());
+        const e = await failure('send-email', {subject: SUBJECT, body: BODY}, {...EMAIL_OPTS, ...LATER});
+        expect(e).toMatchObject({code: 'outcome.unknown', exit_code: 3});
+        expect((e as {hint?: string}).hint).toContain('may send it twice');
+    });
+
+    it('a 404 with no code of Reply own stays reply.refused, status 404 and no reply code, an empty body or a problem without one', async()=>{
+        const bare: [string, ()=>Response][] = [
+            ['empty', ()=>new Response(null, {status: 404})],
+            ['problem', ()=>json({title: 'Not Found', status: 404}, 404, {'Content-Type': 'application/problem+json'})],
+        ];
+        for (const [name, message, opts] of SENDS)
+        {
+            for (const [label, res] of bare)
+            {
+                mock_fetch.mockReset();
+                answer(res());
+                const e = await failure(name, message, {...opts, ...LATER});
+                expect(e, `${name} ${label}`).toMatchObject({code: 'reply.refused', status: 404, exit_code: 1});
+                expect((e as {reply_code?: string}).reply_code, `${name} ${label}`).toBeUndefined();
+            }
+        }
+    });
+});

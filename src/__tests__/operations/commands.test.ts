@@ -221,7 +221,7 @@ describe('operations/commands', ()=>{
         for (const [name, account_flag, codes, sent_at] of DIRECT_SENDS)
         {
             const c = sub(contact_command, name);
-            expect(flags(c), name).toEqual([...CONTACT_FLAGS, account_flag, '--message']);
+            expect(flags(c), name).toEqual([...CONTACT_FLAGS, account_flag, '--message', '--send-after', '--schedule-id', '--idempotency-key']);
             const text = help_of(c);
             const flat = text.replace(/\s+/g, ' ');
             expect(text, text).toContain('--message -');
@@ -237,6 +237,12 @@ describe('operations/commands', ()=>{
             expect(flat.includes('--email alone is refused (usage.contact)'), text).toBe(name !== 'send-email');
             expect(flat, text).toContain(sent_at);
             expect(flat, text).toContain('read from stdin only');
+            // A send for later: what status and state each say, and what an older Reply does with the flags.
+            expect(flat, text).toContain('status "sent" means Reply took the send; state, when Reply gives it, says whether it has gone '
+                + 'out: queued or sending is not yet, then sent, failed or cancelled');
+            expect(flat, text).toContain('direct-send get <reference> reads it later, and direct-send cancel <reference> stops one not yet sent');
+            expect(flat, text).toContain('An answer without state comes from a Reply that does not know --send-after and --schedule-id');
+            expect(flat, text).toContain('--idempotency-key goes as the Idempotency-Key header');
             // Exactly the codes its endpoint publishes, then the shared ones, as the help lists them.
             const listed = text.split('\nErrors')[1].split('\nExit codes')[0].split('\n').slice(1).map(l=>l.trim());
             expect(listed, name).toEqual([...codes, 'access.denied', 'access.feature_unavailable', 'rate_limited', 'reply.unavailable',

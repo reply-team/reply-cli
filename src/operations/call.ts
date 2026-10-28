@@ -37,10 +37,13 @@ const detail_of = (a: Answer): string | undefined=>{
 
 // One call to Reply for an operation. Every HTTP status comes back as an Answer for the command
 // to read. If Reply can't be reached, nothing happened, so that becomes reply.unavailable. A
-// write whose answer was lost passes through as outcome.unknown.
-const call_reply = async(s: Op_session, method: string, path: string, kind: Call_kind, body?: unknown): Promise<Answer>=>{
+// write whose answer was lost passes through as outcome.unknown. Headers given here are this call's
+// own, on top of the session's.
+const call_reply = async(
+    s: Op_session, method: string, path: string, kind: Call_kind, body?: unknown, headers: Record<string, string> = {},
+): Promise<Answer>=>{
     try {
-        const r = await request_raw(s.api_base, s.token, method, path, body, {headers: s.headers, kind});
+        const r = await request_raw(s.api_base, s.token, method, path, body, {headers: {...s.headers, ...headers}, kind});
         return {status: r.status, data: r.data, headers: r.response_headers};
     } catch (e) {
         if (e instanceof RuntimeError)

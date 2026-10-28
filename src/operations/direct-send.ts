@@ -2,7 +2,7 @@ import {PROGRAM_NAME} from '../config';
 import {Operation_error, Unknown_outcome_error, UsageError, type Ids} from '../utils/errors';
 import {parse_retry_after} from '../utils/client';
 import {call_reply, expect_object, refusal, reply_code_of, detail_of, open_session, type Answer} from './call';
-import {parse_id, LARGEST_SAFE_ID, type Op_globals} from './options';
+import {parse_id, parse_moment, parse_idempotency_key, LARGEST_SAFE_ID, type Op_globals} from './options';
 import {read_contact_input, type Contact_flags, type Contact_ref} from './contact-input';
 import {contact_not_found, find_contact_by_address, import_contact, type Channel, type Ensured} from './contacts';
 import {read_stdin_object, stdin_inputs} from './stdin-input';
@@ -10,7 +10,10 @@ import {print_result, with_ids} from './result';
 import type {Cli_context} from '../context';
 
 type Direct_send_name = 'send-email' | 'linkedin-connect' | 'linkedin-message' | 'linkedin-inmail' | 'linkedin-voice';
-type Direct_send_opts = Contact_flags & {emailAccountId?: string; linkedinAccountId?: string; message?: string};
+type Direct_send_opts = Contact_flags & {
+    emailAccountId?: string; linkedinAccountId?: string; message?: string;
+    sendAfter?: string; scheduleId?: string; idempotencyKey?: string;
+};
 type Text = Record<string, string>;
 
 type Direct_send = {
@@ -166,11 +169,19 @@ const send_refusal = (a: Answer, contact_id: number): Operation_error=>{
 const positive_integer = (v: unknown): number | null=>
     typeof v === 'number' && Number.isSafeInteger(v) && v > 0 ? v : null;
 
+// What Reply says of the send itself, each only when it gives it: the reference that names the send
+// for direct-send get and cancel, the moment it was accepted for, and whether it has gone out. An
+// answer without them is printed as it always was.
+const LATER_KEYS: [string, string][] = [['reference', 'reference'], ['sendAfter', 'send_after'], ['state', 'state']];
+
+const later_of = (sent: Record<string, unknown>): Record<string, unknown>=>
+    Object.fromEntries(LATER_KEYS.filter(([from])=>typeof sent[from] === 'string').map(([from, to])=>[to, sent[from]]));
+
 // What the CLI answers for a send Reply took: the contact it went to, as the add commands name it, so
 // a caller can keep its id. Neither adds a time of its own: Reply's answer to a direct email carries
 // none, and a LinkedIn send's sentAtUtc is given as Reply gives it.
-const result_of = (name: Direct_send_name, contact: Ensured, sent: Record<string, unknown>): Record<string, unknown>=>
-    name === 'send-email'
+const result_of = (name: Direct_send_name, contact: Ensured, sent: Record<string, unknown>): Record<string, unknown>=>({
+    ...(name === 'send-email'
         ? {
             status: 'sent', contact_id: contact.id, contact_created: contact.created,
             message_id: typeof sent.messageId === 'string' ? sent.messageId : null,
@@ -181,7 +192,9 @@ const result_of = (name: Direct_send_name, contact: Ensured, sent: Record<string
             status: 'sent', contact_id: contact.id, contact_created: contact.created,
             activity_id: positive_integer(sent.linkedInActivityId),
             sent_at: typeof sent.sentAtUtc === 'string' ? sent.sentAtUtc : null,
-        };
+        }),
+    ...later_of(sent),
+});
 
 // A person given by their fields is looked up by the address the send reaches them at, so one who
 // lacks it is refused before anything is asked. The address is never repeated.
@@ -226,6 +239,18 @@ const handle_direct_send = async(
         : required_id(opts.linkedinAccountId, '--linkedin-account-id');
     const ids: Ids = by_email ? {email_account_id: account_id} : {linkedin_account_id: account_id};
     const text = read_text(name, send, opts.message, stdin.message);
+    // Each is sent only when given, so a send without them is the request it always was.
+    const later: Record<string, unknown> = {};
+    if (opts.sendAfter !== undefined)
+    {
+        later.sendAfter = parse_moment(opts.sendAfter, '--send-after');
+    }
+    if (opts.scheduleId !== undefined)
+    {
+        later.scheduleId = parse_id(opts.scheduleId, '--schedule-id');
+    }
+    const headers: Record<string, string> = opts.idempotencyKey === undefined
+        ? {} : {'Idempotency-Key': parse_idempotency_key(opts.idempotencyKey)};
     const s = await open_session(ctx, g);
     let sending = false;
     try {
@@ -263,7 +288,8 @@ const handle_direct_send = async(
             ids.contact_id = ensured.id;
         }
         sending = true;
-        const a = await call_reply(s, 'POST', `/v3/contacts/${ensured.id}/${send.path}`, 'write', send.body(account_id, text));
+        const body = {...send.body(account_id, text), ...later};
+        const a = await call_reply(s, 'POST', `/v3/contacts/${ensured.id}/${send.path}`, 'write', body, headers);
         if (name === 'linkedin-connect' && a.status === 409 && reply_code_of(a) === 'directLinkedIn.alreadyConnected')
         {
             // Nothing was sent, and nothing needs to be: the contact is already a connection.

@@ -1,5 +1,7 @@
 import {describe, it, expect} from 'vitest';
-import {parse_id, parse_int_in, parse_iso, parse_choice, LARGEST_SAFE_ID} from '../../operations/options';
+import {
+    parse_id, parse_int_in, parse_iso, parse_moment, parse_idempotency_key, parse_choice, LARGEST_SAFE_ID,
+} from '../../operations/options';
 import {UsageError} from '../../utils/errors';
 
 const usage_code = (fn: () => unknown): string | undefined=>{
@@ -57,6 +59,32 @@ describe('operations/options', ()=>{
         for (const bad of ['1', 'March 7', '2026-13-45', '10/01/2026'])
         {
             expect(usage_code(()=>parse_iso(bad, '--since'))).toBe('usage.date');
+        }
+    });
+
+    it('parse_moment takes a date and time with its offset, as the same instant in UTC', ()=>{
+        expect(parse_moment('2026-11-03T14:00:00Z', '--send-after')).toBe('2026-11-03T14:00:00.000Z');
+        expect(parse_moment('2026-11-03T16:00:00+02:00', '--send-after')).toBe('2026-11-03T14:00:00.000Z');
+        expect(parse_moment('2026-11-03T09:00-0500', '--since')).toBe('2026-11-03T14:00:00.000Z');
+        expect(parse_moment('2026-11-03t14:00:00.25z', '--since')).toBe('2026-11-03T14:00:00.250Z');
+    });
+
+    it('parse_moment refuses a date alone and a time without its offset, which the CLI would have to place in a zone of its own', ()=>{
+        for (const bad of ['2026-11-03', '2026-11-03T14:00:00', '2026-11-03 14:00:00Z', 'tomorrow', '1', '2026-13-45T00:00:00Z'])
+        {
+            expect(usage_code(()=>parse_moment(bad, '--send-after')), bad).toBe('usage.date');
+        }
+        expect(()=>parse_moment('2026-11-03T14:00:00', '--send-after'))
+            .toThrow('--send-after must be a date and time with its offset, e.g. 2026-11-03T14:00:00Z.');
+    });
+
+    it('parse_idempotency_key takes 1 to 255 printable ASCII characters with no space at either end, as given', ()=>{
+        expect(parse_idempotency_key('send-456-step-2')).toBe('send-456-step-2');
+        expect(parse_idempotency_key('a b')).toBe('a b');
+        expect(parse_idempotency_key('k'.repeat(255))).toBe('k'.repeat(255));
+        for (const bad of ['', ' ', ' a', 'a ', 'k'.repeat(256), 'café', 'a\nb', 'a\tb'])
+        {
+            expect(usage_code(()=>parse_idempotency_key(bad)), JSON.stringify(bad)).toBe('usage.idempotency_key');
         }
     });
 

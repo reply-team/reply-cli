@@ -290,15 +290,29 @@ const SENT_TO = (by: 'email' | 'linkedin', what: string): string=>CONTACT_FORMS
     + '--contact-id it is always false; in both cases a successful answer says the send was made.\n'
     + (by === 'email' ? '' : LINKEDIN_URL_NEEDED) + STDIN_PAIR('message');
 
+// The flags of a send for later, the same on every direct send.
+const later_options = (c: Command): Command=>c
+    .option('--send-after <moment>', 'Send at or after this moment, given with its offset (e.g. 2026-11-03T14:00:00Z)')
+    .option('--schedule-id <id>', 'The sending schedule Reply times the send by (see `schedule list`)')
+    .option('--idempotency-key <key>', 'Your own key for this send, sent as the Idempotency-Key header');
+
+const LATER = 'With --send-after Reply holds the send until that moment, given with its offset and sent to Reply in UTC; a moment\n'
+    + 'without an offset is refused (usage.date). --schedule-id names the sending schedule Reply times the send by. The answer\n'
+    + 'then adds Reply\'s reference, send_after and state, each only when Reply gives it: status "sent" means Reply took the\n'
+    + 'send; state, when Reply gives it, says whether it has gone out: queued or sending is not yet, then sent, failed or\n'
+    + 'cancelled. direct-send get <reference> reads it later, and direct-send cancel <reference> stops one not yet sent. An\n'
+    + 'answer without state comes from a Reply that does not know --send-after and --schedule-id: it sent at once, as\n'
+    + 'without them. --idempotency-key goes as the Idempotency-Key header, never in the body.\n';
+
 // One send's example with the person and the text both on stdin.
 const piped_send = (command: string, contact: string, message: string, flags: string): string=>
     `echo '{"contact":${contact},"message":${message}}' | ${P} contact ${command} --contact - ${flags} --message -`;
 const ANN_EMAIL = '{"email":"ann@example.com","first_name":"Ann"}';
 const ANN_PROFILE = '{"linkedin_url":"https://www.linkedin.com/in/ann-example","first_name":"Ann"}';
 
-add_contact_options(contact_command.command('send-email'), true)
+later_options(add_contact_options(contact_command.command('send-email'), true)
     .option('--email-account-id <id>', 'The mailbox to send from (see `account list`)')
-    .option('--message <stdin>', 'Only -: the email {subject, body} as JSON on stdin')
+    .option('--message <stdin>', 'Only -: the email {subject, body} as JSON on stdin'))
     .description('Send one email to a contact now, outside any sequence, from the mailbox you name')
     .addHelpText('after', help(
         [`echo '{"subject":"Quick question","body":"<p>Hi Ann, does Tuesday work?</p>"}' | ${P} contact send-email --contact-id 456 --email-account-id 12 --message -`,
@@ -307,9 +321,9 @@ add_contact_options(contact_command.command('send-email'), true)
         'Result: {"status":"sent","contact_id","contact_created","message_id","sent_at","reply_status"}: sent means Reply\n'
             + 'accepted the email, and reply_status is Reply\'s own word for it (new or sent). message_id is Reply\'s messageId,\n'
             + 'null when it gives none. Reply\'s answer carries no time, so sent_at is always null; the CLI adds none of its own.\n'
-            + 'The email is read from stdin only, so its text never sits in the argument list. The body is HTML. Reply sends a\n'
-            + 'direct email at once, outside the mailbox\'s daily limit and sending delay.\n'
-            + SENT_TO('email', 'email'),
+            + 'The email is read from stdin only, so its text never sits in the argument list. The body is HTML. Without\n'
+            + '--send-after, Reply sends a direct email at once, outside the mailbox\'s daily limit and sending delay.\n'
+            + LATER + SENT_TO('email', 'email'),
         SEND_TWICE('email')))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
@@ -332,11 +346,12 @@ const linkedin_send = (
     name: Exclude<Direct_send_name, 'send-email'>, description: string, message: string, examples: string[], codes: string[],
     extra: string, what: string,
 ): void=>{
-    add_contact_options(contact_command.command(name), true)
+    later_options(add_contact_options(contact_command.command(name), true)
         .option('--linkedin-account-id <id>', 'The LinkedIn account to send from (see `account list`)')
-        .option('--message <stdin>', `Only -: the ${message} as JSON on stdin`)
+        .option('--message <stdin>', `Only -: the ${message} as JSON on stdin`))
         .description(description)
-        .addHelpText('after', help(examples, [...LINKEDIN_SEND_CODES, ...codes], true, extra + SENT_TO('linkedin', what), SEND_TWICE(what)))
+        .addHelpText('after', help(examples, [...LINKEDIN_SEND_CODES, ...codes], true, extra + LATER + SENT_TO('linkedin', what),
+            SEND_TWICE(what)))
         .action(run(async(cmd)=>{
             const {g, ctx} = ctx_of(cmd);
             await handle_direct_send(name, cmd.opts(), ctx, g);
