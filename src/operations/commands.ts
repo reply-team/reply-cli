@@ -17,6 +17,7 @@ import {handle_contact_find, handle_contact_get, handle_contact_update, handle_c
 import {handle_direct_send, type Direct_send_name} from './direct-send';
 import {handle_account_list} from './accounts';
 import {handle_schedule_list} from './schedules';
+import {handle_direct_send_get, handle_direct_send_cancel} from './direct-sends';
 
 const P = PROGRAM_NAME;
 const COMMON_ERRORS = [
@@ -539,4 +540,34 @@ schedule_command.command('list')
         await handle_schedule_list(ctx, g);
     }));
 
-export {sequence_command, contact_list_command, contact_command, inbox_command, account_command, schedule_command};
+const direct_send_command = new Command('direct-send').description('Read or cancel a direct send Reply holds to send later');
+
+const DIRECT_SEND = 'Result: {"reference","channel","contact_id","state","send_after","sent_at","message_id","failure_reason",\n'
+    + '"cancelled_at"}, Reply\'s fields under these names, each null when Reply gives none. The reference is Reply\'s, from the\n'
+    + 'answer of a send made with --send-after; it is passed on as given and never read. state is Reply\'s own word: queued\n'
+    + 'or sending is not yet sent, then sent, failed or cancelled. A Reply without this route answers reply.refused with\n'
+    + 'status 404 and no reply_code; direct_send.not_found is a reference that Reply has no send for.\n';
+
+direct_send_command.command('get')
+    .argument('<reference>', 'The send\'s reference, as a send made with --send-after answered it')
+    .description('One direct send as Reply holds it: whether it has gone out, when, and why it failed')
+    .addHelpText('after', help([ex('direct-send get email-1001')], ['direct_send.not_found', 'direct_send.not_owned'], false, DIRECT_SEND))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_direct_send_get(cmd.args[0], ctx, g);
+    }));
+
+direct_send_command.command('cancel')
+    .argument('<reference>', 'The send\'s reference, as a send made with --send-after answered it')
+    .description('Stop a direct send that has not gone out yet')
+    .addHelpText('after', help([ex('direct-send cancel email-1001')],
+        ['direct_send.not_found', 'direct_send.not_owned', 'direct_send.already_sent', 'direct_send.already_failed'], true,
+        DIRECT_SEND + 'The answer is the send as Reply now holds it, state cancelled. Cancelling a send already cancelled answers\n'
+            + 'it again, so running it again is safe. direct_send.already_sent and direct_send.already_failed mean the send\n'
+            + 'was past cancelling; nothing changed.\n'))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_direct_send_cancel(cmd.args[0], ctx, g);
+    }));
+
+export {sequence_command, contact_list_command, contact_command, inbox_command, account_command, schedule_command, direct_send_command};

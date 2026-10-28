@@ -210,6 +210,21 @@ describe('the program', ()=>{
         expect((mock_fetch.mock.calls[0] as [string, RequestInit])[0]).toBe('https://api.reply.io/v3/schedules');
     });
 
+    it('direct-send is a work command of its own: no reference exits 2, a refused cancel exits 1 with its code', async()=>{
+        for (const verb of ['get', 'cancel'])
+        {
+            const {code} = await run_program(['--json', '-q', '-k', 'key-1', 'direct-send', verb]);
+            expect(code, verb).toBe(2);
+        }
+        expect(mock_fetch).not.toHaveBeenCalled();
+        answer(json({code: 'directSend.alreadySent', detail: 'Already sent.'}, 409, {'Content-Type': 'application/problem+json'}));
+        const {code, err} = await run_program(['--json', '-q', '-k', 'key-1', 'direct-send', 'cancel', 'email-1001']);
+        expect(code).toBe(1);
+        expect(JSON.parse(err)).toMatchObject({error: {code: 'direct_send.already_sent', status: 409}});
+        const [url, init] = mock_fetch.mock.calls[0] as [string, RequestInit];
+        expect([init.method, url]).toEqual(['POST', 'https://api.reply.io/v3/direct-sends/email-1001/cancel']);
+    });
+
     it('a usage error exits 2 before any request', async()=>{
         const {code, err} = await run_program(['--json', '-k', 'key-1', 'sequence', 'stats', '123', '--from', '2026-10-02', '--to', '2026-10-01']);
         expect(code).toBe(2);

@@ -1,6 +1,7 @@
 import {describe, it, expect} from 'vitest';
 import type {Command} from 'commander';
-import {sequence_command, contact_list_command, contact_command, inbox_command, account_command, schedule_command} from '../../operations/commands';
+import {sequence_command, contact_list_command, contact_command, inbox_command, account_command, schedule_command,
+    direct_send_command} from '../../operations/commands';
 
 const sub = (parent: Command, name: string): Command=>{
     const found = parent.commands.find(c=>c.name() === name);
@@ -26,6 +27,29 @@ describe('operations/commands', ()=>{
         expect(inbox_command.commands.map(c=>c.name())).toEqual(['list', 'get', 'reply', 'categories', 'categorize', 'mark-read', 'mark-unread']);
         expect(account_command.commands.map(c=>c.name())).toEqual(['list']);
         expect(schedule_command.commands.map(c=>c.name())).toEqual(['list']);
+        expect(direct_send_command.commands.map(c=>c.name())).toEqual(['get', 'cancel']);
+    });
+
+    it('direct-send get and cancel each take one reference and no flag, and list the refusals Reply gives each', ()=>{
+        const expected: [string, string[], boolean][] = [
+            ['get', ['direct_send.not_found', 'direct_send.not_owned'], false],
+            ['cancel', ['direct_send.not_found', 'direct_send.not_owned', 'direct_send.already_sent', 'direct_send.already_failed'], true],
+        ];
+        for (const [name, codes, write] of expected)
+        {
+            const c = sub(direct_send_command, name);
+            expect(flags(c), name).toEqual([]);
+            expect(c.registeredArguments.map(a=>a.name()), name).toEqual(['reference']);
+            const text = help_of(c);
+            const flat = text.replace(/\s+/g, ' ');
+            expect(text, name).toContain(codes.map(code=>`  ${code}\n`).join(''));
+            expect(text.includes('outcome.unknown'), name).toBe(write);
+            expect(flat, name).toContain('The reference is Reply\'s, from the answer of a send made with --send-after');
+            expect(flat, name).toContain('state is Reply\'s own word: queued or sending is not yet sent, then sent, failed or cancelled');
+            expect(flat, name).toContain('A Reply without this route answers reply.refused with status 404 and no reply_code');
+        }
+        expect(help_of(sub(direct_send_command, 'cancel')).replace(/\s+/g, ' '))
+            .toContain('Cancelling a send already cancelled answers it again, so running it again is safe');
     });
 
     it('schedule list takes no flag and no id, and says how a time zone, a weekday, a time and a state are written', ()=>{

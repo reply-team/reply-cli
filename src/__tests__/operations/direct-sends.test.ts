@@ -1,0 +1,170 @@
+import {describe, it, expect, beforeEach} from 'vitest';
+import {mock_fetch, json, ctx, sent, answer, capture} from './helpers';
+import {handle_direct_send_get, handle_direct_send_cancel} from '../../operations/direct-sends';
+
+beforeEach(()=>{ mock_fetch.mockReset(); });
+
+const QUEUED = {
+    reference: 'email-1001', channel: 'email', contactId: 456, state: 'queued', sendAfter: '2026-11-03T14:00:00Z',
+    sentAt: null, messageId: null, failureReason: null, cancelledAt: null,
+};
+const CANCELLED = {...QUEUED, state: 'cancelled', cancelledAt: '2026-11-02T09:15:00Z'};
+
+const get = async(reference: string)=>JSON.parse((await capture(()=>handle_direct_send_get(reference, ctx(), {json: true}))).out);
+const cancel = async(reference: string)=>JSON.parse((await capture(()=>handle_direct_send_cancel(reference, ctx(), {json: true}))).out);
+const failure = (fn: () => Promise<void>)=>fn().catch((x: unknown)=>x);
+
+const lost_connection = ()=>Object.assign(new TypeError('fetch failed'),
+    {cause: Object.assign(new Error('ECONNRESET'), {code: 'ECONNRESET'})});
+
+// A 404 with no code of Reply's own: how a Reply without the route answers.
+const BARE_404: [string, ()=>Response][] = [
+    ['empty', ()=>new Response(null, {status: 404})],
+    ['problem without a code', ()=>json({title: 'Not Found', status: 404}, 404, {'Content-Type': 'application/problem+json'})],
+];
+
+describe('direct-send get', ()=>{
+    it('reads one send by its reference and answers Reply\'s model under the CLI\'s names', async()=>{
+        answer(json(QUEUED));
+        expect(await get('email-1001')).toStrictEqual({
+            reference: 'email-1001', channel: 'email', contact_id: 456, state: 'queued', send_after: '2026-11-03T14:00:00Z',
+            sent_at: null, message_id: null, failure_reason: null, cancelled_at: null,
+        });
+        expect(sent()).toEqual([{method: 'GET', url: 'https://api/v3/direct-sends/email-1001', body: undefined}]);
+    });
+
+    it('gives what Reply leaves out as null, and Reply\'s state as its own word, one the CLI does not know included', async()=>{
+        answer(json({reference: 'linkedin-1042', state: 'held', sentAt: '2026-11-03T14:00:02Z', messageId: 'm-1',
+            failureReason: 'notConnected'}));
+        expect(await get('linkedin-1042')).toStrictEqual({
+            reference: 'linkedin-1042', channel: null, contact_id: null, state: 'held', send_after: null,
+            sent_at: '2026-11-03T14:00:02Z', message_id: 'm-1', failure_reason: 'notConnected', cancelled_at: null,
+        });
+    });
+
+    it('sends the reference as given, encoded into the path and never checked or parsed', async()=>{
+        for (const [reference, path] of [['ds_8F2k', 'ds_8F2k'], ['a/b c?d', 'a%2Fb%20c%3Fd'], ['email-0', 'email-0']])
+        {
+            mock_fetch.mockReset();
+            answer(json({...QUEUED, reference}));
+            await get(reference);
+            expect(sent()[0].url, reference).toBe(`https://api/v3/direct-sends/${path}`);
+        }
+    });
+
+    it('refuses a blank reference before any call', async()=>{
+        for (const blank of ['', '  '])
+        {
+            expect(await failure(()=>handle_direct_send_get(blank, ctx(), {})), JSON.stringify(blank))
+                .toMatchObject({code: 'usage.reference', exit_code: 2});
+        }
+        expect(mock_fetch).not.toHaveBeenCalled();
+    });
+
+    it('maps Reply\'s two refusals of a read, each under the status Reply publishes it with', async()=>{
+        const cases: [Response, string, string | undefined][] = [
+            [json({code: 'directSend.notFound', detail: 'Direct send not found.'}, 404), 'direct_send.not_found', 'directSend.notFound'],
+            [json({code: 'directSend.notOwned', detail: 'Not yours.'}, 403), 'direct_send.not_owned', 'directSend.notOwned'],
+            [json({code: 'directSend.notOwned'}, 404), 'reply.refused', 'directSend.notOwned'],
+            [json({code: 'directSend.forbidden'}, 403), 'access.feature_unavailable', 'directSend.forbidden'],
+            [json({code: 'directSend.somethingElse'}, 400), 'reply.refused', 'directSend.somethingElse'],
+        ];
+        for (const [res, code, reply_code] of cases)
+        {
+            mock_fetch.mockReset();
+            answer(res);
+            const e = await failure(()=>handle_direct_send_get('email-1001', ctx(), {}));
+            expect(e, code).toMatchObject({code, exit_code: 1});
+            expect((e as {reply_code?: string}).reply_code, code).toBe(reply_code);
+        }
+    });
+
+    it('a 404 with no code of Reply\'s own is reply.refused, status 404 and no reply code', async()=>{
+        for (const [label, res] of BARE_404)
+        {
+            mock_fetch.mockReset();
+            answer(res());
+            const e = await failure(()=>handle_direct_send_get('email-1001', ctx(), {}));
+            expect(e, label).toMatchObject({code: 'reply.refused', status: 404, exit_code: 1});
+            expect((e as {reply_code?: string}).reply_code, label).toBeUndefined();
+        }
+    });
+
+    it('an answer without a reference or a state cannot be read, and the read is safe to make again', async()=>{
+        for (const body of [{...QUEUED, reference: undefined}, {...QUEUED, state: ''}, [QUEUED], 'ok'])
+        {
+            mock_fetch.mockReset();
+            answer(json(body));
+            expect(await failure(()=>handle_direct_send_get('email-1001', ctx(), {})), JSON.stringify(body))
+                .toMatchObject({code: 'reply.unavailable', exit_code: 1});
+        }
+    });
+});
+
+describe('direct-send cancel', ()=>{
+    it('cancels one send by its reference and answers the send as Reply now holds it', async()=>{
+        answer(json(CANCELLED));
+        expect(await cancel('email-1001')).toStrictEqual({
+            reference: 'email-1001', channel: 'email', contact_id: 456, state: 'cancelled', send_after: '2026-11-03T14:00:00Z',
+            sent_at: null, message_id: null, failure_reason: null, cancelled_at: '2026-11-02T09:15:00Z',
+        });
+        expect(sent()).toEqual([{method: 'POST', url: 'https://api/v3/direct-sends/email-1001/cancel', body: undefined}]);
+    });
+
+    it('a cancel of a send already cancelled is a success again, as Reply answers it', async()=>{
+        answer(json(CANCELLED), json(CANCELLED));
+        expect(await cancel('email-1001')).toMatchObject({state: 'cancelled'});
+        expect(await cancel('email-1001')).toMatchObject({state: 'cancelled'});
+        expect(mock_fetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('maps Reply\'s four refusals of a cancel, each definite', async()=>{
+        const cases: [Response, string][] = [
+            [json({code: 'directSend.notFound'}, 404), 'direct_send.not_found'],
+            [json({code: 'directSend.notOwned'}, 403), 'direct_send.not_owned'],
+            [json({code: 'directSend.alreadySent'}, 409), 'direct_send.already_sent'],
+            [json({code: 'directSend.alreadyFailed'}, 409), 'direct_send.already_failed'],
+            [json({code: 'directSend.alreadySent'}, 400), 'reply.refused'],
+        ];
+        for (const [res, code] of cases)
+        {
+            mock_fetch.mockReset();
+            answer(res);
+            expect(await failure(()=>handle_direct_send_cancel('email-1001', ctx(), {})), code).toMatchObject({code, exit_code: 1});
+            expect(mock_fetch, code).toHaveBeenCalledTimes(1);
+        }
+    });
+
+    it('a 404 with no code of Reply\'s own is reply.refused, status 404 and no reply code', async()=>{
+        for (const [label, res] of BARE_404)
+        {
+            mock_fetch.mockReset();
+            answer(res());
+            const e = await failure(()=>handle_direct_send_cancel('email-1001', ctx(), {}));
+            expect(e, label).toMatchObject({code: 'reply.refused', status: 404, exit_code: 1});
+            expect((e as {reply_code?: string}).reply_code, label).toBeUndefined();
+        }
+    });
+
+    it('an answer that may hide a cancel is outcome.unknown (exit 3), made once, and says running it again is safe', async()=>{
+        const answers: [string, ()=>void][] = [
+            ['lost answer', ()=>{ mock_fetch.mockRejectedValueOnce(lost_connection()); }],
+            ['503', ()=>answer(json({title: 'Service Unavailable'}, 503))],
+            ['unreadable 200', ()=>answer(json('<html>ok</html>', 200))],
+        ];
+        for (const [label, give] of answers)
+        {
+            mock_fetch.mockReset();
+            give();
+            const e = await failure(()=>handle_direct_send_cancel('email-1001', ctx(), {}));
+            expect(e, label).toMatchObject({code: 'outcome.unknown', exit_code: 3});
+            expect((e as {hint?: string}).hint ?? '', label).toContain('running it again is safe');
+            expect(mock_fetch, label).toHaveBeenCalledTimes(1);
+        }
+    });
+
+    it('refuses a blank reference before any call', async()=>{
+        expect(await failure(()=>handle_direct_send_cancel(' ', ctx(), {}))).toMatchObject({code: 'usage.reference', exit_code: 2});
+        expect(mock_fetch).not.toHaveBeenCalled();
+    });
+});

@@ -162,6 +162,22 @@ const KEY_REFUSALS: Record<Channel, Record<string, Refusal>> = {
     email: {'contact.idempotencyKeyInUse': KEY_IN_USE, 'contact.idempotencyKeyReused': KEY_REUSED},
     linkedin: {'directLinkedIn.idempotencyKeyInUse': KEY_IN_USE, 'directLinkedIn.idempotencyKeyReused': KEY_REUSED},
 };
+// The routes that read and cancel a send by its reference answer under directSend: a reference this
+// account has no send for, a send it may not act on, and, to a cancel, a send already gone out or failed.
+const DIRECT_SEND_REFUSALS: Record<string, Refusal> = {
+    'directSend.notFound': {
+        status: 404, code: 'direct_send.not_found', title: 'Reply has no direct send under that reference that this account can see.',
+    },
+    'directSend.notOwned': {
+        status: 403, code: 'direct_send.not_owned', title: 'The direct send is not one this user may act on.',
+    },
+    'directSend.alreadySent': {
+        status: 409, code: 'direct_send.already_sent', title: 'The direct send has already gone out, so it was not cancelled.',
+    },
+    'directSend.alreadyFailed': {
+        status: 409, code: 'direct_send.already_failed', title: 'The direct send has already failed, so it was not cancelled.',
+    },
+};
 
 // The refusal a table holds for this answer, under the status Reply publishes it with, or undefined.
 const known_refusal = (a: Answer, table: Record<string, Refusal>): Operation_error | undefined=>{
@@ -337,5 +353,5 @@ const handle_direct_send = async(
     }
 };
 
-export {handle_direct_send};
+export {handle_direct_send, known_refusal, DIRECT_SEND_REFUSALS};
 export type {Direct_send_name, Direct_send_opts};
