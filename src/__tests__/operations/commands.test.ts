@@ -24,7 +24,7 @@ describe('operations/commands', ()=>{
         expect(contact_list_command.commands.map(c=>c.name())).toEqual(['add-contact']);
         expect(contact_command.commands.map(c=>c.name())).toEqual(['find', 'get', 'update', 'delete', 'opt-out',
             'send-email', 'linkedin-connect', 'linkedin-message', 'linkedin-inmail', 'linkedin-voice']);
-        expect(inbox_command.commands.map(c=>c.name())).toEqual(['list', 'get', 'reply', 'categories', 'categorize', 'mark-read', 'mark-unread']);
+        expect(inbox_command.commands.map(c=>c.name())).toEqual(['list', 'events', 'get', 'reply', 'categories', 'categorize', 'mark-read', 'mark-unread']);
         expect(account_command.commands.map(c=>c.name())).toEqual(['list']);
         expect(schedule_command.commands.map(c=>c.name())).toEqual(['list']);
         expect(direct_send_command.commands.map(c=>c.name())).toEqual(['get', 'cancel']);
@@ -162,6 +162,22 @@ describe('operations/commands', ()=>{
         }
         expect(flags(sub(contact_command, 'get'))).toEqual([]);
         expect(flags(sub(contact_command, 'delete'))).toEqual([]);
+    });
+
+    it('inbox events takes --cursor, --since and --top, and says how the feed is read forward', ()=>{
+        const c = sub(inbox_command, 'events');
+        expect(flags(c)).toEqual(['--cursor', '--since', '--top']);
+        expect(c.registeredArguments).toEqual([]);
+        const text = help_of(c);
+        const flat = text.replace(/\s+/g, ' ');
+        expect(flat, text).toContain('Result: {"items","has_more","cursor"}');
+        expect(flat, text).toContain('the items as Reply gives them');
+        expect(flat, text).toContain('Give --cursor or --since, not both; with neither, Reply reads the last 30 days');
+        expect(flat, text).toContain('loop on has_more, not on the number of items');
+        expect(flat, text).toContain('an empty page still carries a cursor');
+        expect(flat, text).toContain('inbox.cursor_refused');
+        expect(text, text).toContain('  inbox.cursor_refused\n');
+        expect(text, text).not.toContain('outcome.unknown');
     });
 
     it('sequence list and create take the name only through --name -, and create says a repeat may make a second one', ()=>{

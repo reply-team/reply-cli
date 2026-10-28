@@ -225,6 +225,18 @@ describe('the program', ()=>{
         expect([init.method, url]).toEqual(['POST', 'https://api.reply.io/v3/direct-sends/email-1001/cancel']);
     });
 
+    it('inbox events reads its flags through commander: both --cursor and --since exit 2, a refused cursor exits 1 with its code', async()=>{
+        const both = await run_program(['--json', '-q', '-k', 'key-1', 'inbox', 'events', '--cursor', 'c1', '--since', '2026-11-03T14:00:00Z']);
+        expect(both.code).toBe(2);
+        expect(mock_fetch).not.toHaveBeenCalled();
+        answer(json({title: 'Validation failed', status: 400, errors: [{pointer: '/cursor', detail: 'older than 30 days'}]}, 400,
+            {'Content-Type': 'application/problem+json'}));
+        const {code, err} = await run_program(['--json', '-q', '-k', 'key-1', 'inbox', 'events', '--cursor', 'c1', '--top', '50']);
+        expect(code).toBe(1);
+        expect(JSON.parse(err)).toMatchObject({error: {code: 'inbox.cursor_refused', status: 400}});
+        expect((mock_fetch.mock.calls[0] as [string, RequestInit])[0]).toBe('https://api.reply.io/v3/inbox/events?cursor=c1&top=50');
+    });
+
     it('a usage error exits 2 before any request', async()=>{
         const {code, err} = await run_program(['--json', '-k', 'key-1', 'sequence', 'stats', '123', '--from', '2026-10-02', '--to', '2026-10-01']);
         expect(code).toBe(2);
