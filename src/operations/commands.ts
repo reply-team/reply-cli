@@ -302,7 +302,12 @@ const LATER = 'With --send-after Reply holds the send until that moment, given w
     + 'send; state, when Reply gives it, says whether it has gone out: queued or sending is not yet, then sent, failed or\n'
     + 'cancelled. direct-send get <reference> reads it later, and direct-send cancel <reference> stops one not yet sent. An\n'
     + 'answer without state comes from a Reply that does not know --send-after and --schedule-id: it sent at once, as\n'
-    + 'without them. --idempotency-key goes as the Idempotency-Key header, never in the body.\n';
+    + 'without them. --idempotency-key goes as the Idempotency-Key header, never in the body. A Reply that knows the header\n'
+    + 'answers a repeat with the same key with the send the key first made; while that one is still being made the answer\n'
+    + 'is idempotency_key.in_use, and the same key on a different send is idempotency_key.reused. Neither sends anything.\n';
+
+// The refusals of a send's key, the same on every direct send, after each send's own.
+const KEY_CODES = ['idempotency_key.in_use', 'idempotency_key.reused'];
 
 // One send's example with the person and the text both on stdin.
 const piped_send = (command: string, contact: string, message: string, flags: string): string=>
@@ -317,7 +322,7 @@ later_options(add_contact_options(contact_command.command('send-email'), true)
     .addHelpText('after', help(
         [`echo '{"subject":"Quick question","body":"<p>Hi Ann, does Tuesday work?</p>"}' | ${P} contact send-email --contact-id 456 --email-account-id 12 --message -`,
             piped_send('send-email', ANN_EMAIL, '{"subject":"Quick question","body":"<p>Hi Ann</p>"}', '--email-account-id 12')],
-        ['contact.not_found', ...IMPORT_CODES, 'contact.already_held', 'email_account.not_found', 'contact.blacklisted'], true,
+        ['contact.not_found', ...IMPORT_CODES, 'contact.already_held', 'email_account.not_found', 'contact.blacklisted', ...KEY_CODES], true,
         'Result: {"status":"sent","contact_id","contact_created","message_id","sent_at","reply_status"}: sent means Reply\n'
             + 'accepted the email, and reply_status is Reply\'s own word for it (new or sent). message_id is Reply\'s messageId,\n'
             + 'null when it gives none. Reply\'s answer carries no time, so sent_at is always null; the CLI adds none of its own.\n'
@@ -350,7 +355,7 @@ const linkedin_send = (
         .option('--linkedin-account-id <id>', 'The LinkedIn account to send from (see `account list`)')
         .option('--message <stdin>', `Only -: the ${message} as JSON on stdin`))
         .description(description)
-        .addHelpText('after', help(examples, [...LINKEDIN_SEND_CODES, ...codes], true, extra + LATER + SENT_TO('linkedin', what),
+        .addHelpText('after', help(examples, [...LINKEDIN_SEND_CODES, ...codes, ...KEY_CODES], true, extra + LATER + SENT_TO('linkedin', what),
             SEND_TWICE(what)))
         .action(run(async(cmd)=>{
             const {g, ctx} = ctx_of(cmd);

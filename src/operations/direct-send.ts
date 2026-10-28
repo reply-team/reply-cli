@@ -145,7 +145,34 @@ const REFUSALS: Record<string, {status: number; code: string; title: string}> = 
 
 const LIMITS: Record<string, string> = {'directLinkedIn.dailyLimitReached': 'daily', 'directLinkedIn.weeklyLimitReached': 'weekly'};
 
-const send_refusal = (a: Answer, contact_id: number): Operation_error=>{
+type Refusal = {status: number; code: string; title: string; hint?: string};
+
+// The codes of a send made for later, each Reply's code with the CLI code it maps to, here and
+// nowhere else. A send route answers a refused Idempotency-Key under its own family: contact for the
+// email, directLinkedIn for the LinkedIn sends. Neither sent anything.
+const KEY_IN_USE = {
+    status: 409, code: 'idempotency_key.in_use', title: 'Reply is still making an earlier send with this idempotency key, so this one sent nothing.',
+    hint: 'Run it again with the same key once that send is made: Reply answers a repeat with the send the key first made.',
+};
+const KEY_REUSED = {
+    status: 409, code: 'idempotency_key.reused', title: 'Reply already took this idempotency key for a different send, so nothing was sent.',
+    hint: 'Give each new send a key of its own.',
+};
+const KEY_REFUSALS: Record<Channel, Record<string, Refusal>> = {
+    email: {'contact.idempotencyKeyInUse': KEY_IN_USE, 'contact.idempotencyKeyReused': KEY_REUSED},
+    linkedin: {'directLinkedIn.idempotencyKeyInUse': KEY_IN_USE, 'directLinkedIn.idempotencyKeyReused': KEY_REUSED},
+};
+
+// The refusal a table holds for this answer, under the status Reply publishes it with, or undefined.
+const known_refusal = (a: Answer, table: Record<string, Refusal>): Operation_error | undefined=>{
+    const reply_code = reply_code_of(a);
+    const known = reply_code === undefined ? undefined : table[reply_code];
+    return known !== undefined && known.status === a.status
+        ? new Operation_error(known.code, known.title, {status: a.status, reply_code, detail: detail_of(a), hint: known.hint})
+        : undefined;
+};
+
+const send_refusal = (a: Answer, contact_id: number, by: Channel): Operation_error=>{
     const reply_code = reply_code_of(a);
     if (a.status === 404 && (reply_code === 'contact.notFound' || reply_code === 'directLinkedIn.contactNotFound'))
     {
@@ -158,12 +185,7 @@ const send_refusal = (a: Answer, contact_id: number): Operation_error=>{
             retry_after: parse_retry_after(a.headers['retry-after']) ?? undefined, details: {limit: LIMITS[reply_code]},
         });
     }
-    const known = reply_code === undefined ? undefined : REFUSALS[reply_code];
-    if (known !== undefined && known.status === a.status)
-    {
-        return new Operation_error(known.code, known.title, {status: a.status, reply_code, detail: detail_of(a)});
-    }
-    return refusal(a, 'write');
+    return known_refusal(a, REFUSALS) ?? known_refusal(a, KEY_REFUSALS[by]) ?? refusal(a, 'write');
 };
 
 const positive_integer = (v: unknown): number | null=>
@@ -298,7 +320,7 @@ const handle_direct_send = async(
         }
         if (a.status !== 200)
         {
-            throw send_refusal(a, ensured.id);
+            throw send_refusal(a, ensured.id, by);
         }
         print_result(result_of(name, ensured, expect_object(a, 'write')), g);
     } catch (e) {

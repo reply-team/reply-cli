@@ -702,7 +702,7 @@ describe('a send for later', ()=>{
         expect((e as {hint?: string}).hint).toContain('may send it twice');
     });
 
-    it('a 404 with no code of Reply own stays reply.refused, status 404 and no reply code, an empty body or a problem without one', async()=>{
+    it('a 404 with no code of Reply\'s own stays reply.refused, status 404 and no reply code, an empty body or a problem without one', async()=>{
         const bare: [string, ()=>Response][] = [
             ['empty', ()=>new Response(null, {status: 404})],
             ['problem', ()=>json({title: 'Not Found', status: 404}, 404, {'Content-Type': 'application/problem+json'})],
@@ -717,6 +717,46 @@ describe('a send for later', ()=>{
                 expect(e, `${name} ${label}`).toMatchObject({code: 'reply.refused', status: 404, exit_code: 1});
                 expect((e as {reply_code?: string}).reply_code, `${name} ${label}`).toBeUndefined();
             }
+        }
+    });
+});
+
+describe('a send made with an idempotency key', ()=>{
+    const KEY = {idempotencyKey: 'send-456-step-2'};
+    const SENDS: [Direct_send_name, unknown, Direct_send_opts, string][] = [
+        ['send-email', {subject: SUBJECT, body: BODY}, {...EMAIL_OPTS, ...KEY}, 'contact'],
+        ['linkedin-connect', {note: NOTE}, {...LINKEDIN_OPTS, ...KEY}, 'directLinkedIn'],
+        ['linkedin-message', {body: TEXT}, {...LINKEDIN_OPTS, ...KEY}, 'directLinkedIn'],
+        ['linkedin-inmail', {subject: SUBJECT, body: TEXT}, {...LINKEDIN_OPTS, ...KEY}, 'directLinkedIn'],
+        ['linkedin-voice', {script: SCRIPT}, {...LINKEDIN_OPTS, ...KEY}, 'directLinkedIn'],
+    ];
+
+    it('maps the key Reply holds for a send still being made, and the key reused for another send, each definite', async()=>{
+        for (const [name, message, opts, family] of SENDS)
+        {
+            for (const [reply_code, code] of [['idempotencyKeyInUse', 'idempotency_key.in_use'], ['idempotencyKeyReused', 'idempotency_key.reused']])
+            {
+                mock_fetch.mockReset();
+                answer(json({code: `${family}.${reply_code}`, detail: 'Idempotency-Key conflict.'}, 409));
+                const e = await failure(name, message, opts);
+                expect(e, `${name} ${reply_code}`).toMatchObject({code, exit_code: 1, status: 409, reply_code: `${family}.${reply_code}`,
+                    ids: {contact_id: 456}});
+                expect(sent(), name).toHaveLength(1);
+            }
+        }
+    });
+
+    it('reads those codes only under 409 and only in the send route\'s own family; any other answer is mapped as before', async()=>{
+        const cases: [Direct_send_name, unknown, Direct_send_opts, Response][] = [
+            ['send-email', {subject: SUBJECT, body: BODY}, {...EMAIL_OPTS, ...KEY}, json({code: 'contact.idempotencyKeyInUse'}, 400)],
+            ['send-email', {subject: SUBJECT, body: BODY}, {...EMAIL_OPTS, ...KEY}, json({code: 'directLinkedIn.idempotencyKeyInUse'}, 409)],
+            ['linkedin-message', {body: TEXT}, {...LINKEDIN_OPTS, ...KEY}, json({code: 'contact.idempotencyKeyReused'}, 409)],
+        ];
+        for (const [name, message, opts, res] of cases)
+        {
+            mock_fetch.mockReset();
+            answer(res);
+            expect(await failure(name, message, opts), name).toMatchObject({code: 'reply.refused', exit_code: 1});
         }
     });
 });

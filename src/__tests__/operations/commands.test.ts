@@ -243,9 +243,11 @@ describe('operations/commands', ()=>{
             expect(flat, text).toContain('direct-send get <reference> reads it later, and direct-send cancel <reference> stops one not yet sent');
             expect(flat, text).toContain('An answer without state comes from a Reply that does not know --send-after and --schedule-id');
             expect(flat, text).toContain('--idempotency-key goes as the Idempotency-Key header');
+            expect(flat, text).toContain('A Reply that knows the header answers a repeat with the same key with the send the key first made; while that one is still '
+                + 'being made the answer is idempotency_key.in_use, and the same key on a different send is idempotency_key.reused');
             // Exactly the codes its endpoint publishes, then the shared ones, as the help lists them.
             const listed = text.split('\nErrors')[1].split('\nExit codes')[0].split('\n').slice(1).map(l=>l.trim());
-            expect(listed, name).toEqual([...codes, 'access.denied', 'access.feature_unavailable', 'rate_limited', 'reply.unavailable',
+            expect(listed, name).toEqual([...codes, 'idempotency_key.in_use', 'idempotency_key.reused', 'access.denied', 'access.feature_unavailable', 'rate_limited', 'reply.unavailable',
                 'reply.refused', 'reply.invalid_request', 'outcome.unknown']);
         }
     });
