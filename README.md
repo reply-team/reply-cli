@@ -198,10 +198,14 @@ prints JSON (indented; compact with `--json`) and says what happened in a stable
 | `reply contact update (<id> \| <contact>) --fields -` | change some fields and custom fields; null clears one → `updated` |
 | `reply contact delete <id>` | → `deleted` |
 | `reply contact opt-out <contact>` | → `opted_out` |
-| `reply contact send-email <contact> --email-account-id N --message -` | one email now, outside any sequence → `sent` |
+| `reply contact send-email <contact> --email-account-id N --message -` | one email outside any sequence → `sent` |
 | `reply contact linkedin-connect <contact> --linkedin-account-id N [--message -]` | a LinkedIn invitation, with or without a note → `sent` / `already_connected` |
 | `reply contact linkedin-message …` · `linkedin-inmail …` · `linkedin-voice …` | a LinkedIn message, an InMail, or an AI voice message spoken from a script → `sent` |
+| any direct send `… [--send-after <moment>] [--schedule-id N] [--idempotency-key K]` | the send held until a moment, timed by a schedule, under a key of yours → `sent`, with its `reference` and `state` |
+| `reply direct-send get <reference>` | a send as Reply holds it: whether it has gone out, when, and why it failed |
+| `reply direct-send cancel <reference>` | stop a send that has not gone out yet → `state` `cancelled` |
 | `reply inbox list (--contact-id \| --sequence-id) [--source] [--channel] [--category-id] [--since]` | one page of threads |
+| `reply inbox events [--cursor … \| --since …] [--top N]` | one page of the inbox feed, read forward by cursor |
 | `reply inbox get <thread-id>` | a thread with its subject, and one page of its messages |
 | `reply inbox reply <thread-id> --message -` | reply in the thread, on its own channel → `sent` |
 | `reply inbox categories` | the categories a thread can be filed under |
@@ -304,6 +308,51 @@ lengths Reply publishes (a LinkedIn message's 8000 characters, an InMail's 200 a
 1000) are refused before anything is sent. Reply reads `{{…}}` in a LinkedIn text as its template
 variables, and refuses one it cannot fill with `linkedin.missing_variables`.
 
+Every direct send also takes `--send-after <moment>`, `--schedule-id <id>` and `--idempotency-key
+<key>`. Reply holds the send until the moment, given with its offset (`2026-11-03T14:00:00Z`,
+`2026-11-03T16:00:00+02:00`) and sent to Reply in UTC; a moment without an offset is refused
+(`usage.date`). `--schedule-id` names the sending schedule Reply times the send by (see `reply
+schedule list`). The answer then adds Reply's `reference`, `send_after` and `state`, each only when
+Reply gives it. `status: "sent"` means Reply took the send, and `state`, when present, says whether
+it has gone out: `queued` or `sending` is not yet, then `sent`, `failed` or `cancelled`. `reply
+direct-send get <reference>` reads the send later, and `reply direct-send cancel <reference>` stops
+one that has not gone out; the reference is Reply's, passed on as given. An answer without `state`
+comes from a Reply that does not know these flags yet: it sent at once, as without them.
+
+`--idempotency-key` goes to Reply as the `Idempotency-Key` header, never in the body. A Reply that
+knows the header answers a repeat with the same key with the send the key first made; while that
+one is still being made the answer is `idempotency_key.in_use`, and the same key on a different
+send is `idempotency_key.reused`. Neither sends anything.
+
+```sh
+echo '{"body":"Following up on my note."}' | reply contact linkedin-message --contact-id 456 --linkedin-account-id 34 --message - --send-after 2026-11-03T14:00:00Z --idempotency-key follow-up-456-1
+# {"status":"sent",…,"reference":"linkedin-1042","send_after":"2026-11-03T14:00:00Z","state":"queued"}
+reply direct-send get linkedin-1042
+reply direct-send cancel linkedin-1042
+```
+
+`direct-send cancel` of a send already cancelled answers it again. A send already gone out or
+failed is `direct_send.already_sent` or `direct_send.already_failed`, and a reference Reply has no
+send for is `direct_send.not_found`.
+
+`reply inbox events` reads the inbox feed forward. Each page holds the threads whose latest message,
+inbound or outbound, changed, oldest first and as Reply gives them, with `has_more` and a `cursor`.
+Start with `--since <moment>` (inclusive, at most 30 days ago) or with neither flag, which reads the
+last 30 days, then pass the answered cursor back with `--cursor` while `has_more` is true. Loop on
+`has_more`, not on the number of items: an empty page still carries a cursor, and when `has_more` is
+false that cursor is where the next read starts. A cursor Reply will not read, one unreadable, older
+than 30 days or ahead of its clock, is `inbox.cursor_refused`: start again with `--since`.
+
+```sh
+reply inbox events --since 2026-11-01T00:00:00Z --json
+# {"items":[{"threadId":9876,"contactId":456,"channel":"email","lastActivityDate":"2026-11-03T14:02:11Z",…}],
+#   "has_more":true,"cursor":"AQjfObhYHZgAAADjVg"}
+reply inbox events --cursor AQjfObhYHZgAAADjVg --json
+```
+
+A Reply that does not have `direct-send get`, `direct-send cancel` or the feed yet answers
+`reply.refused` with status 404 and no `reply_code`.
+
 `reply schedule list` gives every sending schedule the account can use, in one answer and in the
 order Reply gives them: its `time_zone_id` as Reply holds it, a Windows time zone identifier such as
 `Eastern Standard Time`, whether it reads its windows in each recipient's own time zone, whether it
@@ -326,7 +375,8 @@ reply schedule list --json
 re-run. On exit 3 (outcome unknown) a reply or a send may already have gone, and running it again may
 send it twice, unless the hint says nothing was sent: a send whose contact's import lost its answer
 was never made, and its hint says so; run again, it answers `contact.already_held` if that import did
-create the contact.
+create the contact. An `--idempotency-key` does not change this: a Reply that does not know the
+header yet would make the send again.
 For `inbox reply`, read the thread with `reply inbox get` before trying again. For
 `sequence create`, Reply allows two sequences of one name, so after exit 3 look the name up with
 `sequence list --name -` first. Every other work command can simply be run again; a `contact delete`
