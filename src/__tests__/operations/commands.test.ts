@@ -300,6 +300,8 @@ describe('operations/commands', ()=>{
                 + 'state and send_after, each only when Reply gives it');
             expect(flat, text).toContain('Any other refusal of a send Reply already holds names that send the same way, beside the '
                 + 'refusal\'s own details; its code is the refusal\'s own');
+            expect(flat, text).toContain('A 400 to the send with neither a code nor errors[] is Reply failing while it made the send: '
+                + 'like a 5xx or a lost answer, it is outcome.unknown (exit 3)');
             // Exactly the codes its endpoint publishes, then the shared ones, as the help lists them.
             const listed = text.split('\nErrors')[1].split('\nExit codes')[0].split('\n').slice(1).map(l=>l.trim());
             expect(listed, name).toEqual([...codes, 'idempotency_key.in_use', 'idempotency_key.reused', 'access.denied', 'access.feature_unavailable', 'rate_limited', 'reply.unavailable',

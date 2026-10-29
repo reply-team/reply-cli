@@ -223,7 +223,19 @@ const known_refusal = (a: Answer, table: Record<string, Refusal>): Operation_err
         : undefined;
 };
 
+// An exception escaping a send reaches the caller as a 400 whose JSON carries neither a code nor
+// errors[]: the send may already be made, as on a 5xx. A model validation names its fields in
+// errors[], and a page that is not JSON is no exception of Reply's; both stay refusals.
+const exception_of_send = (a: Answer): boolean=>
+    a.status === 400 && is_object(a.data) && a.data.code === undefined && a.data.errors === undefined;
+
 const refusal_of_send = (a: Answer, contact_id: number, by: Channel): Operation_error=>{
+    if (exception_of_send(a))
+    {
+        return new Unknown_outcome_error('Reply failed while handling the send; it may or may not have been made.', {
+            status: a.status, detail: detail_of(a),
+        });
+    }
     const reply_code = reply_code_of(a);
     if (a.status === 404 && (reply_code === 'contact.notFound' || reply_code === 'directLinkedIn.contactNotFound'))
     {

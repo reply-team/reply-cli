@@ -528,6 +528,8 @@ describe('a direct send to a person given by their fields', ()=>{
                 'contact.invalid_linkedin_url', 1],
             [[nobody(), nobody(), json({code: 'contact.limitExceeded', detail: 'Contact limit reached.'}, 400)], 'account.contact_limit_reached', 1],
             [[nobody(), nobody(), json({items: [{id: null, status: 'failed', error: 'Invalid data'}]})], 'reply.refused', 1],
+            // A 400 with neither a code nor errors[] is read as Reply's exception only on the send call, never on the import.
+            [[nobody(), nobody(), json({title: 'Bad Request', status: 400}, 400, {'Content-Type': 'application/problem+json'})], 'reply.refused', 1],
         ];
         for (const [answers, code, exit_code] of cases)
         {
@@ -956,6 +958,61 @@ describe('a refused send that Reply holds a row for', ()=>{
             const e = await failure('send-email', EMAIL, EMAIL_OPTS);
             expect(details_of(e)).toBeUndefined();
             expect(JSON.stringify((e as {to_json: () => unknown}).to_json())).not.toContain('details');
+        }
+    });
+});
+
+describe('a 400 on the send call with neither a code nor errors[]', ()=>{
+    const SENDS: [Direct_send_name, unknown, Direct_send_opts][] = [
+        ['send-email', {subject: SUBJECT, body: BODY}, EMAIL_OPTS],
+        ['linkedin-connect', {note: NOTE}, LINKEDIN_OPTS],
+        ['linkedin-message', {body: TEXT}, LINKEDIN_OPTS],
+        ['linkedin-inmail', {subject: SUBJECT, body: TEXT}, LINKEDIN_OPTS],
+        ['linkedin-voice', {script: SCRIPT}, LINKEDIN_OPTS],
+    ];
+    const problem = (body: unknown)=>json(body, 400, {'Content-Type': 'application/problem+json'});
+
+    it('is Reply\'s exception path: outcome.unknown (exit 3), made once, and a repeat may send it twice', async()=>{
+        for (const [name, message, opts] of SENDS)
+        {
+            for (const [label, res] of [['problem', ()=>problem({title: 'Internal error', status: 400})], ['json', ()=>json({title: 'Internal error'}, 400)]] as const)
+            {
+                mock_fetch.mockReset();
+                answer(res());
+                const e = await failure(name, message, opts);
+                expect(e, `${name} ${label}`).toMatchObject({code: 'outcome.unknown', exit_code: 3, status: 400, ids: {contact_id: 456}});
+                expect((e as {reply_code?: string}).reply_code, `${name} ${label}`).toBeUndefined();
+                expect((e as {hint?: string}).hint ?? '', `${name} ${label}`).toContain('may send it twice');
+                expect(mock_fetch, `${name} ${label}`).toHaveBeenCalledTimes(1);
+            }
+        }
+    });
+
+    it('keeps the send it names under details, should Reply give one', async()=>{
+        answer(problem({title: 'Internal error', status: 400, reference: 'email-1001', state: 'failed'}));
+        const e = await failure('send-email', {subject: SUBJECT, body: BODY}, EMAIL_OPTS);
+        expect(e).toMatchObject({code: 'outcome.unknown', exit_code: 3, details: {reference: 'email-1001', state: 'failed'}});
+    });
+
+    it('with errors[] it is a request Reply refused as given, and a page that is not JSON maps as before', async()=>{
+        for (const [name, message, opts] of SENDS)
+        {
+            const cases: [string, ()=>Response, string][] = [
+                ['errors', ()=>problem({title: 'Validation failed', status: 400, errors: [{pointer: '/body', detail: 'must not be empty'}]}),
+                    'reply.invalid_request'],
+                ['empty errors', ()=>problem({title: 'Validation failed', status: 400, errors: []}), 'reply.invalid_request'],
+                ['html', ()=>new Response('<html>Bad Request</html>', {status: 400, headers: {'Content-Type': 'text/html'}}), 'reply.refused'],
+                ['text', ()=>new Response('Bad Request', {status: 400, headers: {'Content-Type': 'text/plain'}}), 'reply.refused'],
+                ['empty', ()=>new Response(null, {status: 400}), 'reply.refused'],
+            ];
+            for (const [label, res, code] of cases)
+            {
+                mock_fetch.mockReset();
+                answer(res());
+                const e = await failure(name, message, opts);
+                expect(e, `${name} ${label}`).toMatchObject({code, exit_code: 1, status: 400});
+                expect(mock_fetch, `${name} ${label}`).toHaveBeenCalledTimes(1);
+            }
         }
     });
 });
