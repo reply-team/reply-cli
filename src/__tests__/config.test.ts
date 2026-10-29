@@ -59,8 +59,43 @@ describe('config', ()=>{
         });
 
         it('user_agent is <app>-cli/<version> and identifies the CLI', ()=>{
-            expect(user_agent()).toBe(`${APP_NAME}-cli/${cli_version()}`);
-            expect(user_agent().startsWith('reply-cli/')).toBe(true);
+            expect(user_agent({})).toBe(`${APP_NAME}-cli/${cli_version()}`);
+            expect(user_agent({}).startsWith('reply-cli/')).toBe(true);
+        });
+
+        it('a well-formed REPLY_CLIENT names the program running the CLI before it, the CLI\'s own token kept last', ()=>{
+            const own = `reply-cli/${cli_version()}`;
+            for (const client of ['jason-harness/0.22.0', 'a/1', 'x9/1.0.0-rc.1+build.7', `${'a'.repeat(32)}/${'9'.repeat(32)}`, 'my-tool/V2'])
+            {
+                expect(user_agent({REPLY_CLIENT: client}), client).toBe(`${client} ${own}`);
+            }
+        });
+
+        it('leaves the User-Agent exactly as it is when REPLY_CLIENT is unset or not one product token and its version', ()=>{
+            const own = `reply-cli/${cli_version()}`;
+            const malformed = [
+                '', ' ', 'jason harness/0.22.0', 'jason-harness/0.22 0', 'jason-harness', 'jason-harness/', '/0.22.0',
+                `${'a'.repeat(33)}/1`, `a/${'9'.repeat(33)}`, 'Jason-harness/0.22.0', 'JASON/1', '9jason/1', '-jason/1',
+                'jason_harness/1', 'jason/harness/1', 'jason/1 (Windows)', ' jason/1', 'jason/1 ', 'jason/1\n', 'jason/1\r\nX-Evil: 1',
+                'jason/1;', 'jasön/1', 'jason/1é',
+            ];
+            expect(user_agent({}), 'unset').toBe(own);
+            for (const client of malformed)
+            {
+                expect(user_agent({REPLY_CLIENT: client}), JSON.stringify(client)).toBe(own);
+            }
+        });
+
+        it('reads REPLY_CLIENT from the process environment by default', ()=>{
+            const before = process.env.REPLY_CLIENT;
+            try {
+                process.env.REPLY_CLIENT = 'jason-harness/0.22.0';
+                expect(user_agent()).toBe(`jason-harness/0.22.0 reply-cli/${cli_version()}`);
+                delete process.env.REPLY_CLIENT;
+                expect(user_agent()).toBe(`reply-cli/${cli_version()}`);
+            } finally {
+                if (before === undefined) { delete process.env.REPLY_CLIENT; } else { process.env.REPLY_CLIENT = before; }
+            }
         });
     });
 });

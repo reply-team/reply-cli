@@ -185,6 +185,21 @@ describe('utils/client', ()=>{
         expect(init.headers['User-Agent']).toMatch(/^reply-cli\/\d+\.\d+\.\d+/);
     });
 
+    it('puts the program named by REPLY_CLIENT before the CLI in the User-Agent, and leaves a malformed one out', async()=>{
+        mock_fetch.mockImplementation(async()=>json_res({ok: true}));
+        try {
+            vi.stubEnv('REPLY_CLIENT', 'jason-harness/0.22.0');
+            await get(BASE, 'tok', '/x');
+            vi.stubEnv('REPLY_CLIENT', 'jason harness');
+            await get(BASE, 'tok', '/x');
+        } finally {
+            vi.unstubAllEnvs();
+        }
+        const agents = mock_fetch.mock.calls.map(([, init])=>init.headers['User-Agent']);
+        expect(agents[0]).toMatch(/^jason-harness\/0\.22\.0 reply-cli\/\d+\.\d+\.\d+/);
+        expect(agents[1]).toMatch(/^reply-cli\/\d+\.\d+\.\d+/);
+    });
+
     describe('retry policy: reads vs writes', ()=>{
         const net_error = (code?: string)=>Object.assign(new TypeError('fetch failed'),
             code ? {cause: Object.assign(new Error(code), {code})} : {});
