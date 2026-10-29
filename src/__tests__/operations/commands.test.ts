@@ -307,6 +307,8 @@ describe('operations/commands', ()=>{
                 + 'refusal\'s own details; its code is the refusal\'s own');
             expect(flat, text).toContain('A 400 to the send with neither a code nor errors[] is Reply failing while it made the send: '
                 + 'like a 5xx or a lost answer, it is outcome.unknown (exit 3)');
+            expect(flat, text).toContain('So is a 400 directLinkedIn.unknown to a LinkedIn send, Reply\'s answer when it failed while '
+                + 'making the send or could not map the provider\'s answer; Reply\'s code is kept in reply_code');
             // Exactly the codes its endpoint publishes, then the shared ones, as the help lists them.
             const listed = text.split('\nErrors')[1].split('\nExit codes')[0].split('\n').slice(1).map(l=>l.trim());
             expect(listed, name).toEqual([...codes, 'idempotency_key.in_use', 'idempotency_key.reused', 'access.denied', 'access.feature_unavailable', 'rate_limited', 'reply.unavailable',

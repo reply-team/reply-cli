@@ -403,7 +403,9 @@ reply schedule list --json
 re-run. On exit 3 (outcome unknown) a reply or a send may already have gone, and running it again may
 send it twice, unless the hint says nothing was sent. A direct send's exit 3 comes from a lost
 answer, a 5xx, or a 400 to the send whose JSON carries neither a `code` nor `errors[]`, which is
-Reply failing while it made the send; a 400 with `errors[]` is `reply.invalid_request` and sent
+Reply failing while it made the send. On a LinkedIn send, a 400 `directLinkedIn.unknown` is the
+same: Reply failed while making the send or could not map the provider's answer, and its code is
+kept in `reply_code`. A 400 with `errors[]` is `reply.invalid_request` and sent
 nothing. A send whose contact's import lost its answer was never made, and its hint says so; run
 again, it answers `contact.already_held` if that import did create the contact. An `--idempotency-key` does not change this: a Reply that does not know the
 header yet would make the send again.
