@@ -275,6 +275,8 @@ describe('every direct send', ()=>{
         const answers: [string, ()=>void][] = [
             ['lost answer', ()=>{ mock_fetch.mockRejectedValueOnce(lost_connection()); }],
             ['503', ()=>answer(json({title: 'Service Unavailable'}, 503))],
+            // An exception escaping a send, on the email route and the LinkedIn ones alike.
+            ['500', ()=>answer(json({title: 'Internal Server Error', status: 500}, 500, {'Content-Type': 'application/problem+json'}))],
             ['uncoded 502', ()=>answer(json('<html>bad gateway</html>', 502))],
             ['201', ()=>answer(json({}, 201))],
             ['unreadable 200', ()=>answer(json('<html>ok</html>', 200))],
