@@ -306,8 +306,9 @@ const LATER = 'With --send-after Reply holds the send until that moment, given w
     + 'without them. --idempotency-key goes as the Idempotency-Key header, never in the body. A Reply that knows the header\n'
     + 'answers a repeat with the same key with the send the key first made; while that one is still being made the answer\n'
     + 'is idempotency_key.in_use, and the same key on a different send is idempotency_key.reused. Neither sends anything.\n'
-    + 'idempotency_key.reused names the send the key was first taken for in details: reference, state and send_after, each\n'
-    + 'only when Reply gives it.\n';
+    + 'A repeat of a send given a person\'s fields answers contact.already_held first, since the first one created the\n'
+    + 'contact: that is safe too, as nothing is sent twice. idempotency_key.reused names the send the key was first taken\n'
+    + 'for in details: reference, state and send_after, each only when Reply gives it.\n';
 
 // The refusals of a send's key, the same on every direct send, after each send's own.
 const KEY_CODES = ['idempotency_key.in_use', 'idempotency_key.reused'];

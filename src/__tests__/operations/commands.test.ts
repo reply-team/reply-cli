@@ -290,6 +290,9 @@ describe('operations/commands', ()=>{
             expect(flat, text).toContain('--idempotency-key goes as the Idempotency-Key header');
             expect(flat, text).toContain('A Reply that knows the header answers a repeat with the same key with the send the key first made; while that one is still '
                 + 'being made the answer is idempotency_key.in_use, and the same key on a different send is idempotency_key.reused');
+            // Given a person's fields, a repeat finds the contact the first one created before it reaches the key.
+            expect(flat, text).toContain('A repeat of a send given a person\'s fields answers contact.already_held first, since the '
+                + 'first one created the contact: that is safe too, as nothing is sent twice');
             expect(flat, text).toContain('idempotency_key.reused names the send the key was first taken for in details: reference, '
                 + 'state and send_after, each only when Reply gives it');
             // Exactly the codes its endpoint publishes, then the shared ones, as the help lists them.

@@ -334,8 +334,10 @@ comes from a Reply that does not know these flags yet: it sent at once, as witho
 `--idempotency-key` goes to Reply as the `Idempotency-Key` header, never in the body. A Reply that
 knows the header answers a repeat with the same key with the send the key first made; while that
 one is still being made the answer is `idempotency_key.in_use`, and the same key on a different
-send is `idempotency_key.reused`. Neither sends anything. `idempotency_key.reused` names the send
-the key was first taken for under the error's `details`: its `reference`, `state` and `send_after`,
+send is `idempotency_key.reused`. Neither sends anything. A repeat of a send given a person's
+fields (`--contact -`) answers `contact.already_held` first, since the first one created the
+contact: that is safe too, as nothing is sent twice. `idempotency_key.reused` names the send the
+key was first taken for under the error's `details`: its `reference`, `state` and `send_after`,
 each only when Reply gives it. A key is 1 to 255 printable ASCII characters; a space inside is kept,
 and one at either end is refused (`usage.idempotency_key`), since a header loses it on the way out.
 
