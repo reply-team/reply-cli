@@ -575,7 +575,8 @@ const direct_send_command = new Command('direct-send').description('Read or canc
 
 const DIRECT_SEND = 'Result: {"reference","channel","contact_id","state","send_after","sent_at","message_id","failure_reason",\n'
     + '"cancelled_at"}, Reply\'s fields under these names, each null when Reply gives none. The reference is Reply\'s, from the\n'
-    + 'answer of a send made with --send-after; it is passed on as given and never read. state is Reply\'s own word: queued\n'
+    + 'answer of a send made with --send-after; it is passed on as given and never read, except that . and .. are refused\n'
+    + '(usage.reference, exit 2), since a path reads either as a step up. state is Reply\'s own word: queued\n'
     + 'or sending is not yet sent, then sent, failed or cancelled. failure_code, missing_variables, rendered_subject and\n'
     + 'rendered_body are added only when Reply gives them: failure_reason is a sentence for a person, never parsed;\n'
     + 'failure_code is Reply\'s code for the failure, the one to branch on. missing_variables lists the template variables\n'

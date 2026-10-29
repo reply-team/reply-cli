@@ -83,13 +83,25 @@ describe('direct-send get', ()=>{
     });
 
     it('sends the reference as given, encoded into the path and never checked or parsed', async()=>{
-        for (const [reference, path] of [['ds_8F2k', 'ds_8F2k'], ['a/b c?d', 'a%2Fb%20c%3Fd'], ['email-0', 'email-0']])
+        for (const [reference, path] of [['ds_8F2k', 'ds_8F2k'], ['a/b c?d', 'a%2Fb%20c%3Fd'], ['email-0', 'email-0'],
+            ['a.b', 'a.b'], ['...', '...'], ['.a', '.a'], [' ..', '%20..']])
         {
             mock_fetch.mockReset();
             answer(json({...QUEUED, reference}));
             await get(reference);
             expect(sent()[0].url, reference).toBe(`https://api/v3/direct-sends/${path}`);
         }
+    });
+
+    it('refuses . and .. before any call: a path segment of either would be read as a step up the path, not as a reference', async()=>{
+        for (const dots of ['.', '..'])
+        {
+            for (const fn of [handle_direct_send_get, handle_direct_send_cancel])
+            {
+                expect(await failure(()=>fn(dots, ctx(), {})), `${fn.name} ${dots}`).toMatchObject({code: 'usage.reference', exit_code: 2});
+            }
+        }
+        expect(mock_fetch).not.toHaveBeenCalled();
     });
 
     it('refuses a blank reference before any call', async()=>{

@@ -5,11 +5,18 @@ import {print_result} from './result';
 import type {Op_globals} from './options';
 import type {Cli_context} from '../context';
 
-// The reference is Reply's and opaque: it is sent as given, encoded into the path, and never read.
+// The reference is Reply's and opaque: it is sent as given, encoded into the path, and never read
+// beyond refusing what cannot name a send.
 const path_of = (reference: string): string=>{
     if (reference.trim() === '')
     {
         throw new UsageError('No reference was given.', {code: 'usage.reference', hint: 'A send made with --send-after answers its reference.'});
+    }
+    // Encoding leaves a dot as it is, and a path segment of . or .. is read as a step up the path: the
+    // call would reach another route.
+    if (reference === '.' || reference === '..')
+    {
+        throw new UsageError(`${reference} is not a reference.`, {code: 'usage.reference', hint: 'A send made with --send-after answers its reference.'});
     }
     return `/v3/direct-sends/${encodeURIComponent(reference)}`;
 };
