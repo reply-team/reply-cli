@@ -576,6 +576,17 @@ Reply.io login (`reply auth login`) to actually do anything.
 | `REPLY_TEAM_ID` | Team/workspace id sent as `X-TEAM-ID` (same as `--team-id`) |
 | `REPLY_CONFIG_DIR` | Config directory (default `~/.config/reply`; `%APPDATA%\reply` on Windows) |
 | `REPLY_NO_UPDATE_CHECK` | Set to `1` to never check whether a newer release exists |
+| `REPLY_CLIENT` | The program running the CLI, as `<name>/<version>`, put before `reply-cli/<version>` in the User-Agent |
+
+`REPLY_CLIENT` lets a program that runs the CLI for you say so on every request
+to Reply: with `REPLY_CLIENT=jason-harness/0.22.0` the User-Agent is
+`jason-harness/0.22.0 reply-cli/0.17.2` instead of `reply-cli/0.17.2`, so calls
+made through that program can be told apart from your own. The Jason harness
+sets it for each command it runs. The value must be one lower-case name of up to
+32 letters, digits or dashes, a `/`, and a version of up to 32 letters, digits,
+dots, `+` or `-`; anything else is left out and the User-Agent stays as it is.
+It is a label, not an input: it never refuses a command and never prints
+anything, and it is read only from the environment of the process.
 
 ## Contributing
 

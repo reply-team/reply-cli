@@ -44,9 +44,19 @@ const cli_version = (): string=>{
     return version;
 };
 
+// One product token and its version, as a program running the CLI names itself.
+const CLIENT = /^[a-z][a-z0-9-]{0,31}\/[0-9A-Za-z.+-]{1,32}$/;
+
 // Identifies CLI requests for telemetry (not security). Product token derives
 // from APP_NAME to keep the single build identity, e.g. 'reply-cli/0.1.0'.
-const user_agent = (): string=>`${APP_NAME}-cli/${cli_version()}`;
+// <PREFIX>_CLIENT puts the program running the CLI before it, e.g.
+// 'jason-harness/0.22.0 reply-cli/0.17.2'. It is a label, not an input: a value
+// of any other shape is left out, and nothing is refused or printed.
+const user_agent = (env: Env = process.env): string=>{
+    const own = `${APP_NAME}-cli/${cli_version()}`;
+    const client = get_env('CLIENT', env);
+    return client !== undefined && CLIENT.test(client) ? `${client} ${own}` : own;
+};
 
 // Default per-user config dir, mirroring gh/aws/az conventions.
 //   linux/mac: $XDG_CONFIG_HOME/<app>  (fallback ~/.config/<app>)
