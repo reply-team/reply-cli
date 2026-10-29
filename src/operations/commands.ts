@@ -573,14 +573,15 @@ schedule_command.command('list')
 
 const direct_send_command = new Command('direct-send').description('Read or cancel a direct send Reply holds to send later');
 
-const DIRECT_SEND = 'Result: {"reference","channel","contact_id","state","send_after","sent_at","message_id",\n'
-    + '"failure_reason","failure_code","missing_variables","rendered_subject","rendered_body","cancelled_at"}, Reply\'s fields\n'
-    + 'under these names, each null when Reply gives none. The reference is Reply\'s, from the answer of a send made with --send-after; it is\n'
-    + 'passed on as given and never read. state is Reply\'s own word: queued or sending is not yet sent, then sent, failed or\n'
-    + 'cancelled. failure_reason is a sentence for a person, never parsed; failure_code is Reply\'s code for the failure,\n'
-    + 'the one to branch on. missing_variables lists the template variables Reply could not fill, and rendered_subject and\n'
-    + 'rendered_body are the text as Reply filled it in. A Reply without this route answers reply.refused with status 404\n'
-    + 'and no reply_code; direct_send.not_found is a reference that Reply has no send for.\n';
+const DIRECT_SEND = 'Result: {"reference","channel","contact_id","state","send_after","sent_at","message_id","failure_reason",\n'
+    + '"cancelled_at"}, Reply\'s fields under these names, each null when Reply gives none. The reference is Reply\'s, from the\n'
+    + 'answer of a send made with --send-after; it is passed on as given and never read. state is Reply\'s own word: queued\n'
+    + 'or sending is not yet sent, then sent, failed or cancelled. failure_code, missing_variables, rendered_subject and\n'
+    + 'rendered_body are added only when Reply gives them: failure_reason is a sentence for a person, never parsed;\n'
+    + 'failure_code is Reply\'s code for the failure, the one to branch on. missing_variables lists the template variables\n'
+    + 'Reply could not fill, and rendered_subject and rendered_body are the text as Reply filled it in. A Reply without this\n'
+    + 'route answers reply.refused with status 404 and no reply_code; direct_send.not_found is a reference that Reply has no\n'
+    + 'send for.\n';
 
 direct_send_command.command('get')
     .argument('<reference>', 'The send\'s reference, as a send made with --send-after answered it')

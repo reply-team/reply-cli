@@ -14,9 +14,24 @@ const path_of = (reference: string): string=>{
     return `/v3/direct-sends/${encodeURIComponent(reference)}`;
 };
 
-// A send as Reply holds it, under the CLI's names; a field Reply leaves out is null. Its state is Reply's word, passed on as given, so a state the CLI does
+// What Reply says of the text it rendered and of a failure's code, each only when it gives it, as text
+// or null, and the unfilled names as a list: an answer without them prints as it did before them.
+const RENDERING_KEYS: [string, string][] = [['failureCode', 'failure_code'], ['renderedSubject', 'rendered_subject'], ['renderedBody', 'rendered_body']];
+
+const rendering_of = (body: Record<string, unknown>): Record<string, unknown>=>{
+    const given = (v: unknown): boolean=>typeof v === 'string' || v === null;
+    const out: Record<string, unknown> = Object.fromEntries(RENDERING_KEYS.filter(([from])=>given(body[from])).map(([from, to])=>[to, body[from]]));
+    const missing = body.missingVariables === null ? null : strings_of(body.missingVariables);
+    if (missing !== undefined)
+    {
+        out.missing_variables = missing;
+    }
+    return out;
+};
+
+// A send as Reply holds it, under the CLI's names; one of its first fields that Reply leaves out is null. Its state is Reply's word, passed on as given, so a state the CLI does
 // not know yet reaches the caller instead of failing the read. failure_reason is a sentence for a person and failure_code
-// Reply's code for the same failure: neither is read here, and missing_variables is a list of names or null.
+// Reply's code for the same failure: neither is read here.
 const direct_send_of = (a: Answer, kind: 'read' | 'write'): Record<string, unknown>=>{
     const body = expect_object(a, kind);
     if (typeof body.reference !== 'string' || body.reference === '' || typeof body.state !== 'string' || body.state === '')
@@ -27,9 +42,7 @@ const direct_send_of = (a: Answer, kind: 'read' | 'write'): Record<string, unkno
     return {
         reference: body.reference, channel: field('channel'), contact_id: field('contactId'), state: body.state,
         send_after: field('sendAfter'), sent_at: field('sentAt'), message_id: field('messageId'),
-        failure_reason: field('failureReason'), failure_code: field('failureCode'),
-        missing_variables: strings_of(body.missingVariables) ?? null,
-        rendered_subject: field('renderedSubject'), rendered_body: field('renderedBody'), cancelled_at: field('cancelledAt'),
+        failure_reason: field('failureReason'), ...rendering_of(body), cancelled_at: field('cancelledAt'),
     };
 };
 

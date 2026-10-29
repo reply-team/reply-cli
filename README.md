@@ -346,10 +346,10 @@ reply direct-send cancel linkedin-1042
 ```
 
 Both answer the send under the CLI's names, each null when Reply gives none: `reference`,
-`channel`, `contact_id`, `state`, `send_after`, `sent_at`, `message_id`, `failure_reason`,
-`failure_code`, `missing_variables`, `rendered_subject`, `rendered_body` and `cancelled_at`.
-`failure_reason` is a sentence for a person and never parsed; `failure_code` is Reply's code for
-the failure, the one to branch on. `direct-send cancel` of a send already cancelled answers it
+`channel`, `contact_id`, `state`, `send_after`, `sent_at`, `message_id`, `failure_reason` and
+`cancelled_at`. `failure_code`, `missing_variables`, `rendered_subject` and `rendered_body` are
+added only when Reply gives them. `failure_reason` is a sentence for a person and never parsed;
+`failure_code` is Reply's code for the failure, the one to branch on. `direct-send cancel` of a send already cancelled answers it
 again. A send already gone out or failed is `direct_send.already_sent` or
 `direct_send.already_failed`, and a reference Reply has no send for is `direct_send.not_found`.
 

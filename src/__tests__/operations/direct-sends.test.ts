@@ -28,8 +28,7 @@ describe('direct-send get', ()=>{
         answer(json(QUEUED));
         expect(await get('email-1001')).toStrictEqual({
             reference: 'email-1001', channel: 'email', contact_id: 456, state: 'queued', send_after: '2026-11-03T14:00:00Z',
-            sent_at: null, message_id: null, failure_reason: null, failure_code: null, missing_variables: null,
-            rendered_subject: null, rendered_body: null, cancelled_at: null,
+            sent_at: null, message_id: null, failure_reason: null, cancelled_at: null,
         });
         expect(sent()).toEqual([{method: 'GET', url: 'https://api/v3/direct-sends/email-1001', body: undefined}]);
     });
@@ -39,8 +38,7 @@ describe('direct-send get', ()=>{
             failureReason: 'notConnected'}));
         expect(await get('linkedin-1042')).toStrictEqual({
             reference: 'linkedin-1042', channel: null, contact_id: null, state: 'held', send_after: null,
-            sent_at: '2026-11-03T14:00:02Z', message_id: 'm-1', failure_reason: 'notConnected', failure_code: null,
-            missing_variables: null, rendered_subject: null, rendered_body: null, cancelled_at: null,
+            sent_at: '2026-11-03T14:00:02Z', message_id: 'm-1', failure_reason: 'notConnected', cancelled_at: null,
         });
     });
 
@@ -54,18 +52,33 @@ describe('direct-send get', ()=>{
         });
     });
 
-    it('gives missing_variables only as a list of names: anything else Reply sends there is null', async()=>{
+    it('adds the rendered text, the failure\'s code and the unfilled names only when Reply gives them, a null included', async()=>{
+        answer(json({...QUEUED, failureCode: null, missingVariables: null, renderedSubject: null, renderedBody: null}));
+        expect(await get('email-1001')).toMatchObject({failure_code: null, missing_variables: null, rendered_subject: null, rendered_body: null});
+        for (const [from, to] of [['failureCode', 'failure_code'], ['missingVariables', 'missing_variables'],
+            ['renderedSubject', 'rendered_subject'], ['renderedBody', 'rendered_body']])
+        {
+            mock_fetch.mockReset();
+            answer(json({...QUEUED, failureCode: 'x', missingVariables: [], renderedSubject: 's', renderedBody: 'b', [from]: undefined}));
+            const got = await get('email-1001');
+            expect(got, from).not.toHaveProperty(to);
+            expect(Object.keys(got), from).toHaveLength(12);
+        }
+    });
+
+    it('gives missing_variables only as a list of names, and the others only as text: anything else is left out', async()=>{
         for (const missing of [[], ['FirstName']])
         {
             mock_fetch.mockReset();
             answer(json({...QUEUED, missingVariables: missing}));
             expect((await get('email-1001')).missing_variables, JSON.stringify(missing)).toEqual(missing);
         }
-        for (const missing of ['FirstName', ['FirstName', 7], {name: 'FirstName'}, null])
+        for (const odd of ['FirstName', ['FirstName', 7], {name: 'FirstName'}, 7])
         {
             mock_fetch.mockReset();
-            answer(json({...QUEUED, missingVariables: missing}));
-            expect((await get('email-1001')).missing_variables, JSON.stringify(missing)).toBeNull();
+            answer(json({...QUEUED, missingVariables: odd, failureCode: [odd], renderedSubject: 7, renderedBody: {odd}}));
+            expect(Object.keys(await get('email-1001')), JSON.stringify(odd)).toEqual(['reference', 'channel', 'contact_id', 'state',
+                'send_after', 'sent_at', 'message_id', 'failure_reason', 'cancelled_at']);
         }
     });
 
@@ -133,8 +146,7 @@ describe('direct-send cancel', ()=>{
         answer(json(CANCELLED));
         expect(await cancel('email-1001')).toStrictEqual({
             reference: 'email-1001', channel: 'email', contact_id: 456, state: 'cancelled', send_after: '2026-11-03T14:00:00Z',
-            sent_at: null, message_id: null, failure_reason: null, failure_code: null, missing_variables: null,
-            rendered_subject: null, rendered_body: null, cancelled_at: '2026-11-02T09:15:00Z',
+            sent_at: null, message_id: null, failure_reason: null, cancelled_at: '2026-11-02T09:15:00Z',
         });
         expect(sent()).toEqual([{method: 'POST', url: 'https://api/v3/direct-sends/email-1001/cancel', body: undefined}]);
     });

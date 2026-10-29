@@ -47,7 +47,7 @@ describe('operations/commands', ()=>{
             expect(flat, name).toContain('The reference is Reply\'s, from the answer of a send made with --send-after');
             expect(flat, name).toContain('state is Reply\'s own word: queued or sending is not yet sent, then sent, failed or cancelled');
             expect(flat, name).toContain('A Reply without this route answers reply.refused with status 404 and no reply_code');
-            expect(flat, name).toContain('"failure_reason","failure_code","missing_variables","rendered_subject","rendered_body","cancelled_at"}');
+            expect(flat, name).toContain('failure_code, missing_variables, rendered_subject and rendered_body are added only when Reply gives them');
             expect(flat, name).toContain('failure_reason is a sentence for a person, never parsed; failure_code is Reply\'s code for the failure');
         }
         expect(help_of(sub(direct_send_command, 'cancel')).replace(/\s+/g, ' '))
