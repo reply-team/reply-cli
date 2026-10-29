@@ -110,7 +110,10 @@ const strings_of = (v: unknown): string[] | undefined=>
 const REFUSALS: Record<string, Refusal> = {
     'contact.missingVariables': {
         status: 400, code: 'contact.missing_variables', title: 'The email holds a template variable Reply could not fill, so nothing was sent.',
-        details: body=>({missing_variables: strings_of(body.missingVariables) ?? []}),
+        details: body=>{
+            const missing = strings_of(body.missingVariables);
+            return missing === undefined ? undefined : {missing_variables: missing};
+        },
     },
     'contact.renderingFailed': {
         status: 400, code: 'contact.rendering_failed', title: 'Reply could not render the email\'s template, so nothing was sent.',

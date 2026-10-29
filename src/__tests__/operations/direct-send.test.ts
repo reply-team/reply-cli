@@ -813,10 +813,18 @@ describe('a direct email Reply renders', ()=>{
         expect(e).toMatchObject({code: 'contact.missing_variables', status: 400, exit_code: 1, reply_code: 'contact.missingVariables',
             details: {missing_variables: ['FirstName', 'Company']}, ids: {contact_id: 456}});
         expect((e as {to_json: () => unknown}).to_json()).toMatchObject({error: {details: {missing_variables: ['FirstName', 'Company']}}});
-        mock_fetch.mockReset();
-        answer(json({code: 'contact.missingVariables', detail: 'The message has variables with no value.'}, 400));
-        expect(await failure('send-email', EMAIL, EMAIL_OPTS)).toMatchObject({code: 'contact.missing_variables',
-            details: {missing_variables: []}});
+    });
+
+    it('leaves missing_variables out when Reply gives no list of names, as the reused key leaves its fields out', async()=>{
+        for (const missing of [undefined, null, 'FirstName', ['FirstName', 7]])
+        {
+            mock_fetch.mockReset();
+            answer(json({code: 'contact.missingVariables', detail: 'The message has variables with no value.', missingVariables: missing}, 400));
+            const e = await failure('send-email', EMAIL, EMAIL_OPTS);
+            expect(e, JSON.stringify(missing)).toMatchObject({code: 'contact.missing_variables', status: 400, exit_code: 1});
+            expect((e as {details?: unknown}).details, JSON.stringify(missing)).toBeUndefined();
+            expect((e as {to_json: () => {error: object}}).to_json().error, JSON.stringify(missing)).not.toHaveProperty('details');
+        }
     });
 
     it('maps a template Reply could not render to contact.rendering_failed, with Reply\'s message as the detail', async()=>{

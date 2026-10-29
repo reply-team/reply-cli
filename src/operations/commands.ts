@@ -337,8 +337,8 @@ later_options(add_contact_options(contact_command.command('send-email'), true)
             + 'Reply tracks neither links nor opens unless --track-links or --track-opens asks it to. An email sent within the\n'
             + 'request adds rendered_subject and rendered_body, the subject and body as Reply filled them in, when Reply gives\n'
             + 'them; a send held for later has neither. contact.missing_variables names the variables Reply could not fill in\n'
-            + 'details.missing_variables, and contact.rendering_failed is a template Reply could not render, its message in\n'
-            + 'detail. Neither sends anything.\n'
+            + 'details.missing_variables when Reply lists them, and contact.rendering_failed is a template Reply could not\n'
+            + 'render, its message in detail. Neither sends anything.\n'
             + LATER + SENT_TO('email', 'email'),
         SEND_TWICE('email')))
     .action(run(async(cmd)=>{

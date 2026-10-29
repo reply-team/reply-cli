@@ -312,8 +312,8 @@ variables, and refuses one it cannot fill with `linkedin.missing_variables`.
 it to. An email Reply sends within the request adds `rendered_subject` and `rendered_body`, the text
 as Reply filled it in, when Reply gives them; a send held for later has neither. A template variable
 Reply cannot fill is `contact.missing_variables`, with the names under the error's
-`details.missing_variables`, and a template Reply cannot render is `contact.rendering_failed`, with
-Reply's message as its `detail`. Neither sends anything:
+`details.missing_variables` when Reply lists them, and a template Reply cannot render is
+`contact.rendering_failed`, with Reply's message as its `detail`. Neither sends anything:
 
 ```sh
 # {"error":{"code":"contact.missing_variables",…,"details":{"missing_variables":["FirstName","Company"]}}}
