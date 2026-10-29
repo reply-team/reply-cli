@@ -1,6 +1,6 @@
 import {Unknown_outcome_error, UsageError} from '../utils/errors';
 import {call_reply, expect_object, refusal, unreadable, open_session, type Answer} from './call';
-import {known_refusal, DIRECT_SEND_REFUSALS} from './direct-send';
+import {known_refusal, strings_of, DIRECT_SEND_REFUSALS} from './direct-send';
 import {print_result} from './result';
 import type {Op_globals} from './options';
 import type {Cli_context} from '../context';
@@ -15,7 +15,8 @@ const path_of = (reference: string): string=>{
 };
 
 // A send as Reply holds it, under the CLI's names; a field Reply leaves out is null. Its state is Reply's word, passed on as given, so a state the CLI does
-// not know yet reaches the caller instead of failing the read.
+// not know yet reaches the caller instead of failing the read. failure_reason is a sentence for a person and failure_code
+// Reply's code for the same failure: neither is read here, and missing_variables is a list of names or null.
 const direct_send_of = (a: Answer, kind: 'read' | 'write'): Record<string, unknown>=>{
     const body = expect_object(a, kind);
     if (typeof body.reference !== 'string' || body.reference === '' || typeof body.state !== 'string' || body.state === '')
@@ -26,7 +27,9 @@ const direct_send_of = (a: Answer, kind: 'read' | 'write'): Record<string, unkno
     return {
         reference: body.reference, channel: field('channel'), contact_id: field('contactId'), state: body.state,
         send_after: field('sendAfter'), sent_at: field('sentAt'), message_id: field('messageId'),
-        failure_reason: field('failureReason'), cancelled_at: field('cancelledAt'),
+        failure_reason: field('failureReason'), failure_code: field('failureCode'),
+        missing_variables: strings_of(body.missingVariables) ?? null,
+        rendered_subject: field('renderedSubject'), rendered_body: field('renderedBody'), cancelled_at: field('cancelledAt'),
     };
 };
 

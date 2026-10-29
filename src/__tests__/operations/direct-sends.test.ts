@@ -28,7 +28,8 @@ describe('direct-send get', ()=>{
         answer(json(QUEUED));
         expect(await get('email-1001')).toStrictEqual({
             reference: 'email-1001', channel: 'email', contact_id: 456, state: 'queued', send_after: '2026-11-03T14:00:00Z',
-            sent_at: null, message_id: null, failure_reason: null, cancelled_at: null,
+            sent_at: null, message_id: null, failure_reason: null, failure_code: null, missing_variables: null,
+            rendered_subject: null, rendered_body: null, cancelled_at: null,
         });
         expect(sent()).toEqual([{method: 'GET', url: 'https://api/v3/direct-sends/email-1001', body: undefined}]);
     });
@@ -38,8 +39,34 @@ describe('direct-send get', ()=>{
             failureReason: 'notConnected'}));
         expect(await get('linkedin-1042')).toStrictEqual({
             reference: 'linkedin-1042', channel: null, contact_id: null, state: 'held', send_after: null,
-            sent_at: '2026-11-03T14:00:02Z', message_id: 'm-1', failure_reason: 'notConnected', cancelled_at: null,
+            sent_at: '2026-11-03T14:00:02Z', message_id: 'm-1', failure_reason: 'notConnected', failure_code: null,
+            missing_variables: null, rendered_subject: null, rendered_body: null, cancelled_at: null,
         });
+    });
+
+    it('gives what Reply says of a rendered or failed send as given: the failure\'s sentence and its code, the unfilled names', async()=>{
+        answer(json({...QUEUED, state: 'failed', failureReason: 'A template variable had no value for this contact.',
+            failureCode: 'contact.missingVariables', missingVariables: ['FirstName', 'Company'],
+            renderedSubject: 'Quick question, Marta', renderedBody: '<p>Hi Marta</p>'}));
+        expect(await get('email-1001')).toMatchObject({
+            state: 'failed', failure_reason: 'A template variable had no value for this contact.', failure_code: 'contact.missingVariables',
+            missing_variables: ['FirstName', 'Company'], rendered_subject: 'Quick question, Marta', rendered_body: '<p>Hi Marta</p>',
+        });
+    });
+
+    it('gives missing_variables only as a list of names: anything else Reply sends there is null', async()=>{
+        for (const missing of [[], ['FirstName']])
+        {
+            mock_fetch.mockReset();
+            answer(json({...QUEUED, missingVariables: missing}));
+            expect((await get('email-1001')).missing_variables, JSON.stringify(missing)).toEqual(missing);
+        }
+        for (const missing of ['FirstName', ['FirstName', 7], {name: 'FirstName'}, null])
+        {
+            mock_fetch.mockReset();
+            answer(json({...QUEUED, missingVariables: missing}));
+            expect((await get('email-1001')).missing_variables, JSON.stringify(missing)).toBeNull();
+        }
     });
 
     it('sends the reference as given, encoded into the path and never checked or parsed', async()=>{
@@ -106,7 +133,8 @@ describe('direct-send cancel', ()=>{
         answer(json(CANCELLED));
         expect(await cancel('email-1001')).toStrictEqual({
             reference: 'email-1001', channel: 'email', contact_id: 456, state: 'cancelled', send_after: '2026-11-03T14:00:00Z',
-            sent_at: null, message_id: null, failure_reason: null, cancelled_at: '2026-11-02T09:15:00Z',
+            sent_at: null, message_id: null, failure_reason: null, failure_code: null, missing_variables: null,
+            rendered_subject: null, rendered_body: null, cancelled_at: '2026-11-02T09:15:00Z',
         });
         expect(sent()).toEqual([{method: 'POST', url: 'https://api/v3/direct-sends/email-1001/cancel', body: undefined}]);
     });
