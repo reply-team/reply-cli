@@ -311,7 +311,9 @@ const LATER = 'With --send-after Reply holds the send until that moment, given w
     + 'for in details: reference, state and send_after, each only when Reply gives it. Any other refusal of a send Reply\n'
     + 'already holds names that send the same way, beside the refusal\'s own details; its code is the refusal\'s own.\n'
     + 'A 400 to the send with neither a code nor errors[] is Reply failing while it made the send: like a 5xx or a lost\n'
-    + 'answer, it is outcome.unknown (exit 3). A 400 with errors[] is reply.invalid_request, and nothing was sent.\n';
+    + 'answer, it is outcome.unknown (exit 3). So is a 400 directLinkedIn.unknown to a LinkedIn send, Reply\'s answer when\n'
+    + 'it failed while making the send or could not map the provider\'s answer; Reply\'s code is kept in reply_code. A 400\n'
+    + 'with errors[] is reply.invalid_request, and nothing was sent.\n';
 
 // The refusals of a send's key, the same on every direct send, after each send's own.
 const KEY_CODES = ['idempotency_key.in_use', 'idempotency_key.reused'];

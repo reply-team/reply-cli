@@ -229,14 +229,19 @@ const known_refusal = (a: Answer, table: Record<string, Refusal>): Operation_err
 const exception_of_send = (a: Answer): boolean=>
     a.status === 400 && is_object(a.data) && a.data.code === undefined && a.data.errors === undefined;
 
+// The LinkedIn sends answer their own exception path, and a provider answer Reply cannot map, as a
+// 400 directLinkedIn.unknown: the send may already be made. An email's exception is a 500.
+const linkedin_exception = (a: Answer, by: Channel): boolean=>
+    by === 'linkedin' && a.status === 400 && reply_code_of(a) === 'directLinkedIn.unknown';
+
 const refusal_of_send = (a: Answer, contact_id: number, by: Channel): Operation_error=>{
-    if (exception_of_send(a))
+    const reply_code = reply_code_of(a);
+    if (exception_of_send(a) || linkedin_exception(a, by))
     {
         return new Unknown_outcome_error('Reply failed while handling the send; it may or may not have been made.', {
-            status: a.status, detail: detail_of(a),
+            status: a.status, reply_code, detail: detail_of(a),
         });
     }
-    const reply_code = reply_code_of(a);
     if (a.status === 404 && (reply_code === 'contact.notFound' || reply_code === 'directLinkedIn.contactNotFound'))
     {
         return contact_not_found(contact_id, a);

@@ -530,6 +530,8 @@ describe('a direct send to a person given by their fields', ()=>{
             [[nobody(), nobody(), json({items: [{id: null, status: 'failed', error: 'Invalid data'}]})], 'reply.refused', 1],
             // A 400 with neither a code nor errors[] is read as Reply's exception only on the send call, never on the import.
             [[nobody(), nobody(), json({title: 'Bad Request', status: 400}, 400, {'Content-Type': 'application/problem+json'})], 'reply.refused', 1],
+            // So is the LinkedIn sends' exception code.
+            [[nobody(), nobody(), json({code: 'directLinkedIn.unknown', detail: 'Unexpected error.'}, 400)], 'reply.refused', 1],
         ];
         for (const [answers, code, exit_code] of cases)
         {
@@ -1013,6 +1015,61 @@ describe('a 400 on the send call with neither a code nor errors[]', ()=>{
                 expect(e, `${name} ${label}`).toMatchObject({code, exit_code: 1, status: 400});
                 expect(mock_fetch, `${name} ${label}`).toHaveBeenCalledTimes(1);
             }
+        }
+    });
+});
+
+describe('a 400 directLinkedIn.unknown on the send call', ()=>{
+    const LINKEDIN: [Direct_send_name, unknown][] = [
+        ['linkedin-connect', {note: NOTE}],
+        ['linkedin-message', {body: TEXT}],
+        ['linkedin-inmail', {subject: SUBJECT, body: TEXT}],
+        ['linkedin-voice', {script: SCRIPT}],
+    ];
+    const unknown = (status: number, extra: Record<string, unknown> = {})=>
+        json({code: 'directLinkedIn.unknown', detail: 'An unexpected error occurred.', ...extra}, status, {'Content-Type': 'application/problem+json'});
+
+    it('is Reply\'s exception path on a LinkedIn send: outcome.unknown (exit 3), status 400 and Reply\'s code kept, made once, '
+        + 'and a repeat may send it twice', async()=>{
+        for (const [name, message] of LINKEDIN)
+        {
+            mock_fetch.mockReset();
+            answer(unknown(400));
+            const e = await failure(name, message, LINKEDIN_OPTS);
+            expect(e, name).toMatchObject({code: 'outcome.unknown', exit_code: 3, status: 400, reply_code: 'directLinkedIn.unknown',
+                ids: {contact_id: 456}});
+            expect((e as {hint?: string}).hint ?? '', name).toContain('may send it twice');
+            expect(mock_fetch, name).toHaveBeenCalledTimes(1);
+        }
+    });
+
+    it('keeps the send it names under details, should Reply give one', async()=>{
+        answer(unknown(400, {reference: 'linkedin-1042', state: 'failed'}));
+        const e = await failure('linkedin-message', {body: TEXT}, LINKEDIN_OPTS);
+        expect(e).toMatchObject({code: 'outcome.unknown', exit_code: 3, details: {reference: 'linkedin-1042', state: 'failed'}});
+    });
+
+    it('under any other status it maps as before', async()=>{
+        for (const [name, message] of LINKEDIN)
+        {
+            for (const [status, code] of [[409, 'reply.refused'], [403, 'access.denied'], [404, 'reply.refused']] as const)
+            {
+                mock_fetch.mockReset();
+                answer(unknown(status));
+                const e = await failure(name, message, LINKEDIN_OPTS);
+                expect(e, `${name} ${status}`).toMatchObject({code, exit_code: 1, status, reply_code: 'directLinkedIn.unknown'});
+            }
+        }
+    });
+
+    it('on send-email it maps as before, and Reply\'s contact.emailSendingFailed stays a refusal: nothing was sent', async()=>{
+        for (const reply_code of ['directLinkedIn.unknown', 'contact.emailSendingFailed'])
+        {
+            mock_fetch.mockReset();
+            answer(json({code: reply_code, detail: 'The email could not be sent.'}, 400, {'Content-Type': 'application/problem+json'}));
+            const e = await failure('send-email', {subject: SUBJECT, body: BODY}, EMAIL_OPTS);
+            expect(e, reply_code).toMatchObject({code: 'reply.refused', exit_code: 1, status: 400, reply_code, ids: {contact_id: 456}});
+            expect(mock_fetch, reply_code).toHaveBeenCalledTimes(1);
         }
     });
 });
