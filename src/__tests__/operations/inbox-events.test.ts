@@ -15,10 +15,15 @@ type Opts = {cursor?: string; since?: string; top?: string};
 const events = async(opts: Opts = {})=>JSON.parse((await capture(()=>handle_inbox_events(opts, ctx(), {json: true}))).out);
 const failure = (opts: Opts)=>handle_inbox_events(opts, ctx(), {}).catch((x: unknown)=>x);
 
-// How Reply's API document publishes a cursor it will not read: a validation problem with no code, pointing at /cursor.
-const CURSOR_TOO_OLD = {
+// A cursor or a since older than the feed's 30 days: a business problem with a code of its own.
+const WINDOW_EXPIRED = {
+    code: 'inboxThread.eventWindowExpired', title: 'Event window expired', status: 400,
+    detail: 'The feed keeps 30 days. Start again with \'since\' (at most 30 days ago) or with no parameters, which reads the last 30 days.',
+};
+// Any other cursor Reply will not read: a validation problem with no code, pointing at /cursor.
+const CURSOR_UNREADABLE = {
     title: 'Validation failed', status: 400, detail: 'The request body contains validation errors.',
-    errors: [{pointer: '/cursor', detail: '\'cursor\' is older than 30 days. Start again with \'since\' (at most 30 days ago) or with no parameters, which reads the last 30 days.'}],
+    errors: [{pointer: '/cursor', detail: '\'cursor\' could not be read.'}],
 };
 const problem = (body: unknown, status: number)=>json(body, status, {'Content-Type': 'application/problem+json'});
 
@@ -66,18 +71,27 @@ describe('inbox events', ()=>{
         expect(mock_fetch).not.toHaveBeenCalled();
     });
 
-    it('a cursor Reply will not read is inbox.cursor_refused, which says to start again with --since', async()=>{
-        answer(problem(CURSOR_TOO_OLD, 400));
-        const e = await failure({cursor: 'AQjfObhYHZgAAADjVg'});
-        expect(e).toMatchObject({code: 'inbox.cursor_refused', status: 400, exit_code: 1, details: {fields: ['cursor']}});
-        expect((e as {reply_code?: string}).reply_code).toBeUndefined();
-        expect((e as {hint?: string}).hint).toContain('--since');
+    it('a cursor or a --since older than the feed keeps is inbox.cursor_expired, which says to start again with --since', async()=>{
+        for (const opts of [{cursor: 'AQjfObhYHZgAAADjVg'}, {since: '2026-09-01T00:00:00Z'}, {}])
+        {
+            mock_fetch.mockReset();
+            answer(problem(WINDOW_EXPIRED, 400));
+            const e = await failure(opts);
+            expect(e, JSON.stringify(opts)).toMatchObject({code: 'inbox.cursor_expired', status: 400, exit_code: 1,
+                reply_code: 'inboxThread.eventWindowExpired', detail: WINDOW_EXPIRED.detail});
+            expect((e as {hint?: string}).hint, JSON.stringify(opts)).toContain('--since');
+        }
     });
 
-    it('any other refusal maps as everywhere else', async()=>{
+    it('the window\'s code under another status is not the window: it maps as everywhere else', async()=>{
+        answer(problem({...WINDOW_EXPIRED, status: 409}, 409));
+        expect(await failure({cursor: 'c'})).toMatchObject({code: 'reply.refused', reply_code: 'inboxThread.eventWindowExpired'});
+    });
+
+    it('any other refusal maps as everywhere else, a cursor Reply will not read included', async()=>{
         const cases: [Opts, Response, string][] = [
-            // The same pointer when no cursor was sent is not about one the caller holds.
-            [{since: '2026-11-03T14:00:00Z'}, problem(CURSOR_TOO_OLD, 400), 'reply.invalid_request'],
+            [{cursor: 'AQjfObhYHZgAAADjVg'}, problem(CURSOR_UNREADABLE, 400), 'reply.invalid_request'],
+            [{since: '2026-11-03T14:00:00Z'}, problem(CURSOR_UNREADABLE, 400), 'reply.invalid_request'],
             [{since: '2026-09-01T00:00:00Z'}, problem({title: 'Validation failed', status: 400, errors: [{pointer: '/since', detail: 'too old'}]}, 400),
                 'reply.invalid_request'],
             [{cursor: 'c'}, problem({code: 'inboxThread.invalidPagination', status: 400}, 400), 'reply.refused'],
