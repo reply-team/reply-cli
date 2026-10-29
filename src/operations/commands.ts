@@ -305,7 +305,9 @@ const LATER = 'With --send-after Reply holds the send until that moment, given w
     + 'answer without state comes from a Reply that does not know --send-after and --schedule-id: it sent at once, as\n'
     + 'without them. --idempotency-key goes as the Idempotency-Key header, never in the body. A Reply that knows the header\n'
     + 'answers a repeat with the same key with the send the key first made; while that one is still being made the answer\n'
-    + 'is idempotency_key.in_use, and the same key on a different send is idempotency_key.reused. Neither sends anything.\n';
+    + 'is idempotency_key.in_use, and the same key on a different send is idempotency_key.reused. Neither sends anything.\n'
+    + 'idempotency_key.reused names the send the key was first taken for in details: reference, state and send_after, each\n'
+    + 'only when Reply gives it.\n';
 
 // The refusals of a send's key, the same on every direct send, after each send's own.
 const KEY_CODES = ['idempotency_key.in_use', 'idempotency_key.reused'];
@@ -318,17 +320,25 @@ const ANN_PROFILE = '{"linkedin_url":"https://www.linkedin.com/in/ann-example","
 
 later_options(add_contact_options(contact_command.command('send-email'), true)
     .option('--email-account-id <id>', 'The mailbox to send from (see `account list`)')
-    .option('--message <stdin>', 'Only -: the email {subject, body} as JSON on stdin'))
+    .option('--message <stdin>', 'Only -: the email {subject, body} as JSON on stdin')
+    .option('--track-links', 'Track the links in the email (off unless given)')
+    .option('--track-opens', 'Track the opens of the email (off unless given)'))
     .description('Send one email to a contact now, outside any sequence, from the mailbox you name')
     .addHelpText('after', help(
         [`echo '{"subject":"Quick question","body":"<p>Hi Ann, does Tuesday work?</p>"}' | ${P} contact send-email --contact-id 456 --email-account-id 12 --message -`,
             piped_send('send-email', ANN_EMAIL, '{"subject":"Quick question","body":"<p>Hi Ann</p>"}', '--email-account-id 12')],
-        ['contact.not_found', ...IMPORT_CODES, 'contact.already_held', 'email_account.not_found', 'contact.blacklisted', ...KEY_CODES], true,
+        ['contact.not_found', ...IMPORT_CODES, 'contact.already_held', 'email_account.not_found', 'contact.blacklisted',
+            'contact.missing_variables', 'contact.rendering_failed', ...KEY_CODES], true,
         'Result: {"status":"sent","contact_id","contact_created","message_id","sent_at","reply_status"}: sent means Reply\n'
             + 'accepted the email, and reply_status is Reply\'s own word for it (new or sent). message_id is Reply\'s messageId,\n'
             + 'null when it gives none. Reply\'s answer carries no time, so sent_at is always null; the CLI adds none of its own.\n'
             + 'The email is read from stdin only, so its text never sits in the argument list. The body is HTML. Without\n'
             + '--send-after, Reply sends a direct email at once, outside the mailbox\'s daily limit and sending delay.\n'
+            + 'Reply tracks neither links nor opens unless --track-links or --track-opens asks it to. An email sent within the\n'
+            + 'request adds rendered_subject and rendered_body, the subject and body as Reply filled them in, when Reply gives\n'
+            + 'them; a send held for later has neither. contact.missing_variables names the variables Reply could not fill in\n'
+            + 'details.missing_variables, and contact.rendering_failed is a template Reply could not render, its message in\n'
+            + 'detail. Neither sends anything.\n'
             + LATER + SENT_TO('email', 'email'),
         SEND_TWICE('email')))
     .action(run(async(cmd)=>{
@@ -433,14 +443,15 @@ inbox_command.command('events')
     .option('--top <n>', 'Items per page, 1-1000 (default: Reply\'s)')
     .description('One page of the inbox feed: each thread whose latest message changed, oldest first, read forward by cursor')
     .addHelpText('after', help([ex('inbox events --since 2026-11-01T00:00:00Z'), ex('inbox events --cursor AQjfObhYHZgAAADjVg --top 200')],
-        ['inbox.cursor_refused'], false,
+        ['inbox.cursor_expired'], false,
         'Result: {"items","has_more","cursor"}, the items as Reply gives them, one per thread whose latest message, inbound\n'
             + 'or outbound, changed: threadId, contactId, channel, lastActivityDate, flags (hasReply, hasBounce, hasAutoReply,\n'
             + 'hasOutOfOffice) and lastMessage among them. Give --cursor or --since, not both; with neither, Reply reads the last\n'
             + '30 days. Call again with the answered cursor while has_more is true, and loop on has_more, not on the number of\n'
             + 'items: an empty page still carries a cursor, and when has_more is false that cursor is where the next read starts.\n'
-            + '--since goes to Reply in UTC; a moment without its offset is refused (usage.date). A cursor Reply will not read,\n'
-            + 'one unreadable, older than 30 days or ahead of its clock, is inbox.cursor_refused: start again with --since.\n'
+            + '--since goes to Reply in UTC; a moment without its offset is refused (usage.date). A cursor or a --since older\n'
+            + 'than 30 days is inbox.cursor_expired: start again with --since. Any other cursor Reply will not read is\n'
+            + 'reply.invalid_request with cursor in details.fields.\n'
             + 'A Reply without the feed answers reply.refused with status 404 and no reply_code.\n'))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
@@ -562,11 +573,14 @@ schedule_command.command('list')
 
 const direct_send_command = new Command('direct-send').description('Read or cancel a direct send Reply holds to send later');
 
-const DIRECT_SEND = 'Result: {"reference","channel","contact_id","state","send_after","sent_at","message_id","failure_reason",\n'
-    + '"cancelled_at"}, Reply\'s fields under these names, each null when Reply gives none. The reference is Reply\'s, from the\n'
-    + 'answer of a send made with --send-after; it is passed on as given and never read. state is Reply\'s own word: queued\n'
-    + 'or sending is not yet sent, then sent, failed or cancelled. A Reply without this route answers reply.refused with\n'
-    + 'status 404 and no reply_code; direct_send.not_found is a reference that Reply has no send for.\n';
+const DIRECT_SEND = 'Result: {"reference","channel","contact_id","state","send_after","sent_at","message_id",\n'
+    + '"failure_reason","failure_code","missing_variables","rendered_subject","rendered_body","cancelled_at"}, Reply\'s fields\n'
+    + 'under these names, each null when Reply gives none. The reference is Reply\'s, from the answer of a send made with --send-after; it is\n'
+    + 'passed on as given and never read. state is Reply\'s own word: queued or sending is not yet sent, then sent, failed or\n'
+    + 'cancelled. failure_reason is a sentence for a person, never parsed; failure_code is Reply\'s code for the failure,\n'
+    + 'the one to branch on. missing_variables lists the template variables Reply could not fill, and rendered_subject and\n'
+    + 'rendered_body are the text as Reply filled it in. A Reply without this route answers reply.refused with status 404\n'
+    + 'and no reply_code; direct_send.not_found is a reference that Reply has no send for.\n';
 
 direct_send_command.command('get')
     .argument('<reference>', 'The send\'s reference, as a send made with --send-after answered it')

@@ -47,6 +47,8 @@ describe('operations/commands', ()=>{
             expect(flat, name).toContain('The reference is Reply\'s, from the answer of a send made with --send-after');
             expect(flat, name).toContain('state is Reply\'s own word: queued or sending is not yet sent, then sent, failed or cancelled');
             expect(flat, name).toContain('A Reply without this route answers reply.refused with status 404 and no reply_code');
+            expect(flat, name).toContain('"failure_reason","failure_code","missing_variables","rendered_subject","rendered_body","cancelled_at"}');
+            expect(flat, name).toContain('failure_reason is a sentence for a person, never parsed; failure_code is Reply\'s code for the failure');
         }
         expect(help_of(sub(direct_send_command, 'cancel')).replace(/\s+/g, ' '))
             .toContain('Cancelling a send already cancelled answers it again, so running it again is safe');
@@ -175,8 +177,10 @@ describe('operations/commands', ()=>{
         expect(flat, text).toContain('Give --cursor or --since, not both; with neither, Reply reads the last 30 days');
         expect(flat, text).toContain('loop on has_more, not on the number of items');
         expect(flat, text).toContain('an empty page still carries a cursor');
-        expect(flat, text).toContain('inbox.cursor_refused');
-        expect(text, text).toContain('  inbox.cursor_refused\n');
+        expect(flat, text).toContain('A cursor or a --since older than 30 days is inbox.cursor_expired: start again with --since');
+        expect(flat, text).toContain('Any other cursor Reply will not read is reply.invalid_request with cursor in details.fields');
+        expect(text, text).toContain('  inbox.cursor_expired\n');
+        expect(text, text).not.toContain('cursor_refused');
         expect(text, text).not.toContain('outcome.unknown');
     });
 
@@ -236,7 +240,8 @@ describe('operations/commands', ()=>{
         'linkedin.feature_disabled', 'linkedin.account_inactive', 'linkedin.invalid_cookie'];
     const SENT_AT_AS_GIVEN = 'sentAtUtc as Reply gives them, each null when it gives none; the CLI adds no time of its own';
     const DIRECT_SENDS: [string, string, string[], string][] = [
-        ['send-email', '--email-account-id', ['contact.not_found', ...IMPORT, 'contact.already_held', 'email_account.not_found', 'contact.blacklisted'],
+        ['send-email', '--email-account-id', ['contact.not_found', ...IMPORT, 'contact.already_held', 'email_account.not_found', 'contact.blacklisted',
+            'contact.missing_variables', 'contact.rendering_failed'],
             'sent_at is always null; the CLI adds none of its own'],
         ['linkedin-connect', '--linkedin-account-id', [...LINKEDIN, 'linkedin.not_connected', 'linkedin.limit_reached',
             'linkedin.message_too_long', 'linkedin.missing_variables'], SENT_AT_AS_GIVEN],
@@ -261,7 +266,8 @@ describe('operations/commands', ()=>{
         for (const [name, account_flag, codes, sent_at] of DIRECT_SENDS)
         {
             const c = sub(contact_command, name);
-            expect(flags(c), name).toEqual([...CONTACT_FLAGS, account_flag, '--message', '--send-after', '--schedule-id', '--idempotency-key']);
+            expect(flags(c), name).toEqual([...CONTACT_FLAGS, account_flag, '--message',
+                ...(name === 'send-email' ? ['--track-links', '--track-opens'] : []), '--send-after', '--schedule-id', '--idempotency-key']);
             const text = help_of(c);
             const flat = text.replace(/\s+/g, ' ');
             expect(text, text).toContain('--message -');
@@ -285,11 +291,25 @@ describe('operations/commands', ()=>{
             expect(flat, text).toContain('--idempotency-key goes as the Idempotency-Key header');
             expect(flat, text).toContain('A Reply that knows the header answers a repeat with the same key with the send the key first made; while that one is still '
                 + 'being made the answer is idempotency_key.in_use, and the same key on a different send is idempotency_key.reused');
+            expect(flat, text).toContain('idempotency_key.reused names the send the key was first taken for in details: reference, '
+                + 'state and send_after, each only when Reply gives it');
             // Exactly the codes its endpoint publishes, then the shared ones, as the help lists them.
             const listed = text.split('\nErrors')[1].split('\nExit codes')[0].split('\n').slice(1).map(l=>l.trim());
             expect(listed, name).toEqual([...codes, 'idempotency_key.in_use', 'idempotency_key.reused', 'access.denied', 'access.feature_unavailable', 'rate_limited', 'reply.unavailable',
                 'reply.refused', 'reply.invalid_request', 'outcome.unknown']);
         }
+    });
+
+    it('send-email says tracking is off unless asked, where the unfilled variables go, and what a rendered answer adds', ()=>{
+        const c = sub(contact_command, 'send-email');
+        const flat = help_of(c).replace(/\s+/g, ' ');
+        const described = (flag: string)=>c.options.find(o=>o.long === flag)?.description;
+        expect(described('--track-links'), '--track-links').toContain('Track the links');
+        expect(described('--track-opens'), '--track-opens').toContain('Track the opens');
+        expect(flat, flat).toContain('Reply tracks neither links nor opens unless --track-links or --track-opens asks it to');
+        expect(flat, flat).toContain('contact.missing_variables names the variables Reply could not fill in details.missing_variables');
+        expect(flat, flat).toContain('contact.rendering_failed is a template Reply could not render, its message in detail');
+        expect(flat, flat).toContain('An email sent within the request adds rendered_subject and rendered_body');
     });
 
     it('inbox reply takes its text only through --message, and says a repeat may send it twice', ()=>{
