@@ -5,20 +5,22 @@ import {print_result} from './result';
 import type {Op_globals} from './options';
 import type {Cli_context} from '../context';
 
-// The reference is Reply's and opaque: it is sent as given, encoded into the path, and never read
-// beyond refusing what cannot name a send.
+// Reply's route takes exactly this form and answers anything else with a bare 404, as it does when it
+// has no such route at all. Checking the form here keeps that 404 meaning only the latter; nothing else
+// is read from the reference, and the form leaves nothing to encode.
+const REFERENCE = /^(email|linkedin)-[1-9]\d{0,9}$/;
+
 const path_of = (reference: string): string=>{
     if (reference.trim() === '')
     {
         throw new UsageError('No reference was given.', {code: 'usage.reference', hint: 'A send made with --send-after answers its reference.'});
     }
-    // Encoding leaves a dot as it is, and a path segment of . or .. is read as a step up the path: the
-    // call would reach another route.
-    if (reference === '.' || reference === '..')
+    if (!REFERENCE.test(reference))
     {
-        throw new UsageError(`${reference} is not a reference.`, {code: 'usage.reference', hint: 'A send made with --send-after answers its reference.'});
+        throw new UsageError('That is not a reference Reply gives: email-<n> or linkedin-<n>, n from 1.',
+            {code: 'usage.reference', hint: 'A send made with --send-after answers its reference.'});
     }
-    return `/v3/direct-sends/${encodeURIComponent(reference)}`;
+    return `/v3/direct-sends/${reference}`;
 };
 
 // What Reply says of the text it rendered and of a failure's code, each only when it gives it, as text

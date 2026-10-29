@@ -84,23 +84,29 @@ describe('direct-send get', ()=>{
         }
     });
 
-    it('sends the reference as given, encoded into the path and never checked or parsed', async()=>{
-        for (const [reference, path] of [['ds_8F2k', 'ds_8F2k'], ['a/b c?d', 'a%2Fb%20c%3Fd'], ['email-0', 'email-0'],
-            ['a.b', 'a.b'], ['...', '...'], ['.a', '.a'], [' ..', '%20..']])
+    it('sends a reference of the form Reply\'s route takes as given: email-<n> or linkedin-<n>, n from 1 and at most ten digits', async()=>{
+        for (const reference of ['email-1', 'linkedin-42', 'email-9999999999', 'email-1001'])
         {
-            mock_fetch.mockReset();
-            answer(json({...QUEUED, reference}));
-            await get(reference);
-            expect(sent()[0].url, reference).toBe(`https://api/v3/direct-sends/${path}`);
+            for (const [fn, suffix] of [[get, ''], [cancel, '/cancel']] as const)
+            {
+                mock_fetch.mockReset();
+                answer(json({...QUEUED, reference}));
+                await fn(reference);
+                expect(sent()[0].url, reference).toBe(`https://api/v3/direct-sends/${reference}${suffix}`);
+            }
         }
     });
 
-    it('refuses . and .. before any call: a path segment of either would be read as a step up the path, not as a reference', async()=>{
-        for (const dots of ['.', '..'])
+    it('refuses any other reference before any call, so a bare 404 always means the route is absent', async()=>{
+        const malformed = ['email-0', 'email-01', 'email-12345678901', 'sms-1', 'email-', 'email-1a', ' email-1', 'email-1 ', 'EMAIL-1',
+            'email--1', 'linkedin', '.', '..', 'a.b', '...', '.a', ' ..', 'a/b c?d', 'ds_8F2k', 'email-1/cancel', 'email-1\n'];
+        for (const reference of malformed)
         {
             for (const fn of [handle_direct_send_get, handle_direct_send_cancel])
             {
-                expect(await failure(()=>fn(dots, ctx(), {})), `${fn.name} ${dots}`).toMatchObject({code: 'usage.reference', exit_code: 2});
+                const e = await failure(()=>fn(reference, ctx(), {}));
+                expect(e, `${fn.name} ${JSON.stringify(reference)}`).toMatchObject({code: 'usage.reference', exit_code: 2});
+                expect((e as Error).message, JSON.stringify(reference)).toContain('email-<n> or linkedin-<n>');
             }
         }
         expect(mock_fetch).not.toHaveBeenCalled();

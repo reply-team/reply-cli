@@ -327,9 +327,10 @@ schedule list`). The answer then adds Reply's `reference`, `send_after` and `sta
 Reply gives it. `status: "sent"` means Reply took the send, and `state`, when present, says whether
 it has gone out: `queued` or `sending` is not yet, then `sent`, `failed` or `cancelled`. `reply
 direct-send get <reference>` reads the send later, and `reply direct-send cancel <reference>` stops
-one that has not gone out; the reference is Reply's, passed on as given, except that `.` and `..`
-are refused (exit 2), since a path reads either as a step up. An answer without `state`
-comes from a Reply that does not know these flags yet: it sent at once, as without them.
+one that has not gone out. The reference is Reply's, `email-<n>` or `linkedin-<n>`, the form
+Reply's route takes: a reference of any other form is refused before any call (`usage.reference`,
+exit 2), and nothing else is read from it. An answer without `state` comes from a Reply that does
+not know these flags yet: it sent at once, as without them.
 
 `--idempotency-key` goes to Reply as the `Idempotency-Key` header, never in the body. A Reply that
 knows the header answers a repeat with the same key with the send the key first made; while that
@@ -377,7 +378,8 @@ reply inbox changes --cursor AQjfObhYHZgAAADjVg --json
 ```
 
 A Reply that does not have `direct-send get`, `direct-send cancel` or the feed yet answers
-`reply.refused` with status 404 and no `reply_code`.
+`reply.refused` with status 404 and no `reply_code`. A reference of any other form never leaves the
+CLI, so on the two `direct-send` commands that 404 means this Reply has no such route.
 
 `reply schedule list` gives every sending schedule the account can use, in one answer and in the
 order Reply gives them: its `time_zone_id` as Reply holds it, a Windows time zone identifier such as

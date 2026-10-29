@@ -579,17 +579,18 @@ const direct_send_command = new Command('direct-send').description('Read or canc
 
 const DIRECT_SEND = 'Result: {"reference","channel","contact_id","state","send_after","sent_at","message_id","failure_reason",\n'
     + '"cancelled_at"}, Reply\'s fields under these names, each null when Reply gives none. The reference is Reply\'s, from the\n'
-    + 'answer of a send made with --send-after; it is passed on as given and never read, except that . and .. are refused\n'
-    + '(usage.reference, exit 2), since a path reads either as a step up. state is Reply\'s own word: queued\n'
-    + 'or sending is not yet sent, then sent, failed or cancelled. failure_code, missing_variables, rendered_subject and\n'
-    + 'rendered_body are added only when Reply gives them: failure_reason is a sentence for a person, never parsed;\n'
-    + 'failure_code is Reply\'s code for the failure, the one to branch on. missing_variables lists the template variables\n'
-    + 'Reply could not fill, and rendered_subject and rendered_body are the text as Reply filled it in. A Reply without this\n'
-    + 'route answers reply.refused with status 404 and no reply_code; direct_send.not_found is a reference that Reply has no\n'
-    + 'send for.\n';
+    + 'answer of a send made with --send-after: email-<n> or linkedin-<n>, the form Reply\'s route takes. A reference of\n'
+    + 'any other form is refused before any call (usage.reference, exit 2), and nothing else is read from it. state is\n'
+    + 'Reply\'s own word: queued or sending is not yet sent, then sent, failed or cancelled. failure_code,\n'
+    + 'missing_variables, rendered_subject and rendered_body are added only when Reply gives them: failure_reason is a\n'
+    + 'sentence for a person, never parsed; failure_code is Reply\'s code for the failure, the one to branch on.\n'
+    + 'missing_variables lists the template variables Reply could not fill, and rendered_subject and rendered_body are the\n'
+    + 'text as Reply filled it in. A Reply without this route answers reply.refused with status 404 and no reply_code; a\n'
+    + 'reference of any other form never leaves the CLI, so that 404 means this Reply has no such route.\n'
+    + 'direct_send.not_found is a reference that Reply has no send for.\n';
 
 direct_send_command.command('get')
-    .argument('<reference>', 'The send\'s reference, as a send made with --send-after answered it')
+    .argument('<reference>', 'The send\'s reference, email-<n> or linkedin-<n>, as a send made with --send-after answered it')
     .description('One direct send as Reply holds it: whether it has gone out, when, and why it failed')
     .addHelpText('after', help([ex('direct-send get email-1001')], ['direct_send.not_found', 'direct_send.not_owned'], false, DIRECT_SEND))
     .action(run(async(cmd)=>{
@@ -598,7 +599,7 @@ direct_send_command.command('get')
     }));
 
 direct_send_command.command('cancel')
-    .argument('<reference>', 'The send\'s reference, as a send made with --send-after answered it')
+    .argument('<reference>', 'The send\'s reference, email-<n> or linkedin-<n>, as a send made with --send-after answered it')
     .description('Stop a direct send that has not gone out yet')
     .addHelpText('after', help([ex('direct-send cancel email-1001')],
         ['direct_send.not_found', 'direct_send.not_owned', 'direct_send.already_sent', 'direct_send.already_failed'], true,
