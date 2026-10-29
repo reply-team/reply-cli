@@ -7,7 +7,9 @@ import {team_command} from './commands/team';
 import {api_command} from './commands/api';
 import {skills_command} from './commands/skills';
 import {install_command} from './commands/install';
-import {sequence_command, contact_list_command, contact_command, inbox_command, account_command, schedule_command} from './operations/commands';
+import {
+    sequence_command, contact_list_command, contact_command, inbox_command, account_command, schedule_command, direct_send_command,
+} from './operations/commands';
 import {update_notice} from './selfupdate/notice';
 import {CliError, format_hint} from './utils/errors';
 import {info, set_quiet} from './utils/output';
@@ -46,7 +48,9 @@ const build_program = (): Command=>{
 
     const WORK = 'Work with your Reply account:';
     const SETUP = 'Setup:';
-    for (const c of [sequence_command, contact_list_command, contact_command, inbox_command, account_command, schedule_command, api_command])
+    for (const c of [
+        sequence_command, contact_list_command, contact_command, inbox_command, account_command, schedule_command, direct_send_command, api_command,
+    ])
     {
         program.addCommand(c.helpGroup(WORK));
     }

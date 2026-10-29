@@ -1,6 +1,7 @@
 import {describe, it, expect} from 'vitest';
 import type {Command} from 'commander';
-import {sequence_command, contact_list_command, contact_command, inbox_command, account_command, schedule_command} from '../../operations/commands';
+import {sequence_command, contact_list_command, contact_command, inbox_command, account_command, schedule_command,
+    direct_send_command} from '../../operations/commands';
 
 const sub = (parent: Command, name: string): Command=>{
     const found = parent.commands.find(c=>c.name() === name);
@@ -23,9 +24,39 @@ describe('operations/commands', ()=>{
         expect(contact_list_command.commands.map(c=>c.name())).toEqual(['add-contact']);
         expect(contact_command.commands.map(c=>c.name())).toEqual(['find', 'get', 'update', 'delete', 'opt-out',
             'send-email', 'linkedin-connect', 'linkedin-message', 'linkedin-inmail', 'linkedin-voice']);
-        expect(inbox_command.commands.map(c=>c.name())).toEqual(['list', 'get', 'reply', 'categories', 'categorize', 'mark-read', 'mark-unread']);
+        expect(inbox_command.commands.map(c=>c.name())).toEqual(['list', 'changes', 'get', 'reply', 'categories', 'categorize', 'mark-read', 'mark-unread']);
         expect(account_command.commands.map(c=>c.name())).toEqual(['list']);
         expect(schedule_command.commands.map(c=>c.name())).toEqual(['list']);
+        expect(direct_send_command.commands.map(c=>c.name())).toEqual(['get', 'cancel']);
+    });
+
+    it('direct-send get and cancel each take one reference and no flag, and list the refusals Reply gives each', ()=>{
+        const expected: [string, string[], boolean][] = [
+            ['get', ['direct_send.not_found', 'direct_send.not_owned'], false],
+            ['cancel', ['direct_send.not_found', 'direct_send.not_owned', 'direct_send.already_sent', 'direct_send.already_failed'], true],
+        ];
+        for (const [name, codes, write] of expected)
+        {
+            const c = sub(direct_send_command, name);
+            expect(flags(c), name).toEqual([]);
+            expect(c.registeredArguments.map(a=>a.name()), name).toEqual(['reference']);
+            const text = help_of(c);
+            const flat = text.replace(/\s+/g, ' ');
+            expect(text, name).toContain(codes.map(code=>`  ${code}\n`).join(''));
+            expect(text.includes('outcome.unknown'), name).toBe(write);
+            expect(flat, name).toContain('The reference is Reply\'s, from the answer of a send made with --send-after');
+            expect(flat, name).toContain('state is Reply\'s own word: queued or sending is not yet sent, then sent, failed or cancelled');
+            expect(flat, name).toContain('A Reply without this route answers reply.refused with status 404 and no reply_code');
+            expect(flat, name).toContain('email-<n> or linkedin-<n>, the form Reply\'s route takes');
+            expect(flat, name).toContain('any other form is refused before any call (usage.reference, exit 2), and nothing else is read from it');
+            expect(flat, name).toContain('a reference of any other form never leaves the CLI, so that 404 means this Reply has no such route');
+            expect(flat, name).not.toContain('step up');
+            expect(c.registeredArguments[0].description, name).toContain('email-<n> or linkedin-<n>');
+            expect(flat, name).toContain('failure_code, missing_variables, rendered_subject and rendered_body are added only when Reply gives them');
+            expect(flat, name).toContain('failure_reason is a sentence for a person, never parsed; failure_code is Reply\'s code for the failure');
+        }
+        expect(help_of(sub(direct_send_command, 'cancel')).replace(/\s+/g, ' '))
+            .toContain('Cancelling a send already cancelled answers it again, so running it again is safe');
     });
 
     it('schedule list takes no flag and no id, and says how a time zone, a weekday, a time and a state are written', ()=>{
@@ -140,6 +171,26 @@ describe('operations/commands', ()=>{
         expect(flags(sub(contact_command, 'delete'))).toEqual([]);
     });
 
+    it('inbox changes takes --cursor, --since and --top, and says how the feed is read forward', ()=>{
+        const c = sub(inbox_command, 'changes');
+        expect(flags(c)).toEqual(['--cursor', '--since', '--top']);
+        expect(c.registeredArguments).toEqual([]);
+        const text = help_of(c);
+        const flat = text.replace(/\s+/g, ' ');
+        expect(flat, text).toContain('Result: {"items","has_more","cursor"}');
+        expect(flat, text).toContain('the items as Reply gives them');
+        expect(flat, text).toContain('Give --cursor or --since, not both; with neither, Reply reads the last 30 days');
+        expect(flat, text).toContain('loop on has_more, not on the number of items');
+        expect(flat, text).toContain('an empty page still carries a cursor');
+        expect(flat, text).toContain('A cursor or a --since older than 30 days is inbox.cursor_expired: start again with --since');
+        expect(flat, text).toContain('A cursor Reply will not read otherwise, unreadable or ahead of its clock, is inbox.cursor_refused');
+        expect(text, text).toContain('  inbox.cursor_expired\n  inbox.cursor_refused\n');
+        expect(text, text).not.toContain('outcome.unknown');
+        // The feed names the threads that changed, and its examples use the command's own name.
+        expect(text, text).toContain('inbox changes --since 2026-11-01T00:00:00Z');
+        expect(text, text).not.toContain('events');
+    });
+
     it('sequence list and create take the name only through --name -, and create says a repeat may make a second one', ()=>{
         expect(flags(sub(sequence_command, 'list'))).toEqual(['--name']);
         const create = sub(sequence_command, 'create');
@@ -196,7 +247,8 @@ describe('operations/commands', ()=>{
         'linkedin.feature_disabled', 'linkedin.account_inactive', 'linkedin.invalid_cookie'];
     const SENT_AT_AS_GIVEN = 'sentAtUtc as Reply gives them, each null when it gives none; the CLI adds no time of its own';
     const DIRECT_SENDS: [string, string, string[], string][] = [
-        ['send-email', '--email-account-id', ['contact.not_found', ...IMPORT, 'contact.already_held', 'email_account.not_found', 'contact.blacklisted'],
+        ['send-email', '--email-account-id', ['contact.not_found', ...IMPORT, 'contact.already_held', 'email_account.not_found', 'contact.blacklisted',
+            'contact.missing_variables', 'contact.rendering_failed'],
             'sent_at is always null; the CLI adds none of its own'],
         ['linkedin-connect', '--linkedin-account-id', [...LINKEDIN, 'linkedin.not_connected', 'linkedin.limit_reached',
             'linkedin.message_too_long', 'linkedin.missing_variables'], SENT_AT_AS_GIVEN],
@@ -221,7 +273,8 @@ describe('operations/commands', ()=>{
         for (const [name, account_flag, codes, sent_at] of DIRECT_SENDS)
         {
             const c = sub(contact_command, name);
-            expect(flags(c), name).toEqual([...CONTACT_FLAGS, account_flag, '--message']);
+            expect(flags(c), name).toEqual([...CONTACT_FLAGS, account_flag, '--message',
+                ...(name === 'send-email' ? ['--track-links', '--track-opens'] : []), '--send-after', '--schedule-id', '--idempotency-key']);
             const text = help_of(c);
             const flat = text.replace(/\s+/g, ' ');
             expect(text, text).toContain('--message -');
@@ -237,11 +290,40 @@ describe('operations/commands', ()=>{
             expect(flat.includes('--email alone is refused (usage.contact)'), text).toBe(name !== 'send-email');
             expect(flat, text).toContain(sent_at);
             expect(flat, text).toContain('read from stdin only');
+            // A send for later: what status and state each say, and what an older Reply does with the flags.
+            expect(flat, text).toContain('status "sent" means Reply took the send; state, when Reply gives it, says whether it has gone '
+                + 'out: queued or sending is not yet, then sent, failed or cancelled');
+            expect(flat, text).toContain('direct-send get <reference> reads it later, and direct-send cancel <reference> stops one not yet sent');
+            expect(flat, text).toContain('An answer without state comes from a Reply that does not know --send-after and --schedule-id');
+            expect(flat, text).toContain('--idempotency-key goes as the Idempotency-Key header');
+            expect(flat, text).toContain('A Reply that knows the header answers a repeat with the same key with the send the key first made; while that one is still '
+                + 'being made the answer is idempotency_key.in_use, and the same key on a different send is idempotency_key.reused');
+            // Given a person's fields, a repeat finds the contact the first one created before it reaches the key.
+            expect(flat, text).toContain('A repeat of a send given a person\'s fields answers contact.already_held first, since the '
+                + 'first one created the contact: that is safe too, as nothing is sent twice');
+            expect(flat, text).toContain('idempotency_key.reused names the send the key was first taken for in details: reference, '
+                + 'state and send_after, each only when Reply gives it');
+            expect(flat, text).toContain('Any other refusal of a send Reply already holds names that send the same way, beside the '
+                + 'refusal\'s own details; its code is the refusal\'s own');
+            expect(flat, text).toContain('A 400 to the send with neither a code nor errors[] is Reply failing while it made the send: '
+                + 'like a 5xx or a lost answer, it is outcome.unknown (exit 3)');
             // Exactly the codes its endpoint publishes, then the shared ones, as the help lists them.
             const listed = text.split('\nErrors')[1].split('\nExit codes')[0].split('\n').slice(1).map(l=>l.trim());
-            expect(listed, name).toEqual([...codes, 'access.denied', 'access.feature_unavailable', 'rate_limited', 'reply.unavailable',
+            expect(listed, name).toEqual([...codes, 'idempotency_key.in_use', 'idempotency_key.reused', 'access.denied', 'access.feature_unavailable', 'rate_limited', 'reply.unavailable',
                 'reply.refused', 'reply.invalid_request', 'outcome.unknown']);
         }
+    });
+
+    it('send-email says tracking is off unless asked, where the unfilled variables go, and what a rendered answer adds', ()=>{
+        const c = sub(contact_command, 'send-email');
+        const flat = help_of(c).replace(/\s+/g, ' ');
+        const described = (flag: string)=>c.options.find(o=>o.long === flag)?.description;
+        expect(described('--track-links'), '--track-links').toContain('Track the links');
+        expect(described('--track-opens'), '--track-opens').toContain('Track the opens');
+        expect(flat, flat).toContain('Reply tracks neither links nor opens unless --track-links or --track-opens asks it to');
+        expect(flat, flat).toContain('contact.missing_variables names the variables Reply could not fill in details.missing_variables');
+        expect(flat, flat).toContain('contact.rendering_failed is a template Reply could not render, its message in detail');
+        expect(flat, flat).toContain('An email sent within the request adds rendered_subject and rendered_body');
     });
 
     it('inbox reply takes its text only through --message, and says a repeat may send it twice', ()=>{

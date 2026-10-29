@@ -67,7 +67,33 @@ const parse_iso = (raw: string, label: string): string=>{
     return new Date(at).toISOString();
 };
 
-const parse_choice = <T extends string>(raw: string | undefined, label: string, allowed: readonly T[]): T | undefined=>{
+const MOMENT = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)(Z|[+-]\d{2}:?\d{2})$/i;
+
+// A moment Reply acts at, such as a send's: a date and time with its offset, sent as the same instant
+// in UTC. Without an offset the CLI would have to choose a zone for it, so one is refused.
+const parse_moment = (raw: string, label: string): string=>{
+    const m = MOMENT.exec(raw.trim());
+    const at = m === null ? NaN : Date.parse(`${m[1]}T${m[2]}${m[3].toUpperCase().replace(/^([+-]\d{2})(\d{2})$/, '$1:$2')}`);
+    if (isNaN(at))
+    {
+        throw new UsageError(`${label} must be a date and time with its offset, e.g. 2026-11-03T14:00:00Z.`, {code: 'usage.date', hint: `Got: ${raw}`});
+    }
+    return new Date(at).toISOString();
+};
+
+// An Idempotency-Key header as Reply takes one: 1 to 255 printable ASCII characters. A space at
+// either end is refused rather than trimmed away by the header on its way out.
+const parse_idempotency_key = (raw: string): string=>{
+    if (!/^[\x21-\x7e](?:[\x20-\x7e]{0,253}[\x21-\x7e])?$/.test(raw))
+    {
+        throw new UsageError('--idempotency-key must be 1 to 255 printable ASCII characters, with no space at either end.', {
+            code: 'usage.idempotency_key',
+        });
+    }
+    return raw;
+};
+
+const parse_choice =<T extends string>(raw: string | undefined, label: string, allowed: readonly T[]): T | undefined=>{
     if (raw === undefined)
     {
         return undefined;
@@ -80,6 +106,6 @@ const parse_choice = <T extends string>(raw: string | undefined, label: string, 
 };
 
 export {
-    read_op_globals, parse_id, parse_int_in, parse_iso, parse_choice, LARGEST_REPLY_ID, LARGEST_SAFE_ID,
+    read_op_globals, parse_id, parse_int_in, parse_iso, parse_moment, parse_idempotency_key, parse_choice, LARGEST_REPLY_ID, LARGEST_SAFE_ID,
 };
 export type {Op_globals};

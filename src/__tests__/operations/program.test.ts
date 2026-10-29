@@ -139,6 +139,28 @@ describe('the program', ()=>{
         ]);
     });
 
+    const LATER_SEND = ['--json', '-k', 'key-1', 'contact', 'linkedin-message', '--contact-id', '456', '--linkedin-account-id', '34',
+        '--message', '-'];
+
+    it('a send for later takes --send-after, --schedule-id and --idempotency-key: the first two in the body, the key as a header', async()=>{
+        pipe_stdin(JSON.stringify({body: 'Thanks for connecting.'}));
+        answer(json({code: 'directLinkedIn.notConnected'}, 409));
+        const {code} = await run_program([...LATER_SEND,
+            '--send-after', '2026-11-03T14:00:00Z', '--schedule-id', '41', '--idempotency-key', 'send-456-1']);
+        expect(code).toBe(1);
+        expect(requests()).toEqual([{method: 'POST', url: 'https://api.reply.io/v3/contacts/456/send-direct-linkedin-message',
+            body: {linkedInAccountId: 34, message: 'Thanks for connecting.', sendAfter: '2026-11-03T14:00:00.000Z', scheduleId: 41}}]);
+        expect((mock_fetch.mock.calls[0] as [string, RequestInit])[1].headers).toMatchObject({'Idempotency-Key': 'send-456-1'});
+    });
+
+    it('a send for later at a moment without its offset exits 2 before any request', async()=>{
+        pipe_stdin(JSON.stringify({body: 'Thanks for connecting.'}));
+        const {code, err} = await run_program([...LATER_SEND, '--send-after', '2026-11-03T14:00:00']);
+        expect(code).toBe(2);
+        expect(JSON.parse(err)).toMatchObject({error: {code: 'usage.date'}});
+        expect(mock_fetch).not.toHaveBeenCalled();
+    });
+
     it('a send to a person Reply already holds exits 1, sends nothing, and names the contact', async()=>{
         pipe_stdin(JSON.stringify({contact: {email: 'marta@example.com', first_name: 'Marta'},
             message: {subject: 'Hi Marta', body: 'Tuesday works'}}));
@@ -186,6 +208,33 @@ describe('the program', ()=>{
         expect(code).toBe(1);
         expect(JSON.parse(err)).toMatchObject({error: {code: 'access.feature_unavailable', status: 403}});
         expect((mock_fetch.mock.calls[0] as [string, RequestInit])[0]).toBe('https://api.reply.io/v3/schedules');
+    });
+
+    it('direct-send is a work command of its own: no reference exits 2, a refused cancel exits 1 with its code', async()=>{
+        for (const verb of ['get', 'cancel'])
+        {
+            const {code} = await run_program(['--json', '-q', '-k', 'key-1', 'direct-send', verb]);
+            expect(code, verb).toBe(2);
+        }
+        expect(mock_fetch).not.toHaveBeenCalled();
+        answer(json({code: 'directSend.alreadySent', detail: 'Already sent.'}, 409, {'Content-Type': 'application/problem+json'}));
+        const {code, err} = await run_program(['--json', '-q', '-k', 'key-1', 'direct-send', 'cancel', 'email-1001']);
+        expect(code).toBe(1);
+        expect(JSON.parse(err)).toMatchObject({error: {code: 'direct_send.already_sent', status: 409}});
+        const [url, init] = mock_fetch.mock.calls[0] as [string, RequestInit];
+        expect([init.method, url]).toEqual(['POST', 'https://api.reply.io/v3/direct-sends/email-1001/cancel']);
+    });
+
+    it('inbox changes reads its flags through commander: both --cursor and --since exit 2, an expired cursor exits 1 with its code', async()=>{
+        const both = await run_program(['--json', '-q', '-k', 'key-1', 'inbox', 'changes', '--cursor', 'c1', '--since', '2026-11-03T14:00:00Z']);
+        expect(both.code).toBe(2);
+        expect(mock_fetch).not.toHaveBeenCalled();
+        answer(json({code: 'inboxThread.changeWindowExpired', status: 400, detail: 'The feed keeps 30 days.'}, 400,
+            {'Content-Type': 'application/problem+json'}));
+        const {code, err} = await run_program(['--json', '-q', '-k', 'key-1', 'inbox', 'changes', '--cursor', 'c1', '--top', '50']);
+        expect(code).toBe(1);
+        expect(JSON.parse(err)).toMatchObject({error: {code: 'inbox.cursor_expired', status: 400, reply_code: 'inboxThread.changeWindowExpired'}});
+        expect((mock_fetch.mock.calls[0] as [string, RequestInit])[0]).toBe('https://api.reply.io/v3/inbox/threads/changes?cursor=c1&top=50');
     });
 
     it('a usage error exits 2 before any request', async()=>{

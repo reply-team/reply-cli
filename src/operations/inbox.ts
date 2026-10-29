@@ -1,9 +1,9 @@
 import {Operation_error, UsageError} from '../utils/errors';
 import {
-    call_reply, expect_object, read_page, refusal, reply_code_of, is_object, item_failure, unreadable, open_session,
-    type Answer, type Op_session,
+    call_reply, expect_object, read_page, refusal, reply_code_of, detail_of, invalid_fields, is_object, item_failure, unreadable,
+    open_session, type Answer, type Op_session,
 } from './call';
-import {parse_id, parse_int_in, parse_iso, parse_choice, type Op_globals} from './options';
+import {parse_id, parse_int_in, parse_iso, parse_moment, parse_choice, type Op_globals} from './options';
 import {print_result, with_ids} from './result';
 import type {Cli_context} from '../context';
 
@@ -64,6 +64,65 @@ const handle_inbox_list = async(opts: Inbox_list_opts, ctx: Cli_context, g: Op_g
     }
     const page = read_page(a);
     print_result({items: page.items, has_more: page.has_more}, g);
+};
+
+type Inbox_changes_opts = {cursor?: string; since?: string; top?: string};
+
+const START_AGAIN = 'Start again with --since (at most 30 days ago), or with neither flag to read the last 30 days.';
+
+// The feed keeps 30 days. Reply refuses a cursor or a since older than that under a code of its own.
+const window_expired = (a: Answer): Operation_error | undefined=>
+    a.status === 400 && reply_code_of(a) === 'inboxThread.changeWindowExpired'
+        ? new Operation_error('inbox.cursor_expired', 'Reply keeps the feed for 30 days, and the cursor or --since reaches further back.', {
+            status: a.status, reply_code: reply_code_of(a), detail: detail_of(a), hint: START_AGAIN,
+        })
+        : undefined;
+
+// Any other cursor Reply will not read (unreadable, or ahead of its clock) is a validation problem
+// with no code that points at /cursor; they differ only in their text.
+const cursor_refused = (a: Answer, fields: string[]): Operation_error=>
+    new Operation_error('inbox.cursor_refused', 'Reply would not read the cursor: unreadable, older than 30 days or ahead of its clock.', {
+        status: a.status, detail: detail_of(a), details: {fields}, hint: START_AGAIN,
+    });
+
+const handle_inbox_changes = async(opts: Inbox_changes_opts, ctx: Cli_context, g: Op_globals): Promise<void>=>{
+    if (opts.cursor !== undefined && opts.since !== undefined)
+    {
+        throw new UsageError('Give --cursor or --since, not both.', {code: 'usage.inbox'});
+    }
+    const query = new URLSearchParams();
+    if (opts.cursor !== undefined)
+    {
+        // Reply's cursor is opaque: it goes back as given, never read.
+        if (opts.cursor.trim() === '')
+        {
+            throw new UsageError('--cursor is empty.', {code: 'usage.inbox', hint: 'Pass the cursor a previous page answered, unchanged.'});
+        }
+        query.set('cursor', opts.cursor);
+    }
+    if (opts.since !== undefined)
+    {
+        // Reply's since is inclusive already, so the moment goes as given, in UTC.
+        query.set('since', parse_moment(opts.since, '--since'));
+    }
+    if (opts.top !== undefined)
+    {
+        query.set('top', String(parse_int_in(opts.top, '--top', 1, 1000, 0)));
+    }
+    const s = await open_session(ctx, g);
+    const q = query.toString();
+    const a = await call_reply(s, 'GET', q === '' ? '/v3/inbox/threads/changes' : `/v3/inbox/threads/changes?${q}`, 'read');
+    if (a.status !== 200)
+    {
+        const fields = opts.cursor !== undefined && a.status === 400 && reply_code_of(a) === undefined ? invalid_fields(a) : undefined;
+        throw window_expired(a) ?? (fields?.includes('cursor') ? cursor_refused(a, fields) : refusal(a, 'read'));
+    }
+    const body = expect_object(a, 'read');
+    if (!Array.isArray(body.items) || typeof body.hasMore !== 'boolean' || typeof body.cursor !== 'string')
+    {
+        throw unreadable(a, 'read');
+    }
+    print_result({items: body.items, has_more: body.hasMore, cursor: body.cursor}, g);
 };
 
 // INTERIM (API gap): GET /v3/inbox/threads/{id} carries the thread's whole history inline, every
@@ -216,7 +275,7 @@ const handle_inbox_mark_unread = (thread_arg: string, ctx: Cli_context, g: Op_gl
     mark_thread(thread_arg, false, ctx, g);
 
 export {
-    handle_inbox_list, handle_inbox_get, handle_inbox_categories, handle_inbox_categorize,
+    handle_inbox_list, handle_inbox_changes, handle_inbox_get, handle_inbox_categories, handle_inbox_categorize,
     handle_inbox_mark_read, handle_inbox_mark_unread, thread_not_found, SOURCES, CHANNELS,
 };
 export type {Channel};

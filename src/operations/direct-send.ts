@@ -1,8 +1,8 @@
 import {PROGRAM_NAME} from '../config';
 import {Operation_error, Unknown_outcome_error, UsageError, type Ids} from '../utils/errors';
 import {parse_retry_after} from '../utils/client';
-import {call_reply, expect_object, refusal, reply_code_of, detail_of, open_session, type Answer} from './call';
-import {parse_id, LARGEST_SAFE_ID, type Op_globals} from './options';
+import {call_reply, expect_object, refusal, is_object, reply_code_of, detail_of, open_session, type Answer} from './call';
+import {parse_id, parse_moment, parse_idempotency_key, LARGEST_SAFE_ID, type Op_globals} from './options';
 import {read_contact_input, type Contact_flags, type Contact_ref} from './contact-input';
 import {contact_not_found, find_contact_by_address, import_contact, type Channel, type Ensured} from './contacts';
 import {read_stdin_object, stdin_inputs} from './stdin-input';
@@ -10,7 +10,10 @@ import {print_result, with_ids} from './result';
 import type {Cli_context} from '../context';
 
 type Direct_send_name = 'send-email' | 'linkedin-connect' | 'linkedin-message' | 'linkedin-inmail' | 'linkedin-voice';
-type Direct_send_opts = Contact_flags & {emailAccountId?: string; linkedinAccountId?: string; message?: string};
+type Direct_send_opts = Contact_flags & {
+    emailAccountId?: string; linkedinAccountId?: string; message?: string;
+    sendAfter?: string; scheduleId?: string; idempotencyKey?: string; trackLinks?: boolean; trackOpens?: boolean;
+};
 type Text = Record<string, string>;
 
 type Direct_send = {
@@ -88,8 +91,41 @@ const read_text = (name: Direct_send_name, send: Direct_send, source: string | u
     return text;
 };
 
+// A refusal Reply publishes, under the status it comes with; details reads what the problem body
+// carries beside its code, for the error output's details.
+type Refusal = {
+    status: number; code: string; title: string; hint?: string;
+    details?: (body: Record<string, unknown>) => Record<string, unknown> | undefined;
+};
+
+// The keys a table names that hold a string in what Reply sent, under the names the CLI prints.
+const picked = (keys: [string, string][], from: Record<string, unknown>): Record<string, unknown>=>
+    Object.fromEntries(keys.filter(([key])=>typeof from[key] === 'string').map(([key, to])=>[to, from[key]]));
+
+// A list of strings, or undefined for anything else.
+const strings_of = (v: unknown): string[] | undefined=>
+    Array.isArray(v) && v.every(s=>typeof s === 'string') ? v : undefined;
+
+// The email route's refusals of the template it renders. Only that route renders one, so a LinkedIn
+// send answering either code falls to the usual mapping. Each one is definite: nothing was sent.
+const TEMPLATE_REFUSALS: Record<Channel, Record<string, Refusal>> = {
+    email: {
+        'contact.missingVariables': {
+            status: 400, code: 'contact.missing_variables', title: 'The email holds a template variable Reply could not fill, so nothing was sent.',
+            details: body=>{
+                const missing = strings_of(body.missingVariables);
+                return missing === undefined ? undefined : {missing_variables: missing};
+            },
+        },
+        'contact.renderingFailed': {
+            status: 400, code: 'contact.rendering_failed', title: 'Reply could not render the email\'s template, so nothing was sent.',
+        },
+    },
+    linkedin: {},
+};
+
 // Reply's refusals of a direct send, by status and code. Each one is definite: nothing was sent.
-const REFUSALS: Record<string, {status: number; code: string; title: string}> = {
+const REFUSALS: Record<string, Refusal> = {
     'contact.emailAccountNotFound': {
         status: 400, code: 'email_account.not_found', title: 'Reply has no mailbox by that id that this account can send from, so nothing was sent.',
     },
@@ -142,7 +178,64 @@ const REFUSALS: Record<string, {status: number; code: string; title: string}> = 
 
 const LIMITS: Record<string, string> = {'directLinkedIn.dailyLimitReached': 'daily', 'directLinkedIn.weeklyLimitReached': 'weekly'};
 
-const send_refusal = (a: Answer, contact_id: number): Operation_error=>{
+// The codes of a send made for later, each Reply's code with the CLI code it maps to, here and
+// nowhere else. A send route answers a refused Idempotency-Key under its own family: contact for the
+// email, directLinkedIn for the LinkedIn sends. Neither sent anything.
+const KEY_IN_USE: Refusal = {
+    status: 409, code: 'idempotency_key.in_use', title: 'Reply is still making an earlier send with this idempotency key, so this one sent nothing.',
+    hint: 'Run it again with the same key once that send is made: Reply answers a repeat with the send the key first made.',
+};
+// Reply holds the send the key was first taken for, and may name it: a repeat built differently from
+// the first attempt answers reused, so the caller still learns which send that was (send_refusal).
+const KEY_REUSED: Refusal = {
+    status: 409, code: 'idempotency_key.reused', title: 'Reply already took this idempotency key for a different send, so nothing was sent.',
+    hint: 'Give each new send a key of its own.',
+};
+const KEY_REFUSALS: Record<Channel, Record<string, Refusal>> = {
+    email: {'contact.idempotencyKeyInUse': KEY_IN_USE, 'contact.idempotencyKeyReused': KEY_REUSED},
+    linkedin: {'directLinkedIn.idempotencyKeyInUse': KEY_IN_USE, 'directLinkedIn.idempotencyKeyReused': KEY_REUSED},
+};
+// The routes that read and cancel a send by its reference answer under directSend: a reference this
+// account has no send for, a send it may not act on, and, to a cancel, a send already gone out or failed.
+const DIRECT_SEND_REFUSALS: Record<string, Refusal> = {
+    'directSend.notFound': {
+        status: 404, code: 'direct_send.not_found', title: 'Reply has no direct send under that reference that this account can see.',
+    },
+    'directSend.notOwned': {
+        status: 403, code: 'direct_send.not_owned', title: 'The direct send is not one this user may act on.',
+    },
+    'directSend.alreadySent': {
+        status: 409, code: 'direct_send.already_sent', title: 'The direct send has already gone out, so it was not cancelled.',
+    },
+    'directSend.alreadyFailed': {
+        status: 409, code: 'direct_send.already_failed', title: 'The direct send has already failed, so it was not cancelled.',
+    },
+};
+
+// The refusal a table holds for this answer, under the status Reply publishes it with, or undefined.
+const known_refusal = (a: Answer, table: Record<string, Refusal>): Operation_error | undefined=>{
+    const reply_code = reply_code_of(a);
+    const known = reply_code === undefined ? undefined : table[reply_code];
+    return known !== undefined && known.status === a.status
+        ? new Operation_error(known.code, known.title, {
+            status: a.status, reply_code, detail: detail_of(a), hint: known.hint, details: known.details?.(a.data as Record<string, unknown>),
+        })
+        : undefined;
+};
+
+// An exception escaping a send reaches the caller as a 400 whose JSON carries neither a code nor
+// errors[]: the send may already be made, as on a 5xx. A model validation names its fields in
+// errors[], and a page that is not JSON is no exception of Reply's; both stay refusals.
+const exception_of_send = (a: Answer): boolean=>
+    a.status === 400 && is_object(a.data) && a.data.code === undefined && a.data.errors === undefined;
+
+const refusal_of_send = (a: Answer, contact_id: number, by: Channel): Operation_error=>{
+    if (exception_of_send(a))
+    {
+        return new Unknown_outcome_error('Reply failed while handling the send; it may or may not have been made.', {
+            status: a.status, detail: detail_of(a),
+        });
+    }
     const reply_code = reply_code_of(a);
     if (a.status === 404 && (reply_code === 'contact.notFound' || reply_code === 'directLinkedIn.contactNotFound'))
     {
@@ -155,22 +248,40 @@ const send_refusal = (a: Answer, contact_id: number): Operation_error=>{
             retry_after: parse_retry_after(a.headers['retry-after']) ?? undefined, details: {limit: LIMITS[reply_code]},
         });
     }
-    const known = reply_code === undefined ? undefined : REFUSALS[reply_code];
-    if (known !== undefined && known.status === a.status)
+    return known_refusal(a, REFUSALS) ?? known_refusal(a, TEMPLATE_REFUSALS[by]) ?? known_refusal(a, KEY_REFUSALS[by])
+        ?? refusal(a, 'write');
+};
+
+// A send Reply refused after its row existed, or the send a reused key was taken for, comes with
+// Reply's reference, state and sendAfter: each one it gives as a string goes under details, beside
+// the refusal's own. The refusal's code and class are its own either way.
+const send_refusal = (a: Answer, contact_id: number, by: Channel): Operation_error=>{
+    const e = refusal_of_send(a, contact_id, by);
+    const held = is_object(a.data) ? picked(HELD_KEYS, a.data) : {};
+    if (Object.keys(held).length > 0)
     {
-        return new Operation_error(known.code, known.title, {status: a.status, reply_code, detail: detail_of(a)});
+        e.details = {...e.details, ...held};
     }
-    return refusal(a, 'write');
+    return e;
 };
 
 const positive_integer = (v: unknown): number | null=>
     typeof v === 'number' && Number.isSafeInteger(v) && v > 0 ? v : null;
 
+// What Reply says of the send itself, each only when it gives it: the reference that names the send
+// for direct-send get and cancel, the moment it was accepted for, and whether it has gone out; and,
+// for an email sent inside the request, its subject and body as Reply filled them in, before the
+// signature and the tracking. An answer without them is printed as it always was.
+const HELD_KEYS: [string, string][] = [['reference', 'reference'], ['sendAfter', 'send_after'], ['state', 'state']];
+const LATER_KEYS: [string, string][] = [...HELD_KEYS, ['renderedSubject', 'rendered_subject'], ['renderedBody', 'rendered_body']];
+
+const later_of = (sent: Record<string, unknown>): Record<string, unknown>=>picked(LATER_KEYS, sent);
+
 // What the CLI answers for a send Reply took: the contact it went to, as the add commands name it, so
 // a caller can keep its id. Neither adds a time of its own: Reply's answer to a direct email carries
 // none, and a LinkedIn send's sentAtUtc is given as Reply gives it.
-const result_of = (name: Direct_send_name, contact: Ensured, sent: Record<string, unknown>): Record<string, unknown>=>
-    name === 'send-email'
+const result_of = (name: Direct_send_name, contact: Ensured, sent: Record<string, unknown>): Record<string, unknown>=>({
+    ...(name === 'send-email'
         ? {
             status: 'sent', contact_id: contact.id, contact_created: contact.created,
             message_id: typeof sent.messageId === 'string' ? sent.messageId : null,
@@ -181,7 +292,9 @@ const result_of = (name: Direct_send_name, contact: Ensured, sent: Record<string
             status: 'sent', contact_id: contact.id, contact_created: contact.created,
             activity_id: positive_integer(sent.linkedInActivityId),
             sent_at: typeof sent.sentAtUtc === 'string' ? sent.sentAtUtc : null,
-        };
+        }),
+    ...later_of(sent),
+});
 
 // A person given by their fields is looked up by the address the send reaches them at, so one who
 // lacks it is refused before anything is asked. The address is never repeated.
@@ -226,6 +339,27 @@ const handle_direct_send = async(
         : required_id(opts.linkedinAccountId, '--linkedin-account-id');
     const ids: Ids = by_email ? {email_account_id: account_id} : {linkedin_account_id: account_id};
     const text = read_text(name, send, opts.message, stdin.message);
+    // Each is sent only when given, so a send without them is the request it always was.
+    const later: Record<string, unknown> = {};
+    if (opts.sendAfter !== undefined)
+    {
+        later.sendAfter = parse_moment(opts.sendAfter, '--send-after');
+    }
+    if (opts.scheduleId !== undefined)
+    {
+        later.scheduleId = parse_id(opts.scheduleId, '--schedule-id');
+    }
+    // Reply tracks neither unless asked, so each is sent only to turn it on.
+    if (opts.trackLinks === true)
+    {
+        later.trackLinks = true;
+    }
+    if (opts.trackOpens === true)
+    {
+        later.trackOpens = true;
+    }
+    const headers: Record<string, string> = opts.idempotencyKey === undefined
+        ? {} : {'Idempotency-Key': parse_idempotency_key(opts.idempotencyKey)};
     const s = await open_session(ctx, g);
     let sending = false;
     try {
@@ -263,7 +397,8 @@ const handle_direct_send = async(
             ids.contact_id = ensured.id;
         }
         sending = true;
-        const a = await call_reply(s, 'POST', `/v3/contacts/${ensured.id}/${send.path}`, 'write', send.body(account_id, text));
+        const body = {...send.body(account_id, text), ...later};
+        const a = await call_reply(s, 'POST', `/v3/contacts/${ensured.id}/${send.path}`, 'write', body, headers);
         if (name === 'linkedin-connect' && a.status === 409 && reply_code_of(a) === 'directLinkedIn.alreadyConnected')
         {
             // Nothing was sent, and nothing needs to be: the contact is already a connection.
@@ -272,7 +407,7 @@ const handle_direct_send = async(
         }
         if (a.status !== 200)
         {
-            throw send_refusal(a, ensured.id);
+            throw send_refusal(a, ensured.id, by);
         }
         print_result(result_of(name, ensured, expect_object(a, 'write')), g);
     } catch (e) {
@@ -289,5 +424,5 @@ const handle_direct_send = async(
     }
 };
 
-export {handle_direct_send};
+export {handle_direct_send, known_refusal, strings_of, DIRECT_SEND_REFUSALS};
 export type {Direct_send_name, Direct_send_opts};

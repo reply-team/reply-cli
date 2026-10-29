@@ -198,10 +198,14 @@ prints JSON (indented; compact with `--json`) and says what happened in a stable
 | `reply contact update (<id> \| <contact>) --fields -` | change some fields and custom fields; null clears one → `updated` |
 | `reply contact delete <id>` | → `deleted` |
 | `reply contact opt-out <contact>` | → `opted_out` |
-| `reply contact send-email <contact> --email-account-id N --message -` | one email now, outside any sequence → `sent` |
+| `reply contact send-email <contact> --email-account-id N --message - [--track-links] [--track-opens]` | one email outside any sequence → `sent` |
 | `reply contact linkedin-connect <contact> --linkedin-account-id N [--message -]` | a LinkedIn invitation, with or without a note → `sent` / `already_connected` |
 | `reply contact linkedin-message …` · `linkedin-inmail …` · `linkedin-voice …` | a LinkedIn message, an InMail, or an AI voice message spoken from a script → `sent` |
+| any direct send `… [--send-after <moment>] [--schedule-id N] [--idempotency-key K]` | the send held until a moment, timed by a schedule, under a key of yours → `sent`, with its `reference` and `state` |
+| `reply direct-send get <reference>` | a send as Reply holds it: whether it has gone out, when, and why it failed |
+| `reply direct-send cancel <reference>` | stop a send that has not gone out yet → `state` `cancelled` |
 | `reply inbox list (--contact-id \| --sequence-id) [--source] [--channel] [--category-id] [--since]` | one page of threads |
+| `reply inbox changes [--cursor … \| --since …] [--top N]` | one page of the inbox feed, read forward by cursor |
 | `reply inbox get <thread-id>` | a thread with its subject, and one page of its messages |
 | `reply inbox reply <thread-id> --message -` | reply in the thread, on its own channel → `sent` |
 | `reply inbox categories` | the categories a thread can be filed under |
@@ -304,6 +308,79 @@ lengths Reply publishes (a LinkedIn message's 8000 characters, an InMail's 200 a
 1000) are refused before anything is sent. Reply reads `{{…}}` in a LinkedIn text as its template
 variables, and refuses one it cannot fill with `linkedin.missing_variables`.
 
+`contact send-email` tracks neither links nor opens unless `--track-links` or `--track-opens` asks
+it to. An email Reply sends within the request adds `rendered_subject` and `rendered_body`, the text
+as Reply filled it in, when Reply gives them; a send held for later has neither. A template variable
+Reply cannot fill is `contact.missing_variables`, with the names under the error's
+`details.missing_variables` when Reply lists them, and a template Reply cannot render is
+`contact.rendering_failed`, with Reply's message as its `detail`. Neither sends anything:
+
+```sh
+# {"error":{"code":"contact.missing_variables",…,"details":{"missing_variables":["FirstName","Company"]}}}
+```
+
+Every direct send also takes `--send-after <moment>`, `--schedule-id <id>` and `--idempotency-key
+<key>`. Reply holds the send until the moment, given with its offset (`2026-11-03T14:00:00Z`,
+`2026-11-03T16:00:00+02:00`) and sent to Reply in UTC; a moment without an offset is refused
+(`usage.date`). `--schedule-id` names the sending schedule Reply times the send by (see `reply
+schedule list`). The answer then adds Reply's `reference`, `send_after` and `state`, each only when
+Reply gives it. `status: "sent"` means Reply took the send, and `state`, when present, says whether
+it has gone out: `queued` or `sending` is not yet, then `sent`, `failed` or `cancelled`. `reply
+direct-send get <reference>` reads the send later, and `reply direct-send cancel <reference>` stops
+one that has not gone out. The reference is Reply's, `email-<n>` or `linkedin-<n>`, the form
+Reply's route takes: a reference of any other form is refused before any call (`usage.reference`,
+exit 2), and nothing else is read from it. An answer without `state` comes from a Reply that does
+not know these flags yet: it sent at once, as without them.
+
+`--idempotency-key` goes to Reply as the `Idempotency-Key` header, never in the body. A Reply that
+knows the header answers a repeat with the same key with the send the key first made; while that
+one is still being made the answer is `idempotency_key.in_use`, and the same key on a different
+send is `idempotency_key.reused`. Neither sends anything. A repeat of a send given a person's
+fields (`--contact -`) answers `contact.already_held` first, since the first one created the
+contact: that is safe too, as nothing is sent twice. `idempotency_key.reused` names the send the
+key was first taken for under the error's `details`: its `reference`, `state` and `send_after`,
+each only when Reply gives it. Any other refusal of a send Reply already holds, an email that
+failed after Reply made its row for example, names that send the same way, beside the refusal's
+own details such as `missing_variables`; its code is the refusal's own. A key is 1 to 255
+printable ASCII characters; a space inside is kept, and one at either end is refused
+(`usage.idempotency_key`), since a header loses it on the way out.
+
+```sh
+echo '{"body":"Following up on my note."}' | reply contact linkedin-message --contact-id 456 --linkedin-account-id 34 --message - --send-after 2026-11-03T14:00:00Z --idempotency-key follow-up-456-1
+# {"status":"sent",…,"reference":"linkedin-1042","send_after":"2026-11-03T14:00:00Z","state":"queued"}
+reply direct-send get linkedin-1042
+reply direct-send cancel linkedin-1042
+```
+
+Both answer the send under the CLI's names, each null when Reply gives none: `reference`,
+`channel`, `contact_id`, `state`, `send_after`, `sent_at`, `message_id`, `failure_reason` and
+`cancelled_at`. `failure_code`, `missing_variables`, `rendered_subject` and `rendered_body` are
+added only when Reply gives them. `failure_reason` is a sentence for a person and never parsed;
+`failure_code` is Reply's code for the failure, the one to branch on. `direct-send cancel` of a send already cancelled answers it
+again. A send already gone out or failed is `direct_send.already_sent` or
+`direct_send.already_failed`, and a reference Reply has no send for is `direct_send.not_found`.
+
+`reply inbox changes` reads the inbox feed forward. Each page holds the threads whose latest message,
+inbound or outbound, changed, oldest first and as Reply gives them, with `has_more` and a `cursor`.
+Start with `--since <moment>` (inclusive, at most 30 days ago) or with neither flag, which reads the
+last 30 days, then pass the answered cursor back with `--cursor` while `has_more` is true. Loop on
+`has_more`, not on the number of items: an empty page still carries a cursor, and when `has_more` is
+false that cursor is where the next read starts. A cursor or a `--since` older than the 30 days the
+feed keeps is `inbox.cursor_expired`: start again with `--since`. A cursor Reply will not read
+otherwise, unreadable or ahead of its clock, is `inbox.cursor_refused`, with `cursor` in
+`details.fields`; start again the same way.
+
+```sh
+reply inbox changes --since 2026-11-01T00:00:00Z --json
+# {"items":[{"threadId":9876,"contactId":456,"channel":"email","lastActivityDate":"2026-11-03T14:02:11Z",…}],
+#   "has_more":true,"cursor":"AQjfObhYHZgAAADjVg"}
+reply inbox changes --cursor AQjfObhYHZgAAADjVg --json
+```
+
+A Reply that does not have `direct-send get`, `direct-send cancel` or the feed yet answers
+`reply.refused` with status 404 and no `reply_code`. A reference of any other form never leaves the
+CLI, so on the two `direct-send` commands that 404 means this Reply has no such route.
+
 `reply schedule list` gives every sending schedule the account can use, in one answer and in the
 order Reply gives them: its `time_zone_id` as Reply holds it, a Windows time zone identifier such as
 `Eastern Standard Time`, whether it reads its windows in each recipient's own time zone, whether it
@@ -324,9 +401,12 @@ reply schedule list --json
 
 `inbox reply`, `sequence create` and the five direct sends are the work commands that are not safe to
 re-run. On exit 3 (outcome unknown) a reply or a send may already have gone, and running it again may
-send it twice, unless the hint says nothing was sent: a send whose contact's import lost its answer
-was never made, and its hint says so; run again, it answers `contact.already_held` if that import did
-create the contact.
+send it twice, unless the hint says nothing was sent. A direct send's exit 3 comes from a lost
+answer, a 5xx, or a 400 to the send whose JSON carries neither a `code` nor `errors[]`, which is
+Reply failing while it made the send; a 400 with `errors[]` is `reply.invalid_request` and sent
+nothing. A send whose contact's import lost its answer was never made, and its hint says so; run
+again, it answers `contact.already_held` if that import did create the contact. An `--idempotency-key` does not change this: a Reply that does not know the
+header yet would make the send again.
 For `inbox reply`, read the thread with `reply inbox get` before trying again. For
 `sequence create`, Reply allows two sequences of one name, so after exit 3 look the name up with
 `sequence list --name -` first. Every other work command can simply be run again; a `contact delete`
