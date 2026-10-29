@@ -15,7 +15,7 @@ type Opts = {cursor?: string; since?: string; top?: string};
 const events = async(opts: Opts = {})=>JSON.parse((await capture(()=>handle_inbox_events(opts, ctx(), {json: true}))).out);
 const failure = (opts: Opts)=>handle_inbox_events(opts, ctx(), {}).catch((x: unknown)=>x);
 
-// How #477 publishes a cursor Reply will not read: a validation problem with no code, pointing at /cursor.
+// How Reply's API document publishes a cursor it will not read: a validation problem with no code, pointing at /cursor.
 const CURSOR_TOO_OLD = {
     title: 'Validation failed', status: 400, detail: 'The request body contains validation errors.',
     errors: [{pointer: '/cursor', detail: '\'cursor\' is older than 30 days. Start again with \'since\' (at most 30 days ago) or with no parameters, which reads the last 30 days.'}],
