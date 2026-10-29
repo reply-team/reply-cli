@@ -1,7 +1,7 @@
 import {Operation_error, UsageError} from '../utils/errors';
 import {
-    call_reply, expect_object, read_page, refusal, reply_code_of, detail_of, is_object, item_failure, unreadable, open_session,
-    type Answer, type Op_session,
+    call_reply, expect_object, read_page, refusal, reply_code_of, detail_of, invalid_fields, is_object, item_failure, unreadable,
+    open_session, type Answer, type Op_session,
 } from './call';
 import {parse_id, parse_int_in, parse_iso, parse_moment, parse_choice, type Op_globals} from './options';
 import {print_result, with_ids} from './result';
@@ -68,15 +68,22 @@ const handle_inbox_list = async(opts: Inbox_list_opts, ctx: Cli_context, g: Op_g
 
 type Inbox_events_opts = {cursor?: string; since?: string; top?: string};
 
-// The feed keeps 30 days. Reply refuses a cursor or a since older than that under a code of its own,
-// the one refusal of the feed mapped here; any other is a validation problem and maps as everywhere else.
+const START_AGAIN = 'Start again with --since (at most 30 days ago), or with neither flag to read the last 30 days.';
+
+// The feed keeps 30 days. Reply refuses a cursor or a since older than that under a code of its own.
 const window_expired = (a: Answer): Operation_error | undefined=>
     a.status === 400 && reply_code_of(a) === 'inboxThread.eventWindowExpired'
         ? new Operation_error('inbox.cursor_expired', 'Reply keeps the feed for 30 days, and the cursor or --since reaches further back.', {
-            status: a.status, reply_code: reply_code_of(a), detail: detail_of(a),
-            hint: 'Start again with --since at most 30 days ago, or with neither flag to read the last 30 days.',
+            status: a.status, reply_code: reply_code_of(a), detail: detail_of(a), hint: START_AGAIN,
         })
         : undefined;
+
+// Any other cursor Reply will not read (unreadable, or ahead of its clock) is a validation problem
+// with no code that points at /cursor; they differ only in their text.
+const cursor_refused = (a: Answer, fields: string[]): Operation_error=>
+    new Operation_error('inbox.cursor_refused', 'Reply would not read the cursor: unreadable, older than 30 days or ahead of its clock.', {
+        status: a.status, detail: detail_of(a), details: {fields}, hint: START_AGAIN,
+    });
 
 const handle_inbox_events = async(opts: Inbox_events_opts, ctx: Cli_context, g: Op_globals): Promise<void>=>{
     if (opts.cursor !== undefined && opts.since !== undefined)
@@ -107,7 +114,8 @@ const handle_inbox_events = async(opts: Inbox_events_opts, ctx: Cli_context, g: 
     const a = await call_reply(s, 'GET', q === '' ? '/v3/inbox/events' : `/v3/inbox/events?${q}`, 'read');
     if (a.status !== 200)
     {
-        throw window_expired(a) ?? refusal(a, 'read');
+        const fields = opts.cursor !== undefined && a.status === 400 && reply_code_of(a) === undefined ? invalid_fields(a) : undefined;
+        throw window_expired(a) ?? (fields?.includes('cursor') ? cursor_refused(a, fields) : refusal(a, 'read'));
     }
     const body = expect_object(a, 'read');
     if (!Array.isArray(body.items) || typeof body.hasMore !== 'boolean' || typeof body.cursor !== 'string')

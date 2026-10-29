@@ -20,7 +20,7 @@ const WINDOW_EXPIRED = {
     code: 'inboxThread.eventWindowExpired', title: 'Event window expired', status: 400,
     detail: 'The feed keeps 30 days. Start again with \'since\' (at most 30 days ago) or with no parameters, which reads the last 30 days.',
 };
-// Any other cursor Reply will not read: a validation problem with no code, pointing at /cursor.
+// How Reply's API document publishes a cursor it will not read: a validation problem with no code, pointing at /cursor.
 const CURSOR_UNREADABLE = {
     title: 'Validation failed', status: 400, detail: 'The request body contains validation errors.',
     errors: [{pointer: '/cursor', detail: '\'cursor\' could not be read.'}],
@@ -88,9 +88,19 @@ describe('inbox events', ()=>{
         expect(await failure({cursor: 'c'})).toMatchObject({code: 'reply.refused', reply_code: 'inboxThread.eventWindowExpired'});
     });
 
-    it('any other refusal maps as everywhere else, a cursor Reply will not read included', async()=>{
+    it('a cursor Reply will not read is inbox.cursor_refused, with the same hint as the expired window', async()=>{
+        answer(problem(CURSOR_UNREADABLE, 400));
+        const e = await failure({cursor: 'AQjfObhYHZgAAADjVg'});
+        expect(e).toMatchObject({code: 'inbox.cursor_refused', status: 400, exit_code: 1, details: {fields: ['cursor']}});
+        expect((e as {reply_code?: string}).reply_code).toBeUndefined();
+        mock_fetch.mockReset();
+        answer(problem(WINDOW_EXPIRED, 400));
+        expect((e as {hint?: string}).hint).toBe((await failure({cursor: 'AQjfObhYHZgAAADjVg'}) as {hint?: string}).hint);
+    });
+
+    it('any other refusal maps as everywhere else', async()=>{
         const cases: [Opts, Response, string][] = [
-            [{cursor: 'AQjfObhYHZgAAADjVg'}, problem(CURSOR_UNREADABLE, 400), 'reply.invalid_request'],
+            // The same pointer when no cursor was sent is not about one the caller holds.
             [{since: '2026-11-03T14:00:00Z'}, problem(CURSOR_UNREADABLE, 400), 'reply.invalid_request'],
             [{since: '2026-09-01T00:00:00Z'}, problem({title: 'Validation failed', status: 400, errors: [{pointer: '/since', detail: 'too old'}]}, 400),
                 'reply.invalid_request'],

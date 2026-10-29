@@ -178,9 +178,8 @@ describe('operations/commands', ()=>{
         expect(flat, text).toContain('loop on has_more, not on the number of items');
         expect(flat, text).toContain('an empty page still carries a cursor');
         expect(flat, text).toContain('A cursor or a --since older than 30 days is inbox.cursor_expired: start again with --since');
-        expect(flat, text).toContain('Any other cursor Reply will not read is reply.invalid_request with cursor in details.fields');
-        expect(text, text).toContain('  inbox.cursor_expired\n');
-        expect(text, text).not.toContain('cursor_refused');
+        expect(flat, text).toContain('A cursor Reply will not read otherwise, unreadable or ahead of its clock, is inbox.cursor_refused');
+        expect(text, text).toContain('  inbox.cursor_expired\n  inbox.cursor_refused\n');
         expect(text, text).not.toContain('outcome.unknown');
     });
 

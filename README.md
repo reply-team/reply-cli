@@ -359,8 +359,9 @@ Start with `--since <moment>` (inclusive, at most 30 days ago) or with neither f
 last 30 days, then pass the answered cursor back with `--cursor` while `has_more` is true. Loop on
 `has_more`, not on the number of items: an empty page still carries a cursor, and when `has_more` is
 false that cursor is where the next read starts. A cursor or a `--since` older than the 30 days the
-feed keeps is `inbox.cursor_expired`: start again with `--since`. Any other cursor Reply will not
-read is `reply.invalid_request`, with `cursor` in `details.fields`.
+feed keeps is `inbox.cursor_expired`: start again with `--since`. A cursor Reply will not read
+otherwise, unreadable or ahead of its clock, is `inbox.cursor_refused`, with `cursor` in
+`details.fields`; start again the same way.
 
 ```sh
 reply inbox events --since 2026-11-01T00:00:00Z --json

@@ -443,15 +443,15 @@ inbox_command.command('events')
     .option('--top <n>', 'Items per page, 1-1000 (default: Reply\'s)')
     .description('One page of the inbox feed: each thread whose latest message changed, oldest first, read forward by cursor')
     .addHelpText('after', help([ex('inbox events --since 2026-11-01T00:00:00Z'), ex('inbox events --cursor AQjfObhYHZgAAADjVg --top 200')],
-        ['inbox.cursor_expired'], false,
+        ['inbox.cursor_expired', 'inbox.cursor_refused'], false,
         'Result: {"items","has_more","cursor"}, the items as Reply gives them, one per thread whose latest message, inbound\n'
             + 'or outbound, changed: threadId, contactId, channel, lastActivityDate, flags (hasReply, hasBounce, hasAutoReply,\n'
             + 'hasOutOfOffice) and lastMessage among them. Give --cursor or --since, not both; with neither, Reply reads the last\n'
             + '30 days. Call again with the answered cursor while has_more is true, and loop on has_more, not on the number of\n'
             + 'items: an empty page still carries a cursor, and when has_more is false that cursor is where the next read starts.\n'
             + '--since goes to Reply in UTC; a moment without its offset is refused (usage.date). A cursor or a --since older\n'
-            + 'than 30 days is inbox.cursor_expired: start again with --since. Any other cursor Reply will not read is\n'
-            + 'reply.invalid_request with cursor in details.fields.\n'
+            + 'than 30 days is inbox.cursor_expired: start again with --since. A cursor Reply will not read otherwise,\n'
+            + 'unreadable or ahead of its clock, is inbox.cursor_refused, with cursor in details.fields; start again the same way.\n'
             + 'A Reply without the feed answers reply.refused with status 404 and no reply_code.\n'))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
