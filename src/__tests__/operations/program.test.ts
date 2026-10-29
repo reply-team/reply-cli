@@ -225,16 +225,16 @@ describe('the program', ()=>{
         expect([init.method, url]).toEqual(['POST', 'https://api.reply.io/v3/direct-sends/email-1001/cancel']);
     });
 
-    it('inbox events reads its flags through commander: both --cursor and --since exit 2, an expired cursor exits 1 with its code', async()=>{
-        const both = await run_program(['--json', '-q', '-k', 'key-1', 'inbox', 'events', '--cursor', 'c1', '--since', '2026-11-03T14:00:00Z']);
+    it('inbox changes reads its flags through commander: both --cursor and --since exit 2, an expired cursor exits 1 with its code', async()=>{
+        const both = await run_program(['--json', '-q', '-k', 'key-1', 'inbox', 'changes', '--cursor', 'c1', '--since', '2026-11-03T14:00:00Z']);
         expect(both.code).toBe(2);
         expect(mock_fetch).not.toHaveBeenCalled();
-        answer(json({code: 'inboxThread.eventWindowExpired', status: 400, detail: 'The feed keeps 30 days.'}, 400,
+        answer(json({code: 'inboxThread.changeWindowExpired', status: 400, detail: 'The feed keeps 30 days.'}, 400,
             {'Content-Type': 'application/problem+json'}));
-        const {code, err} = await run_program(['--json', '-q', '-k', 'key-1', 'inbox', 'events', '--cursor', 'c1', '--top', '50']);
+        const {code, err} = await run_program(['--json', '-q', '-k', 'key-1', 'inbox', 'changes', '--cursor', 'c1', '--top', '50']);
         expect(code).toBe(1);
-        expect(JSON.parse(err)).toMatchObject({error: {code: 'inbox.cursor_expired', status: 400, reply_code: 'inboxThread.eventWindowExpired'}});
-        expect((mock_fetch.mock.calls[0] as [string, RequestInit])[0]).toBe('https://api.reply.io/v3/inbox/events?cursor=c1&top=50');
+        expect(JSON.parse(err)).toMatchObject({error: {code: 'inbox.cursor_expired', status: 400, reply_code: 'inboxThread.changeWindowExpired'}});
+        expect((mock_fetch.mock.calls[0] as [string, RequestInit])[0]).toBe('https://api.reply.io/v3/inbox/threads/changes?cursor=c1&top=50');
     });
 
     it('a usage error exits 2 before any request', async()=>{

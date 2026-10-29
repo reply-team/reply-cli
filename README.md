@@ -205,7 +205,7 @@ prints JSON (indented; compact with `--json`) and says what happened in a stable
 | `reply direct-send get <reference>` | a send as Reply holds it: whether it has gone out, when, and why it failed |
 | `reply direct-send cancel <reference>` | stop a send that has not gone out yet → `state` `cancelled` |
 | `reply inbox list (--contact-id \| --sequence-id) [--source] [--channel] [--category-id] [--since]` | one page of threads |
-| `reply inbox events [--cursor … \| --since …] [--top N]` | one page of the inbox feed, read forward by cursor |
+| `reply inbox changes [--cursor … \| --since …] [--top N]` | one page of the inbox feed, read forward by cursor |
 | `reply inbox get <thread-id>` | a thread with its subject, and one page of its messages |
 | `reply inbox reply <thread-id> --message -` | reply in the thread, on its own channel → `sent` |
 | `reply inbox categories` | the categories a thread can be filed under |
@@ -356,7 +356,7 @@ added only when Reply gives them. `failure_reason` is a sentence for a person an
 again. A send already gone out or failed is `direct_send.already_sent` or
 `direct_send.already_failed`, and a reference Reply has no send for is `direct_send.not_found`.
 
-`reply inbox events` reads the inbox feed forward. Each page holds the threads whose latest message,
+`reply inbox changes` reads the inbox feed forward. Each page holds the threads whose latest message,
 inbound or outbound, changed, oldest first and as Reply gives them, with `has_more` and a `cursor`.
 Start with `--since <moment>` (inclusive, at most 30 days ago) or with neither flag, which reads the
 last 30 days, then pass the answered cursor back with `--cursor` while `has_more` is true. Loop on
@@ -367,10 +367,10 @@ otherwise, unreadable or ahead of its clock, is `inbox.cursor_refused`, with `cu
 `details.fields`; start again the same way.
 
 ```sh
-reply inbox events --since 2026-11-01T00:00:00Z --json
+reply inbox changes --since 2026-11-01T00:00:00Z --json
 # {"items":[{"threadId":9876,"contactId":456,"channel":"email","lastActivityDate":"2026-11-03T14:02:11Z",…}],
 #   "has_more":true,"cursor":"AQjfObhYHZgAAADjVg"}
-reply inbox events --cursor AQjfObhYHZgAAADjVg --json
+reply inbox changes --cursor AQjfObhYHZgAAADjVg --json
 ```
 
 A Reply that does not have `direct-send get`, `direct-send cancel` or the feed yet answers

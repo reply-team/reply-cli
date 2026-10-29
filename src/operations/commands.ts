@@ -8,7 +8,7 @@ import {handle_sequence_list, handle_sequence_create} from './sequence-by-name';
 import {handle_sequence_add_contact, handle_sequence_remove_contact} from './sequence-membership';
 import {handle_sequence_pause, handle_sequence_start} from './sequence-state';
 import {
-    handle_inbox_list, handle_inbox_events, handle_inbox_get, handle_inbox_categories, handle_inbox_categorize, handle_inbox_mark_read, handle_inbox_mark_unread,
+    handle_inbox_list, handle_inbox_changes, handle_inbox_get, handle_inbox_categories, handle_inbox_categorize, handle_inbox_mark_read, handle_inbox_mark_unread,
 } from './inbox';
 import {handle_inbox_reply} from './inbox-reply';
 import {handle_contact_list_add_contact} from './contact-list';
@@ -438,12 +438,12 @@ inbox_command.command('list')
         await handle_inbox_list(cmd.opts(), ctx, g);
     }));
 
-inbox_command.command('events')
+inbox_command.command('changes')
     .option('--cursor <cursor>', 'Go on from the cursor a previous page answered, passed back unchanged')
     .option('--since <moment>', 'Start at this moment, inclusive, given with its offset; at most 30 days ago')
     .option('--top <n>', 'Items per page, 1-1000 (default: Reply\'s)')
     .description('One page of the inbox feed: each thread whose latest message changed, oldest first, read forward by cursor')
-    .addHelpText('after', help([ex('inbox events --since 2026-11-01T00:00:00Z'), ex('inbox events --cursor AQjfObhYHZgAAADjVg --top 200')],
+    .addHelpText('after', help([ex('inbox changes --since 2026-11-01T00:00:00Z'), ex('inbox changes --cursor AQjfObhYHZgAAADjVg --top 200')],
         ['inbox.cursor_expired', 'inbox.cursor_refused'], false,
         'Result: {"items","has_more","cursor"}, the items as Reply gives them, one per thread whose latest message, inbound\n'
             + 'or outbound, changed: threadId, contactId, channel, lastActivityDate, flags (hasReply, hasBounce, hasAutoReply,\n'
@@ -456,7 +456,7 @@ inbox_command.command('events')
             + 'A Reply without the feed answers reply.refused with status 404 and no reply_code.\n'))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
-        await handle_inbox_events(cmd.opts(), ctx, g);
+        await handle_inbox_changes(cmd.opts(), ctx, g);
     }));
 
 inbox_command.command('get')

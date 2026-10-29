@@ -1,10 +1,10 @@
 import {describe, it, expect, beforeEach} from 'vitest';
 import {mock_fetch, json, ctx, sent, answer, capture} from './helpers';
-import {handle_inbox_events} from '../../operations/inbox';
+import {handle_inbox_changes} from '../../operations/inbox';
 
 beforeEach(()=>{ mock_fetch.mockReset(); });
 
-const EVENT = {
+const CHANGE = {
     threadId: 9876, contactId: 456, channel: 'email', lastActivityDate: '2026-11-03T14:02:11Z', sequenceId: 12,
     category: 'interested', hasMeetingIntent: false, newFieldReplyAdds: 'kept',
     flags: {hasReply: true, hasBounce: false, hasAutoReply: false, hasOutOfOffice: false},
@@ -12,12 +12,12 @@ const EVENT = {
 };
 
 type Opts = {cursor?: string; since?: string; top?: string};
-const events = async(opts: Opts = {})=>JSON.parse((await capture(()=>handle_inbox_events(opts, ctx(), {json: true}))).out);
-const failure = (opts: Opts)=>handle_inbox_events(opts, ctx(), {}).catch((x: unknown)=>x);
+const changes = async(opts: Opts = {})=>JSON.parse((await capture(()=>handle_inbox_changes(opts, ctx(), {json: true}))).out);
+const failure = (opts: Opts)=>handle_inbox_changes(opts, ctx(), {}).catch((x: unknown)=>x);
 
 // A cursor or a since older than the feed's 30 days: a business problem with a code of its own.
 const WINDOW_EXPIRED = {
-    code: 'inboxThread.eventWindowExpired', title: 'Event window expired', status: 400,
+    code: 'inboxThread.changeWindowExpired', title: 'Change window expired', status: 400,
     detail: 'The feed keeps 30 days. Start again with \'since\' (at most 30 days ago) or with no parameters, which reads the last 30 days.',
 };
 // How Reply's API document publishes a cursor it will not read: a validation problem with no code, pointing at /cursor.
@@ -27,16 +27,16 @@ const CURSOR_UNREADABLE = {
 };
 const problem = (body: unknown, status: number)=>json(body, status, {'Content-Type': 'application/problem+json'});
 
-describe('inbox events', ()=>{
+describe('inbox changes', ()=>{
     it('reads one page of the feed and passes the items on as Reply gives them, under has_more and cursor', async()=>{
-        answer(json({items: [EVENT], hasMore: true, cursor: 'AQjfObhYHZgAAADjVg'}));
-        expect(await events()).toStrictEqual({items: [EVENT], has_more: true, cursor: 'AQjfObhYHZgAAADjVg'});
-        expect(sent()).toEqual([{method: 'GET', url: 'https://api/v3/inbox/events', body: undefined}]);
+        answer(json({items: [CHANGE], hasMore: true, cursor: 'AQjfObhYHZgAAADjVg'}));
+        expect(await changes()).toStrictEqual({items: [CHANGE], has_more: true, cursor: 'AQjfObhYHZgAAADjVg'});
+        expect(sent()).toEqual([{method: 'GET', url: 'https://api/v3/inbox/threads/changes', body: undefined}]);
     });
 
     it('an empty page keeps the cursor Reply gives with it, so the next read goes on from there', async()=>{
         answer(json({items: [], hasMore: false, cursor: 'AQjfObkJcH4Af____w'}));
-        expect(await events({cursor: 'AQjfObhYHZgAAADjVg'})).toStrictEqual({items: [], has_more: false, cursor: 'AQjfObkJcH4Af____w'});
+        expect(await changes({cursor: 'AQjfObhYHZgAAADjVg'})).toStrictEqual({items: [], has_more: false, cursor: 'AQjfObkJcH4Af____w'});
     });
 
     it('sends the cursor as given and encoded, --since in UTC and not shifted, and --top only when given', async()=>{
@@ -50,8 +50,8 @@ describe('inbox events', ()=>{
         {
             mock_fetch.mockReset();
             answer(json({items: [], hasMore: false, cursor: 'c'}));
-            await events(opts);
-            expect(sent()[0].url, query).toBe(`https://api/v3/inbox/events?${query}`);
+            await changes(opts);
+            expect(sent()[0].url, query).toBe(`https://api/v3/inbox/threads/changes?${query}`);
         }
     });
 
@@ -78,14 +78,14 @@ describe('inbox events', ()=>{
             answer(problem(WINDOW_EXPIRED, 400));
             const e = await failure(opts);
             expect(e, JSON.stringify(opts)).toMatchObject({code: 'inbox.cursor_expired', status: 400, exit_code: 1,
-                reply_code: 'inboxThread.eventWindowExpired', detail: WINDOW_EXPIRED.detail});
+                reply_code: 'inboxThread.changeWindowExpired', detail: WINDOW_EXPIRED.detail});
             expect((e as {hint?: string}).hint, JSON.stringify(opts)).toContain('--since');
         }
     });
 
     it('the window\'s code under another status is not the window: it maps as everywhere else', async()=>{
         answer(problem({...WINDOW_EXPIRED, status: 409}, 409));
-        expect(await failure({cursor: 'c'})).toMatchObject({code: 'reply.refused', reply_code: 'inboxThread.eventWindowExpired'});
+        expect(await failure({cursor: 'c'})).toMatchObject({code: 'reply.refused', reply_code: 'inboxThread.changeWindowExpired'});
     });
 
     it('a cursor Reply will not read is inbox.cursor_refused, with the same hint as the expired window', async()=>{
@@ -136,7 +136,7 @@ describe('inbox events', ()=>{
 
     it('a page without its items, has_more or cursor cannot be read, and the read is safe to make again', async()=>{
         for (const body of [{items: [], hasMore: false}, {items: [], cursor: 'c'}, {items: {}, hasMore: false, cursor: 'c'},
-            {items: [], hasMore: 'no', cursor: 'c'}, {items: [], hasMore: false, cursor: 7}, [EVENT]])
+            {items: [], hasMore: 'no', cursor: 'c'}, {items: [], hasMore: false, cursor: 7}, [CHANGE]])
         {
             mock_fetch.mockReset();
             answer(json(body));

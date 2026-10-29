@@ -66,13 +66,13 @@ const handle_inbox_list = async(opts: Inbox_list_opts, ctx: Cli_context, g: Op_g
     print_result({items: page.items, has_more: page.has_more}, g);
 };
 
-type Inbox_events_opts = {cursor?: string; since?: string; top?: string};
+type Inbox_changes_opts = {cursor?: string; since?: string; top?: string};
 
 const START_AGAIN = 'Start again with --since (at most 30 days ago), or with neither flag to read the last 30 days.';
 
 // The feed keeps 30 days. Reply refuses a cursor or a since older than that under a code of its own.
 const window_expired = (a: Answer): Operation_error | undefined=>
-    a.status === 400 && reply_code_of(a) === 'inboxThread.eventWindowExpired'
+    a.status === 400 && reply_code_of(a) === 'inboxThread.changeWindowExpired'
         ? new Operation_error('inbox.cursor_expired', 'Reply keeps the feed for 30 days, and the cursor or --since reaches further back.', {
             status: a.status, reply_code: reply_code_of(a), detail: detail_of(a), hint: START_AGAIN,
         })
@@ -85,7 +85,7 @@ const cursor_refused = (a: Answer, fields: string[]): Operation_error=>
         status: a.status, detail: detail_of(a), details: {fields}, hint: START_AGAIN,
     });
 
-const handle_inbox_events = async(opts: Inbox_events_opts, ctx: Cli_context, g: Op_globals): Promise<void>=>{
+const handle_inbox_changes = async(opts: Inbox_changes_opts, ctx: Cli_context, g: Op_globals): Promise<void>=>{
     if (opts.cursor !== undefined && opts.since !== undefined)
     {
         throw new UsageError('Give --cursor or --since, not both.', {code: 'usage.inbox'});
@@ -111,7 +111,7 @@ const handle_inbox_events = async(opts: Inbox_events_opts, ctx: Cli_context, g: 
     }
     const s = await open_session(ctx, g);
     const q = query.toString();
-    const a = await call_reply(s, 'GET', q === '' ? '/v3/inbox/events' : `/v3/inbox/events?${q}`, 'read');
+    const a = await call_reply(s, 'GET', q === '' ? '/v3/inbox/threads/changes' : `/v3/inbox/threads/changes?${q}`, 'read');
     if (a.status !== 200)
     {
         const fields = opts.cursor !== undefined && a.status === 400 && reply_code_of(a) === undefined ? invalid_fields(a) : undefined;
@@ -275,7 +275,7 @@ const handle_inbox_mark_unread = (thread_arg: string, ctx: Cli_context, g: Op_gl
     mark_thread(thread_arg, false, ctx, g);
 
 export {
-    handle_inbox_list, handle_inbox_events, handle_inbox_get, handle_inbox_categories, handle_inbox_categorize,
+    handle_inbox_list, handle_inbox_changes, handle_inbox_get, handle_inbox_categories, handle_inbox_categorize,
     handle_inbox_mark_read, handle_inbox_mark_unread, thread_not_found, SOURCES, CHANNELS,
 };
 export type {Channel};

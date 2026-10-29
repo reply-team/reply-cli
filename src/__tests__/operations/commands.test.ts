@@ -24,7 +24,7 @@ describe('operations/commands', ()=>{
         expect(contact_list_command.commands.map(c=>c.name())).toEqual(['add-contact']);
         expect(contact_command.commands.map(c=>c.name())).toEqual(['find', 'get', 'update', 'delete', 'opt-out',
             'send-email', 'linkedin-connect', 'linkedin-message', 'linkedin-inmail', 'linkedin-voice']);
-        expect(inbox_command.commands.map(c=>c.name())).toEqual(['list', 'events', 'get', 'reply', 'categories', 'categorize', 'mark-read', 'mark-unread']);
+        expect(inbox_command.commands.map(c=>c.name())).toEqual(['list', 'changes', 'get', 'reply', 'categories', 'categorize', 'mark-read', 'mark-unread']);
         expect(account_command.commands.map(c=>c.name())).toEqual(['list']);
         expect(schedule_command.commands.map(c=>c.name())).toEqual(['list']);
         expect(direct_send_command.commands.map(c=>c.name())).toEqual(['get', 'cancel']);
@@ -166,8 +166,8 @@ describe('operations/commands', ()=>{
         expect(flags(sub(contact_command, 'delete'))).toEqual([]);
     });
 
-    it('inbox events takes --cursor, --since and --top, and says how the feed is read forward', ()=>{
-        const c = sub(inbox_command, 'events');
+    it('inbox changes takes --cursor, --since and --top, and says how the feed is read forward', ()=>{
+        const c = sub(inbox_command, 'changes');
         expect(flags(c)).toEqual(['--cursor', '--since', '--top']);
         expect(c.registeredArguments).toEqual([]);
         const text = help_of(c);
@@ -181,6 +181,9 @@ describe('operations/commands', ()=>{
         expect(flat, text).toContain('A cursor Reply will not read otherwise, unreadable or ahead of its clock, is inbox.cursor_refused');
         expect(text, text).toContain('  inbox.cursor_expired\n  inbox.cursor_refused\n');
         expect(text, text).not.toContain('outcome.unknown');
+        // The feed names the threads that changed, and its examples use the command's own name.
+        expect(text, text).toContain('inbox changes --since 2026-11-01T00:00:00Z');
+        expect(text, text).not.toContain('events');
     });
 
     it('sequence list and create take the name only through --name -, and create says a repeat may make a second one', ()=>{
