@@ -847,6 +847,22 @@ describe('a direct email Reply renders', ()=>{
         }
     });
 
+    it('reads the two codes only from the email route: a LinkedIn send answering either falls to the usual mapping', async()=>{
+        const sends: [Direct_send_name, unknown][] = [['linkedin-connect', {note: NOTE}], ['linkedin-message', {body: TEXT}],
+            ['linkedin-inmail', {subject: SUBJECT, body: TEXT}], ['linkedin-voice', {script: SCRIPT}]];
+        for (const [name, message] of sends)
+        {
+            for (const reply_code of ['contact.missingVariables', 'contact.renderingFailed'])
+            {
+                mock_fetch.mockReset();
+                answer(json({code: reply_code, missingVariables: ['FirstName']}, 400));
+                const e = await failure(name, message, LINKEDIN_OPTS);
+                expect(e, `${name} ${reply_code}`).toMatchObject({code: 'reply.refused', status: 400, reply_code, exit_code: 1});
+                expect((e as {details?: unknown}).details, `${name} ${reply_code}`).toBeUndefined();
+            }
+        }
+    });
+
     it('sends trackLinks and trackOpens only when their flags are given, and nothing of them otherwise', async()=>{
         const cases: [Direct_send_opts, Record<string, unknown>][] = [
             [EMAIL_OPTS, {}],

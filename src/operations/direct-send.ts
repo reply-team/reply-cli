@@ -106,18 +106,26 @@ const picked = (keys: [string, string][], from: Record<string, unknown>): Record
 const strings_of = (v: unknown): string[] | undefined=>
     Array.isArray(v) && v.every(s=>typeof s === 'string') ? v : undefined;
 
-// Reply's refusals of a direct send, by status and code. Each one is definite: nothing was sent.
-const REFUSALS: Record<string, Refusal> = {
-    'contact.missingVariables': {
-        status: 400, code: 'contact.missing_variables', title: 'The email holds a template variable Reply could not fill, so nothing was sent.',
-        details: body=>{
-            const missing = strings_of(body.missingVariables);
-            return missing === undefined ? undefined : {missing_variables: missing};
+// The email route's refusals of the template it renders. Only that route renders one, so a LinkedIn
+// send answering either code falls to the usual mapping. Each one is definite: nothing was sent.
+const TEMPLATE_REFUSALS: Record<Channel, Record<string, Refusal>> = {
+    email: {
+        'contact.missingVariables': {
+            status: 400, code: 'contact.missing_variables', title: 'The email holds a template variable Reply could not fill, so nothing was sent.',
+            details: body=>{
+                const missing = strings_of(body.missingVariables);
+                return missing === undefined ? undefined : {missing_variables: missing};
+            },
+        },
+        'contact.renderingFailed': {
+            status: 400, code: 'contact.rendering_failed', title: 'Reply could not render the email\'s template, so nothing was sent.',
         },
     },
-    'contact.renderingFailed': {
-        status: 400, code: 'contact.rendering_failed', title: 'Reply could not render the email\'s template, so nothing was sent.',
-    },
+    linkedin: {},
+};
+
+// Reply's refusals of a direct send, by status and code. Each one is definite: nothing was sent.
+const REFUSALS: Record<string, Refusal> = {
     'contact.emailAccountNotFound': {
         status: 400, code: 'email_account.not_found', title: 'Reply has no mailbox by that id that this account can send from, so nothing was sent.',
     },
@@ -232,7 +240,8 @@ const send_refusal = (a: Answer, contact_id: number, by: Channel): Operation_err
             retry_after: parse_retry_after(a.headers['retry-after']) ?? undefined, details: {limit: LIMITS[reply_code]},
         });
     }
-    return known_refusal(a, REFUSALS) ?? known_refusal(a, KEY_REFUSALS[by]) ?? refusal(a, 'write');
+    return known_refusal(a, REFUSALS) ?? known_refusal(a, TEMPLATE_REFUSALS[by]) ?? known_refusal(a, KEY_REFUSALS[by])
+        ?? refusal(a, 'write');
 };
 
 const positive_integer = (v: unknown): number | null=>
