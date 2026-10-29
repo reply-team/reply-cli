@@ -17,10 +17,12 @@ const failure = (fn: () => Promise<void>)=>fn().catch((x: unknown)=>x);
 const lost_connection = ()=>Object.assign(new TypeError('fetch failed'),
     {cause: Object.assign(new Error('ECONNRESET'), {code: 'ECONNRESET'})});
 
-// A 404 with no code of Reply's own: how a Reply without the route answers.
+// A 404 with no code of Reply's own: how a Reply without the route, or a proxy in front of it, answers.
 const BARE_404: [string, ()=>Response][] = [
     ['empty', ()=>new Response(null, {status: 404})],
     ['problem without a code', ()=>json({title: 'Not Found', status: 404}, 404, {'Content-Type': 'application/problem+json'})],
+    ['html page', ()=>new Response('<html>Not Found</html>', {status: 404, headers: {'Content-Type': 'text/html'}})],
+    ['plain text', ()=>new Response('Not Found', {status: 404, headers: {'Content-Type': 'text/plain'}})],
 ];
 
 describe('direct-send get', ()=>{

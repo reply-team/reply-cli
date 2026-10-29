@@ -714,10 +714,12 @@ describe('a send for later', ()=>{
         expect((e as {hint?: string}).hint).toContain('may send it twice');
     });
 
-    it('a 404 with no code of Reply\'s own stays reply.refused, status 404 and no reply code, an empty body or a problem without one', async()=>{
+    it('a 404 with no code of Reply\'s own stays reply.refused, status 404 and no reply code, an empty body, a problem without one, or a page that is not JSON', async()=>{
         const bare: [string, ()=>Response][] = [
             ['empty', ()=>new Response(null, {status: 404})],
             ['problem', ()=>json({title: 'Not Found', status: 404}, 404, {'Content-Type': 'application/problem+json'})],
+            ['html', ()=>new Response('<html>Not Found</html>', {status: 404, headers: {'Content-Type': 'text/html'}})],
+            ['text', ()=>new Response('Not Found', {status: 404, headers: {'Content-Type': 'text/plain'}})],
         ];
         for (const [name, message, opts] of SENDS)
         {

@@ -118,10 +118,20 @@ describe('inbox events', ()=>{
     });
 
     it('a 404 with no code of Reply\'s own, from a Reply without the feed, is reply.refused with status 404 and no reply code', async()=>{
-        answer(new Response(null, {status: 404}));
-        const e = await failure({});
-        expect(e).toMatchObject({code: 'reply.refused', status: 404});
-        expect((e as {reply_code?: string}).reply_code).toBeUndefined();
+        const bare: [string, ()=>Response][] = [
+            ['empty', ()=>new Response(null, {status: 404})],
+            ['problem without a code', ()=>problem({title: 'Not Found', status: 404}, 404)],
+            ['html page', ()=>new Response('<html>Not Found</html>', {status: 404, headers: {'Content-Type': 'text/html'}})],
+            ['plain text', ()=>new Response('Not Found', {status: 404, headers: {'Content-Type': 'text/plain'}})],
+        ];
+        for (const [label, res] of bare)
+        {
+            mock_fetch.mockReset();
+            answer(res());
+            const e = await failure({});
+            expect(e, label).toMatchObject({code: 'reply.refused', status: 404, exit_code: 1});
+            expect((e as {reply_code?: string}).reply_code, label).toBeUndefined();
+        }
     });
 
     it('a page without its items, has_more or cursor cannot be read, and the read is safe to make again', async()=>{
