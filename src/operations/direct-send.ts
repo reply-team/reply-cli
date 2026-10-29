@@ -1,7 +1,7 @@
 import {PROGRAM_NAME} from '../config';
 import {Operation_error, Unknown_outcome_error, UsageError, type Ids} from '../utils/errors';
 import {parse_retry_after} from '../utils/client';
-import {call_reply, expect_object, refusal, reply_code_of, detail_of, open_session, type Answer} from './call';
+import {call_reply, expect_object, refusal, is_object, reply_code_of, detail_of, open_session, type Answer} from './call';
 import {parse_id, parse_moment, parse_idempotency_key, LARGEST_SAFE_ID, type Op_globals} from './options';
 import {read_contact_input, type Contact_flags, type Contact_ref} from './contact-input';
 import {contact_not_found, find_contact_by_address, import_contact, type Channel, type Ensured} from './contacts';
@@ -186,14 +186,10 @@ const KEY_IN_USE: Refusal = {
     hint: 'Run it again with the same key once that send is made: Reply answers a repeat with the send the key first made.',
 };
 // Reply holds the send the key was first taken for, and may name it: a repeat built differently from
-// the first attempt answers reused, so the caller still learns which send that was.
+// the first attempt answers reused, so the caller still learns which send that was (send_refusal).
 const KEY_REUSED: Refusal = {
     status: 409, code: 'idempotency_key.reused', title: 'Reply already took this idempotency key for a different send, so nothing was sent.',
     hint: 'Give each new send a key of its own.',
-    details: body=>{
-        const held = picked(HELD_KEYS, body);
-        return Object.keys(held).length === 0 ? undefined : held;
-    },
 };
 const KEY_REFUSALS: Record<Channel, Record<string, Refusal>> = {
     email: {'contact.idempotencyKeyInUse': KEY_IN_USE, 'contact.idempotencyKeyReused': KEY_REUSED},
@@ -227,7 +223,7 @@ const known_refusal = (a: Answer, table: Record<string, Refusal>): Operation_err
         : undefined;
 };
 
-const send_refusal = (a: Answer, contact_id: number, by: Channel): Operation_error=>{
+const refusal_of_send = (a: Answer, contact_id: number, by: Channel): Operation_error=>{
     const reply_code = reply_code_of(a);
     if (a.status === 404 && (reply_code === 'contact.notFound' || reply_code === 'directLinkedIn.contactNotFound'))
     {
@@ -242,6 +238,19 @@ const send_refusal = (a: Answer, contact_id: number, by: Channel): Operation_err
     }
     return known_refusal(a, REFUSALS) ?? known_refusal(a, TEMPLATE_REFUSALS[by]) ?? known_refusal(a, KEY_REFUSALS[by])
         ?? refusal(a, 'write');
+};
+
+// A send Reply refused after its row existed, or the send a reused key was taken for, comes with
+// Reply's reference, state and sendAfter: each one it gives as a string goes under details, beside
+// the refusal's own. The refusal's code and class are its own either way.
+const send_refusal = (a: Answer, contact_id: number, by: Channel): Operation_error=>{
+    const e = refusal_of_send(a, contact_id, by);
+    const held = is_object(a.data) ? picked(HELD_KEYS, a.data) : {};
+    if (Object.keys(held).length > 0)
+    {
+        e.details = {...e.details, ...held};
+    }
+    return e;
 };
 
 const positive_integer = (v: unknown): number | null=>

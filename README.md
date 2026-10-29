@@ -338,8 +338,11 @@ send is `idempotency_key.reused`. Neither sends anything. A repeat of a send giv
 fields (`--contact -`) answers `contact.already_held` first, since the first one created the
 contact: that is safe too, as nothing is sent twice. `idempotency_key.reused` names the send the
 key was first taken for under the error's `details`: its `reference`, `state` and `send_after`,
-each only when Reply gives it. A key is 1 to 255 printable ASCII characters; a space inside is kept,
-and one at either end is refused (`usage.idempotency_key`), since a header loses it on the way out.
+each only when Reply gives it. Any other refusal of a send Reply already holds, an email that
+failed after Reply made its row for example, names that send the same way, beside the refusal's
+own details such as `missing_variables`; its code is the refusal's own. A key is 1 to 255
+printable ASCII characters; a space inside is kept, and one at either end is refused
+(`usage.idempotency_key`), since a header loses it on the way out.
 
 ```sh
 echo '{"body":"Following up on my note."}' | reply contact linkedin-message --contact-id 456 --linkedin-account-id 34 --message - --send-after 2026-11-03T14:00:00Z --idempotency-key follow-up-456-1

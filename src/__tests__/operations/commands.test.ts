@@ -298,6 +298,8 @@ describe('operations/commands', ()=>{
                 + 'first one created the contact: that is safe too, as nothing is sent twice');
             expect(flat, text).toContain('idempotency_key.reused names the send the key was first taken for in details: reference, '
                 + 'state and send_after, each only when Reply gives it');
+            expect(flat, text).toContain('Any other refusal of a send Reply already holds names that send the same way, beside the '
+                + 'refusal\'s own details; its code is the refusal\'s own');
             // Exactly the codes its endpoint publishes, then the shared ones, as the help lists them.
             const listed = text.split('\nErrors')[1].split('\nExit codes')[0].split('\n').slice(1).map(l=>l.trim());
             expect(listed, name).toEqual([...codes, 'idempotency_key.in_use', 'idempotency_key.reused', 'access.denied', 'access.feature_unavailable', 'rate_limited', 'reply.unavailable',

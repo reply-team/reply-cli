@@ -777,15 +777,20 @@ describe('a send made with an idempotency key', ()=>{
             .toStrictEqual({reference: 'email-1001'});
     });
 
-    it('a reused key without the send, and a key in use, carry no details: the output is what it was', async()=>{
+    it('a reused key or a key in use without the send carries no details: the output is what it was', async()=>{
         for (const reply_code of ['contact.idempotencyKeyReused', 'contact.idempotencyKeyInUse'])
         {
             mock_fetch.mockReset();
-            answer(json({code: reply_code, detail: 'Conflict.', reference: reply_code.endsWith('InUse') ? 'email-1001' : undefined}, 409));
+            answer(json({code: reply_code, detail: 'Conflict.'}, 409));
             const e = await failure('send-email', {subject: SUBJECT, body: BODY}, {...EMAIL_OPTS, ...KEY});
             expect((e as {details?: unknown}).details, reply_code).toBeUndefined();
             expect(JSON.stringify((e as {to_json: () => unknown}).to_json()), reply_code).not.toContain('details');
         }
+        // A key in use names the send too when Reply gives it, as every refusal of a send does.
+        mock_fetch.mockReset();
+        answer(json({code: 'contact.idempotencyKeyInUse', detail: 'Conflict.', reference: 'email-1001'}, 409));
+        expect((await failure('send-email', {subject: SUBJECT, body: BODY}, {...EMAIL_OPTS, ...KEY}) as {details?: unknown}).details)
+            .toStrictEqual({reference: 'email-1001'});
     });
 
     it('reads those codes only under 409 and only in the send route\'s own family; any other answer is mapped as before', async()=>{
@@ -879,6 +884,76 @@ describe('a direct email Reply renders', ()=>{
             expect({trackLinks: body.trackLinks, trackOpens: body.trackOpens}, JSON.stringify(tracking))
                 .toStrictEqual({trackLinks: tracking.trackLinks, trackOpens: tracking.trackOpens});
             expect(Object.keys(body).filter(k=>k.startsWith('track')), JSON.stringify(tracking)).toEqual(Object.keys(tracking));
+        }
+    });
+});
+
+describe('a refused send that Reply holds a row for', ()=>{
+    const EMAIL: unknown = {subject: SUBJECT, body: BODY};
+    const HELD = {reference: 'email-1001', state: 'failed', sendAfter: '2026-11-03T14:00:00Z'};
+    const details_of = (e: unknown): unknown=>(e as {details?: unknown}).details;
+
+    it('names the send under details, reference, state and send_after, beside the refusal\'s code and class as before', async()=>{
+        answer(json({code: 'contact.renderingFailed', detail: 'Unclosed block at line 2.', ...HELD}, 400));
+        const e = await failure('send-email', EMAIL, EMAIL_OPTS);
+        expect(e).toMatchObject({code: 'contact.rendering_failed', status: 400, exit_code: 1, reply_code: 'contact.renderingFailed',
+            ids: {contact_id: 456}});
+        expect(details_of(e)).toStrictEqual({reference: 'email-1001', state: 'failed', send_after: '2026-11-03T14:00:00Z'});
+        expect((e as {to_json: () => unknown}).to_json()).toMatchObject({error: {details: {reference: 'email-1001', state: 'failed'}}});
+    });
+
+    it('gives each field only when Reply gives it as a string', async()=>{
+        const cases: [Record<string, unknown>, unknown][] = [
+            [{reference: 'email-1001'}, {reference: 'email-1001'}],
+            [{reference: 'email-1001', state: 7, sendAfter: null}, {reference: 'email-1001'}],
+            [{state: {failed: true}, sendAfter: ['2026-11-03T14:00:00Z']}, undefined],
+        ];
+        for (const [held, details] of cases)
+        {
+            mock_fetch.mockReset();
+            answer(json({code: 'contact.contactInBlackList', ...held}, 400));
+            const e = await failure('send-email', EMAIL, EMAIL_OPTS);
+            expect(e, JSON.stringify(held)).toMatchObject({code: 'contact.blacklisted', exit_code: 1});
+            expect(details_of(e), JSON.stringify(held)).toStrictEqual(details);
+        }
+    });
+
+    it('names it on a LinkedIn send\'s refusal too, a known code or one mapped as everywhere else', async()=>{
+        const cases: [Direct_send_name, unknown, Response, string][] = [
+            ['linkedin-message', {body: TEXT}, json({code: 'directLinkedIn.notConnected', ...HELD, reference: 'linkedin-1042'}, 409),
+                'linkedin.not_connected'],
+            ['linkedin-connect', {note: NOTE}, json({code: 'directLinkedIn.somethingNew', ...HELD, reference: 'linkedin-1042'}, 400),
+                'reply.refused'],
+        ];
+        for (const [name, message, res, code] of cases)
+        {
+            mock_fetch.mockReset();
+            answer(res);
+            const e = await failure(name, message, LINKEDIN_OPTS);
+            expect(e, name).toMatchObject({code, exit_code: 1});
+            expect(details_of(e), name).toStrictEqual({reference: 'linkedin-1042', state: 'failed', send_after: '2026-11-03T14:00:00Z'});
+        }
+    });
+
+    it('sits beside the details a refusal carries of its own: the unfilled names, a LinkedIn limit', async()=>{
+        answer(json({code: 'contact.missingVariables', missingVariables: ['FirstName'], ...HELD}, 400));
+        expect(details_of(await failure('send-email', EMAIL, EMAIL_OPTS))).toStrictEqual({missing_variables: ['FirstName'],
+            reference: 'email-1001', state: 'failed', send_after: '2026-11-03T14:00:00Z'});
+        mock_fetch.mockReset();
+        answer(json({code: 'directLinkedIn.dailyLimitReached', reference: 'linkedin-1042'}, 429, {'Retry-After': '3600'}));
+        expect(details_of(await failure('linkedin-message', {body: TEXT}, LINKEDIN_OPTS))).toStrictEqual({limit: 'daily',
+            reference: 'linkedin-1042'});
+    });
+
+    it('a refusal without them carries no details, and the output is what it was', async()=>{
+        for (const res of [json({code: 'contact.renderingFailed', detail: 'Unclosed block at line 2.'}, 400),
+            json({code: 'contact.somethingNew'}, 400), json('<html>Bad Request</html>', 400)])
+        {
+            mock_fetch.mockReset();
+            answer(res);
+            const e = await failure('send-email', EMAIL, EMAIL_OPTS);
+            expect(details_of(e)).toBeUndefined();
+            expect(JSON.stringify((e as {to_json: () => unknown}).to_json())).not.toContain('details');
         }
     });
 });

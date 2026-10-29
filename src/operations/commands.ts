@@ -308,7 +308,8 @@ const LATER = 'With --send-after Reply holds the send until that moment, given w
     + 'is idempotency_key.in_use, and the same key on a different send is idempotency_key.reused. Neither sends anything.\n'
     + 'A repeat of a send given a person\'s fields answers contact.already_held first, since the first one created the\n'
     + 'contact: that is safe too, as nothing is sent twice. idempotency_key.reused names the send the key was first taken\n'
-    + 'for in details: reference, state and send_after, each only when Reply gives it.\n';
+    + 'for in details: reference, state and send_after, each only when Reply gives it. Any other refusal of a send Reply\n'
+    + 'already holds names that send the same way, beside the refusal\'s own details; its code is the refusal\'s own.\n';
 
 // The refusals of a send's key, the same on every direct send, after each send's own.
 const KEY_CODES = ['idempotency_key.in_use', 'idempotency_key.reused'];
