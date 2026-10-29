@@ -668,6 +668,17 @@ describe('a send for later', ()=>{
         });
     });
 
+    it('adds the rendered subject and body of an email sent inside the request, each only when Reply gives it', async()=>{
+        answer(accepted('send-email', {renderedSubject: 'Quick question, Marta', renderedBody: '<p>Hi Marta</p>', state: 'sent'}));
+        expect(await run('send-email', {subject: SUBJECT, body: BODY}, EMAIL_OPTS)).toStrictEqual({
+            status: 'sent', contact_id: 456, contact_created: false, message_id: null, sent_at: null, reply_status: 'new',
+            state: 'sent', rendered_subject: 'Quick question, Marta', rendered_body: '<p>Hi Marta</p>',
+        });
+        mock_fetch.mockReset();
+        answer(accepted('send-email', {reference: 'email-1001', state: 'queued', renderedSubject: null}));
+        expect(await run('send-email', {subject: SUBJECT, body: BODY}, {...EMAIL_OPTS, ...LATER})).not.toHaveProperty('rendered_subject');
+    });
+
     it('an answer without them prints exactly what it prints today, even when the flags were given', async()=>{
         answer(accepted('linkedin-voice', {sentAtUtc: '2026-10-19T10:30:00Z'}));
         expect(await run('linkedin-voice', {script: SCRIPT}, {...LINKEDIN_OPTS, ...LATER})).toStrictEqual({
@@ -683,6 +694,7 @@ describe('a send for later', ()=>{
             [{scheduleId: 'business'}, 'usage.id'],
             [{idempotencyKey: ''}, 'usage.idempotency_key'],
             [{idempotencyKey: 'k'.repeat(256)}, 'usage.idempotency_key'],
+            [{idempotencyKey: 'tab\there'}, 'usage.idempotency_key'],
         ];
         for (const [name, message, opts] of SENDS)
         {
@@ -746,6 +758,34 @@ describe('a send made with an idempotency key', ()=>{
         }
     });
 
+    it('a reused key carries the send Reply holds under it, reference, state and send_after, each only when Reply gives it', async()=>{
+        for (const [name, message, opts, family] of SENDS)
+        {
+            mock_fetch.mockReset();
+            answer(json({code: `${family}.idempotencyKeyReused`, detail: 'Reused.', reference: 'email-1001', state: 'queued',
+                sendAfter: '2026-11-03T14:00:00Z'}, 409));
+            const e = await failure(name, message, opts);
+            expect(e, name).toMatchObject({code: 'idempotency_key.reused',
+                details: {reference: 'email-1001', state: 'queued', send_after: '2026-11-03T14:00:00Z'}});
+            expect((e as {to_json: () => unknown}).to_json(), name).toMatchObject({error: {details: {reference: 'email-1001'}}});
+        }
+        mock_fetch.mockReset();
+        answer(json({code: 'contact.idempotencyKeyReused', reference: 'email-1001', state: 7, sendAfter: null}, 409));
+        expect((await failure('send-email', {subject: SUBJECT, body: BODY}, {...EMAIL_OPTS, ...KEY}) as {details?: unknown}).details)
+            .toStrictEqual({reference: 'email-1001'});
+    });
+
+    it('a reused key without the send, and a key in use, carry no details: the output is what it was', async()=>{
+        for (const reply_code of ['contact.idempotencyKeyReused', 'contact.idempotencyKeyInUse'])
+        {
+            mock_fetch.mockReset();
+            answer(json({code: reply_code, detail: 'Conflict.', reference: reply_code.endsWith('InUse') ? 'email-1001' : undefined}, 409));
+            const e = await failure('send-email', {subject: SUBJECT, body: BODY}, {...EMAIL_OPTS, ...KEY});
+            expect((e as {details?: unknown}).details, reply_code).toBeUndefined();
+            expect(JSON.stringify((e as {to_json: () => unknown}).to_json()), reply_code).not.toContain('details');
+        }
+    });
+
     it('reads those codes only under 409 and only in the send route\'s own family; any other answer is mapped as before', async()=>{
         const cases: [Direct_send_name, unknown, Direct_send_opts, Response][] = [
             ['send-email', {subject: SUBJECT, body: BODY}, {...EMAIL_OPTS, ...KEY}, json({code: 'contact.idempotencyKeyInUse'}, 400)],
@@ -757,6 +797,62 @@ describe('a send made with an idempotency key', ()=>{
             mock_fetch.mockReset();
             answer(res);
             expect(await failure(name, message, opts), name).toMatchObject({code: 'reply.refused', exit_code: 1});
+        }
+    });
+});
+
+describe('a direct email Reply renders', ()=>{
+    const EMAIL: unknown = {subject: SUBJECT, body: BODY};
+
+    it('maps a variable Reply could not fill to contact.missing_variables, with the bare names under details', async()=>{
+        answer(json({code: 'contact.missingVariables', detail: 'The message has variables with no value.',
+            missingVariables: ['FirstName', 'Company']}, 400));
+        const e = await failure('send-email', EMAIL, EMAIL_OPTS);
+        expect(e).toMatchObject({code: 'contact.missing_variables', status: 400, exit_code: 1, reply_code: 'contact.missingVariables',
+            details: {missing_variables: ['FirstName', 'Company']}, ids: {contact_id: 456}});
+        expect((e as {to_json: () => unknown}).to_json()).toMatchObject({error: {details: {missing_variables: ['FirstName', 'Company']}}});
+        mock_fetch.mockReset();
+        answer(json({code: 'contact.missingVariables', detail: 'The message has variables with no value.'}, 400));
+        expect(await failure('send-email', EMAIL, EMAIL_OPTS)).toMatchObject({code: 'contact.missing_variables',
+            details: {missing_variables: []}});
+    });
+
+    it('maps a template Reply could not render to contact.rendering_failed, with Reply\'s message as the detail', async()=>{
+        answer(json({code: 'contact.renderingFailed', detail: 'Unclosed block at line 2.'}, 400));
+        expect(await failure('send-email', EMAIL, EMAIL_OPTS)).toMatchObject({code: 'contact.rendering_failed', status: 400, exit_code: 1,
+            reply_code: 'contact.renderingFailed', detail: 'Unclosed block at line 2.'});
+    });
+
+    it('reads the two codes only under 400; Reply\'s older contact.unknown stays reply.refused', async()=>{
+        const cases: [Response, string][] = [
+            [json({code: 'contact.missingVariables'}, 409), 'reply.refused'],
+            [json({code: 'contact.renderingFailed'}, 409), 'reply.refused'],
+            [json({code: 'contact.unknown', detail: 'The message has variables with no value.'}, 400), 'reply.refused'],
+        ];
+        for (const [res, code] of cases)
+        {
+            mock_fetch.mockReset();
+            answer(res);
+            expect(await failure('send-email', EMAIL, EMAIL_OPTS), code).toMatchObject({code, exit_code: 1});
+        }
+    });
+
+    it('sends trackLinks and trackOpens only when their flags are given, and nothing of them otherwise', async()=>{
+        const cases: [Direct_send_opts, Record<string, unknown>][] = [
+            [EMAIL_OPTS, {}],
+            [{...EMAIL_OPTS, trackLinks: true}, {trackLinks: true}],
+            [{...EMAIL_OPTS, trackOpens: true}, {trackOpens: true}],
+            [{...EMAIL_OPTS, trackLinks: true, trackOpens: true}, {trackLinks: true, trackOpens: true}],
+        ];
+        for (const [opts, tracking] of cases)
+        {
+            mock_fetch.mockReset();
+            answer(json({status: 'new', messageId: null}));
+            await run('send-email', EMAIL, opts);
+            const body = sent()[0].body as Record<string, unknown>;
+            expect({trackLinks: body.trackLinks, trackOpens: body.trackOpens}, JSON.stringify(tracking))
+                .toStrictEqual({trackLinks: tracking.trackLinks, trackOpens: tracking.trackOpens});
+            expect(Object.keys(body).filter(k=>k.startsWith('track')), JSON.stringify(tracking)).toEqual(Object.keys(tracking));
         }
     });
 });

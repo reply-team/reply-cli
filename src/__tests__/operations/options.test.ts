@@ -78,11 +78,14 @@ describe('operations/options', ()=>{
             .toThrow('--send-after must be a date and time with its offset, e.g. 2026-11-03T14:00:00Z.');
     });
 
-    it('parse_idempotency_key takes 1 to 255 printable ASCII characters with no space at either end, as given', ()=>{
+    it('parse_idempotency_key takes 1 to 255 characters from space to tilde, spaces inside, as given', ()=>{
         expect(parse_idempotency_key('send-456-step-2')).toBe('send-456-step-2');
-        expect(parse_idempotency_key('a b')).toBe('a b');
-        expect(parse_idempotency_key('k'.repeat(255))).toBe('k'.repeat(255));
-        for (const bad of ['', ' ', ' a', 'a ', 'k'.repeat(256), 'café', 'a\nb', 'a\tb'])
+        for (const good of ['a b', 'send 456  step 2', '~!"#', 'k'.repeat(255), `a${' '.repeat(253)}b`])
+        {
+            expect(parse_idempotency_key(good), JSON.stringify(good)).toBe(good);
+        }
+        // A header value loses a space at either end on its way out, so such a key would reach Reply as another key.
+        for (const bad of ['', ' ', ' a', 'a ', 'k'.repeat(256), 'café', 'a\nb', 'a\tb', 'a\u007fb'])
         {
             expect(usage_code(()=>parse_idempotency_key(bad)), JSON.stringify(bad)).toBe('usage.idempotency_key');
         }

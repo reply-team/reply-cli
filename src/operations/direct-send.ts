@@ -12,7 +12,7 @@ import type {Cli_context} from '../context';
 type Direct_send_name = 'send-email' | 'linkedin-connect' | 'linkedin-message' | 'linkedin-inmail' | 'linkedin-voice';
 type Direct_send_opts = Contact_flags & {
     emailAccountId?: string; linkedinAccountId?: string; message?: string;
-    sendAfter?: string; scheduleId?: string; idempotencyKey?: string;
+    sendAfter?: string; scheduleId?: string; idempotencyKey?: string; trackLinks?: boolean; trackOpens?: boolean;
 };
 type Text = Record<string, string>;
 
@@ -91,8 +91,30 @@ const read_text = (name: Direct_send_name, send: Direct_send, source: string | u
     return text;
 };
 
+// A refusal Reply publishes, under the status it comes with; details reads what the problem body
+// carries beside its code, for the error output's details.
+type Refusal = {
+    status: number; code: string; title: string; hint?: string;
+    details?: (body: Record<string, unknown>) => Record<string, unknown> | undefined;
+};
+
+// The keys a table names that hold a string in what Reply sent, under the names the CLI prints.
+const picked = (keys: [string, string][], from: Record<string, unknown>): Record<string, unknown>=>
+    Object.fromEntries(keys.filter(([key])=>typeof from[key] === 'string').map(([key, to])=>[to, from[key]]));
+
+// A list of strings, or undefined for anything else.
+const strings_of = (v: unknown): string[] | undefined=>
+    Array.isArray(v) && v.every(s=>typeof s === 'string') ? v : undefined;
+
 // Reply's refusals of a direct send, by status and code. Each one is definite: nothing was sent.
-const REFUSALS: Record<string, {status: number; code: string; title: string}> = {
+const REFUSALS: Record<string, Refusal> = {
+    'contact.missingVariables': {
+        status: 400, code: 'contact.missing_variables', title: 'The email holds a template variable Reply could not fill, so nothing was sent.',
+        details: body=>({missing_variables: strings_of(body.missingVariables) ?? []}),
+    },
+    'contact.renderingFailed': {
+        status: 400, code: 'contact.rendering_failed', title: 'Reply could not render the email\'s template, so nothing was sent.',
+    },
     'contact.emailAccountNotFound': {
         status: 400, code: 'email_account.not_found', title: 'Reply has no mailbox by that id that this account can send from, so nothing was sent.',
     },
@@ -145,18 +167,22 @@ const REFUSALS: Record<string, {status: number; code: string; title: string}> = 
 
 const LIMITS: Record<string, string> = {'directLinkedIn.dailyLimitReached': 'daily', 'directLinkedIn.weeklyLimitReached': 'weekly'};
 
-type Refusal = {status: number; code: string; title: string; hint?: string};
-
 // The codes of a send made for later, each Reply's code with the CLI code it maps to, here and
 // nowhere else. A send route answers a refused Idempotency-Key under its own family: contact for the
 // email, directLinkedIn for the LinkedIn sends. Neither sent anything.
-const KEY_IN_USE = {
+const KEY_IN_USE: Refusal = {
     status: 409, code: 'idempotency_key.in_use', title: 'Reply is still making an earlier send with this idempotency key, so this one sent nothing.',
     hint: 'Run it again with the same key once that send is made: Reply answers a repeat with the send the key first made.',
 };
-const KEY_REUSED = {
+// Reply holds the send the key was first taken for, and may name it: a repeat built differently from
+// the first attempt answers reused, so the caller still learns which send that was.
+const KEY_REUSED: Refusal = {
     status: 409, code: 'idempotency_key.reused', title: 'Reply already took this idempotency key for a different send, so nothing was sent.',
     hint: 'Give each new send a key of its own.',
+    details: body=>{
+        const held = picked(HELD_KEYS, body);
+        return Object.keys(held).length === 0 ? undefined : held;
+    },
 };
 const KEY_REFUSALS: Record<Channel, Record<string, Refusal>> = {
     email: {'contact.idempotencyKeyInUse': KEY_IN_USE, 'contact.idempotencyKeyReused': KEY_REUSED},
@@ -184,7 +210,9 @@ const known_refusal = (a: Answer, table: Record<string, Refusal>): Operation_err
     const reply_code = reply_code_of(a);
     const known = reply_code === undefined ? undefined : table[reply_code];
     return known !== undefined && known.status === a.status
-        ? new Operation_error(known.code, known.title, {status: a.status, reply_code, detail: detail_of(a), hint: known.hint})
+        ? new Operation_error(known.code, known.title, {
+            status: a.status, reply_code, detail: detail_of(a), hint: known.hint, details: known.details?.(a.data as Record<string, unknown>),
+        })
         : undefined;
 };
 
@@ -208,12 +236,13 @@ const positive_integer = (v: unknown): number | null=>
     typeof v === 'number' && Number.isSafeInteger(v) && v > 0 ? v : null;
 
 // What Reply says of the send itself, each only when it gives it: the reference that names the send
-// for direct-send get and cancel, the moment it was accepted for, and whether it has gone out. An
-// answer without them is printed as it always was.
-const LATER_KEYS: [string, string][] = [['reference', 'reference'], ['sendAfter', 'send_after'], ['state', 'state']];
+// for direct-send get and cancel, the moment it was accepted for, and whether it has gone out; and,
+// for an email sent inside the request, its subject and body as Reply filled them in, before the
+// signature and the tracking. An answer without them is printed as it always was.
+const HELD_KEYS: [string, string][] = [['reference', 'reference'], ['sendAfter', 'send_after'], ['state', 'state']];
+const LATER_KEYS: [string, string][] = [...HELD_KEYS, ['renderedSubject', 'rendered_subject'], ['renderedBody', 'rendered_body']];
 
-const later_of = (sent: Record<string, unknown>): Record<string, unknown>=>
-    Object.fromEntries(LATER_KEYS.filter(([from])=>typeof sent[from] === 'string').map(([from, to])=>[to, sent[from]]));
+const later_of = (sent: Record<string, unknown>): Record<string, unknown>=>picked(LATER_KEYS, sent);
 
 // What the CLI answers for a send Reply took: the contact it went to, as the add commands name it, so
 // a caller can keep its id. Neither adds a time of its own: Reply's answer to a direct email carries
@@ -287,6 +316,15 @@ const handle_direct_send = async(
     {
         later.scheduleId = parse_id(opts.scheduleId, '--schedule-id');
     }
+    // Reply tracks neither unless asked, so each is sent only to turn it on.
+    if (opts.trackLinks === true)
+    {
+        later.trackLinks = true;
+    }
+    if (opts.trackOpens === true)
+    {
+        later.trackOpens = true;
+    }
     const headers: Record<string, string> = opts.idempotencyKey === undefined
         ? {} : {'Idempotency-Key': parse_idempotency_key(opts.idempotencyKey)};
     const s = await open_session(ctx, g);
@@ -353,5 +391,5 @@ const handle_direct_send = async(
     }
 };
 
-export {handle_direct_send, known_refusal, DIRECT_SEND_REFUSALS};
+export {handle_direct_send, known_refusal, strings_of, DIRECT_SEND_REFUSALS};
 export type {Direct_send_name, Direct_send_opts};
