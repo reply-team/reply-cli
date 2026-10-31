@@ -634,7 +634,8 @@ direct_send_command.command('cancel')
         DIRECT_SEND + 'The answer is the send as Reply now holds it, state cancelled. Cancelling a send already cancelled answers\n'
             + 'it again, so running it again is safe. direct_send.already_sent, direct_send.already_failed and\n'
             + 'direct_send.already_sending mean the send was past cancelling; nothing changed. direct_send.cancel_not_confirmed\n'
-            + 'is a 503 from Reply that could not confirm the cancel: it may not have taken, and running it again is safe;\n'
+            + 'is a 503 from Reply that could not confirm the cancel: the send is still queued or waiting for its schedule, so\n'
+            + 'run the cancel again, as Reply asks;\n'
             + 'retry_after carries Reply\'s Retry-After when it sends one. Any other 5xx is outcome.unknown (exit 3).\n'))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);

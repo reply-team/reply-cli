@@ -387,8 +387,8 @@ added only when Reply gives them, and so is `estimated_send_at`, read the same w
 again. A send already gone out, failed or going out is `direct_send.already_sent`,
 `direct_send.already_failed` or `direct_send.already_sending`, and a reference Reply has no send for
 is `direct_send.not_found`. A `503` that Reply answers with `directSend.cancelNotConfirmed` is
-`direct_send.cancel_not_confirmed` (exit 1): Reply could not confirm the cancel, so it may not have
-taken, and running it again is safe; `retry_after` carries Reply's `Retry-After` when it sends one.
+`direct_send.cancel_not_confirmed` (exit 1): Reply could not confirm the cancel, and says the send is
+still queued or waiting for its schedule, so run the cancel again, as Reply asks; `retry_after` carries Reply's `Retry-After` when it sends one.
 Any other `5xx` to a cancel stays `outcome.unknown` (exit 3).
 
 `reply inbox changes` reads the inbox feed forward. Each page holds the threads whose latest message,

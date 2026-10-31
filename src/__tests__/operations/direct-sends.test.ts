@@ -300,8 +300,8 @@ describe('direct-send cancel', ()=>{
         }
     });
 
-    it('a 503 directSend.cancelNotConfirmed is direct_send.cancel_not_confirmed (exit 1), made once, says running it again '
-        + 'is safe, and passes on Reply\'s wait', async()=>{
+    it('a 503 directSend.cancelNotConfirmed is direct_send.cancel_not_confirmed (exit 1), made once, says the send is still '
+        + 'waiting and to cancel again, and passes on Reply\'s wait', async()=>{
         const cases: [Record<string, string>, number | undefined][] = [[{}, undefined], [{'Retry-After': '5'}, 5]];
         for (const [headers, retry_after] of cases)
         {
@@ -313,7 +313,9 @@ describe('direct-send cancel', ()=>{
                 detail: 'The cancel could not be confirmed.',
             });
             expect((e as {retry_after?: number}).retry_after, JSON.stringify(headers)).toBe(retry_after);
-            expect((e as {hint?: string}).hint ?? '').toContain('running it again is safe');
+            expect((e as {title?: string}).title).toBe('Reply could not confirm the cancel; the send is still waiting to go out.');
+            expect((e as {hint?: string}).hint).toBe('Reply says the send is still queued or waiting for its schedule: run the '
+                + 'cancel again, as Reply asks; running it again is safe.');
             expect(mock_fetch).toHaveBeenCalledTimes(1);
         }
     });

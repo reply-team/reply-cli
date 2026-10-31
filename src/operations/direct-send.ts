@@ -226,12 +226,13 @@ const DIRECT_SEND_REFUSALS: Record<string, Refusal> = {
         status: 409, code: 'direct_send.already_sending', title: 'The direct send is already going out, so it was not cancelled.',
     },
 };
-// A cancel Reply could not confirm: it may not have taken, and Reply says repeating it is safe, so it is a refusal of its
-// own rather than an outcome left unknown. Only a cancel answers it; a read answering this code maps as any other 5xx.
+// A cancel Reply could not confirm: Reply says the send is still queued or waiting for its schedule and asks for the
+// cancel again, so it is a refusal of its own rather than an outcome left unknown. Only a cancel answers it; a read
+// answering this code maps as any other 5xx.
 const CANCEL_REFUSALS: Record<string, Refusal> = {
     'directSend.cancelNotConfirmed': {
-        status: 503, code: 'direct_send.cancel_not_confirmed', title: 'Reply could not confirm the cancel; it may not have taken.',
-        hint: 'The send may or may not have been cancelled; running it again is safe, and direct-send get reads where it stands.',
+        status: 503, code: 'direct_send.cancel_not_confirmed', title: 'Reply could not confirm the cancel; the send is still waiting to go out.',
+        hint: 'Reply says the send is still queued or waiting for its schedule: run the cancel again, as Reply asks; running it again is safe.',
         waits: true,
     },
 };

@@ -63,8 +63,8 @@ describe('operations/commands', ()=>{
         expect(cancel).toContain('Cancelling a send already cancelled answers it again, so running it again is safe');
         expect(cancel).toContain('direct_send.already_sent, direct_send.already_failed and direct_send.already_sending mean the send '
             + 'was past cancelling; nothing changed');
-        expect(cancel).toContain('direct_send.cancel_not_confirmed is a 503 from Reply that could not confirm the cancel: it may not '
-            + 'have taken, and running it again is safe; retry_after carries Reply\'s Retry-After when it sends one. Any other 5xx '
+        expect(cancel).toContain('direct_send.cancel_not_confirmed is a 503 from Reply that could not confirm the cancel: the send '
+            + 'is still queued or waiting for its schedule, so run the cancel again, as Reply asks; retry_after carries Reply\'s Retry-After when it sends one. Any other 5xx '
             + 'is outcome.unknown (exit 3)');
     });
 
