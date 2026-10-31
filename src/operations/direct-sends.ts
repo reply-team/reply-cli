@@ -1,6 +1,6 @@
 import {Unknown_outcome_error, UsageError} from '../utils/errors';
 import {call_reply, expect_object, refusal, unreadable, open_session, type Answer} from './call';
-import {known_refusal, strings_of, DIRECT_SEND_REFUSALS} from './direct-send';
+import {known_refusal, strings_of, estimated_of, DIRECT_SEND_REFUSALS} from './direct-send';
 import {print_result} from './result';
 import type {Op_globals} from './options';
 import type {Cli_context} from '../context';
@@ -51,7 +51,7 @@ const direct_send_of = (a: Answer, kind: 'read' | 'write'): Record<string, unkno
     const field = (name: string): unknown=>body[name] ?? null;
     return {
         reference: body.reference, channel: field('channel'), contact_id: field('contactId'), state: body.state,
-        send_after: field('sendAfter'), sent_at: field('sentAt'), message_id: field('messageId'),
+        send_after: field('sendAfter'), ...estimated_of(body), sent_at: field('sentAt'), message_id: field('messageId'),
         failure_reason: field('failureReason'), ...rendering_of(body), cancelled_at: field('cancelledAt'),
     };
 };

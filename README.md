@@ -333,6 +333,11 @@ Reply's route takes: a reference of any other form is refused before any call (`
 exit 2), and nothing else is read from it. An answer without `state` comes from a Reply that does
 not know these flags yet: it sent at once, as without them.
 
+A LinkedIn send timed by `--schedule-id` may answer `state` `waitingForSchedule`: Reply holds it for
+the schedule's next opening, so `send_after` is left out, and `estimated_send_at` is when Reply
+expects to send it, or null when no opening falls within the 30 days it looks ahead. It is added
+only when Reply gives it.
+
 `--idempotency-key` goes to Reply as the `Idempotency-Key` header, never in the body. A Reply that
 knows the header answers a repeat with the same key with the send the key first made; while that
 one is still being made the answer is `idempotency_key.in_use`, and the same key on a different
@@ -356,7 +361,8 @@ reply direct-send cancel linkedin-1042
 Both answer the send under the CLI's names, each null when Reply gives none: `reference`,
 `channel`, `contact_id`, `state`, `send_after`, `sent_at`, `message_id`, `failure_reason` and
 `cancelled_at`. `failure_code`, `missing_variables`, `rendered_subject` and `rendered_body` are
-added only when Reply gives them. `failure_reason` is a sentence for a person and never parsed;
+added only when Reply gives them, and so is `estimated_send_at`, read the same way as on the send.
+`failure_reason` is a sentence for a person and never parsed;
 `failure_code` is Reply's code for the failure, the one to branch on. `direct-send cancel` of a send already cancelled answers it
 again. A send already gone out or failed is `direct_send.already_sent` or
 `direct_send.already_failed`, and a reference Reply has no send for is `direct_send.not_found`.

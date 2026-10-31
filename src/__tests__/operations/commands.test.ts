@@ -54,6 +54,8 @@ describe('operations/commands', ()=>{
             expect(c.registeredArguments[0].description, name).toContain('email-<n>, linkedin-<n> or linkedin-scheduled-<n>');
             expect(flat, name).toContain('failure_code, missing_variables, rendered_subject and rendered_body are added only when Reply gives them');
             expect(flat, name).toContain('failure_reason is a sentence for a person, never parsed; failure_code is Reply\'s code for the failure');
+            expect(flat, name).toContain('estimated_send_at is added only when Reply gives it: when Reply expects a send waiting for its '
+                + 'schedule\'s next opening to go out, or null when no opening falls within the 30 days it looks ahead');
         }
         expect(help_of(sub(direct_send_command, 'cancel')).replace(/\s+/g, ' '))
             .toContain('Cancelling a send already cancelled answers it again, so running it again is safe');
@@ -294,6 +296,8 @@ describe('operations/commands', ()=>{
             expect(flat, text).toContain('status "sent" means Reply took the send; state, when Reply gives it, says whether it has gone '
                 + 'out: queued or sending is not yet, then sent, failed or cancelled');
             expect(flat, text).toContain('direct-send get <reference> reads it later, and direct-send cancel <reference> stops one not yet sent');
+            expect(flat.includes('A LinkedIn send timed by --schedule-id may answer state waitingForSchedule'), text).toBe(name !== 'send-email');
+            expect(flat.includes('estimated_send_at'), text).toBe(name !== 'send-email');
             expect(flat, text).toContain('An answer without state comes from a Reply that does not know --send-after and --schedule-id');
             expect(flat, text).toContain('--idempotency-key goes as the Idempotency-Key header');
             expect(flat, text).toContain('A Reply that knows the header answers a repeat with the same key with the send the key first made; while that one is still '

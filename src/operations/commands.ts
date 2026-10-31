@@ -364,6 +364,11 @@ const VARIABLES = (where: string): string=>
     `Reply reads {{…}} in the ${where} as its template variables; one it cannot fill is linkedin.missing_variables.\n`;
 const LINKEDIN_EXAMPLE = '--contact-id 456 --linkedin-account-id 34';
 
+// What a LinkedIn send timed by a schedule answers while it waits for the schedule's next opening.
+const SCHEDULED = 'A LinkedIn send timed by --schedule-id may answer state waitingForSchedule, held for the schedule\'s next\n'
+    + 'opening: send_after is then left out, and estimated_send_at is when Reply expects to send it, or null when no opening\n'
+    + 'falls within the 30 days it looks ahead; it is added only when Reply gives it.\n';
+
 const linkedin_send = (
     name: Exclude<Direct_send_name, 'send-email'>, description: string, message: string, examples: string[], codes: string[],
     extra: string, what: string,
@@ -372,7 +377,7 @@ const linkedin_send = (
         .option('--linkedin-account-id <id>', 'The LinkedIn account to send from (see `account list`)')
         .option('--message <stdin>', `Only -: the ${message} as JSON on stdin`))
         .description(description)
-        .addHelpText('after', help(examples, [...LINKEDIN_SEND_CODES, ...codes, ...KEY_CODES], true, extra + LATER + SENT_TO('linkedin', what),
+        .addHelpText('after', help(examples, [...LINKEDIN_SEND_CODES, ...codes, ...KEY_CODES], true, extra + LATER + SCHEDULED + SENT_TO('linkedin', what),
             SEND_TWICE(what)))
         .action(run(async(cmd)=>{
             const {g, ctx} = ctx_of(cmd);
@@ -587,7 +592,9 @@ const DIRECT_SEND = 'Result: {"reference","channel","contact_id","state","send_a
     + 'missing_variables, rendered_subject and rendered_body are added only when Reply gives them: failure_reason is a\n'
     + 'sentence for a person, never parsed; failure_code is Reply\'s code for the failure, the one to branch on.\n'
     + 'missing_variables lists the template variables Reply could not fill, and rendered_subject and rendered_body are the\n'
-    + 'text as Reply filled it in. A Reply without this route answers reply.refused with status 404 and no reply_code; a\n'
+    + 'text as Reply filled it in. estimated_send_at is added only when Reply gives it: when Reply expects a send waiting\n'
+    + 'for its schedule\'s next opening to go out, or null when no opening falls within the 30 days it looks ahead.\n'
+    + 'A Reply without this route answers reply.refused with status 404 and no reply_code; a\n'
     + 'reference of any other form never leaves the CLI, so that 404 means this Reply has no such route.\n'
     + 'direct_send.not_found is a reference that Reply has no send for.\n';
 

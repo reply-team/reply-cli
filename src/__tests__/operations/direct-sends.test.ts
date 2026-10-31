@@ -68,6 +68,32 @@ describe('direct-send get', ()=>{
         }
     });
 
+    it('adds estimated_send_at, Reply\'s estimatedSendAt, as text or null and only when Reply gives it, to get and cancel', async()=>{
+        const WAITING = {...QUEUED, reference: 'linkedin-scheduled-77', channel: 'linkedin', state: 'waitingForSchedule', sendAfter: null};
+        const cases: [unknown, Record<string, unknown>][] = [
+            ['2026-11-04T09:00:00Z', {estimated_send_at: '2026-11-04T09:00:00Z'}],
+            [null, {estimated_send_at: null}],
+        ];
+        for (const fn of [get, cancel])
+        {
+            for (const [estimatedSendAt, added] of cases)
+            {
+                mock_fetch.mockReset();
+                answer(json({...WAITING, estimatedSendAt}));
+                expect(await fn('linkedin-scheduled-77'), JSON.stringify(estimatedSendAt)).toStrictEqual({
+                    reference: 'linkedin-scheduled-77', channel: 'linkedin', contact_id: 456, state: 'waitingForSchedule', send_after: null,
+                    ...added, sent_at: null, message_id: null, failure_reason: null, cancelled_at: null,
+                });
+            }
+            for (const odd of [undefined, 7, ['2026-11-04T09:00:00Z']])
+            {
+                mock_fetch.mockReset();
+                answer(json({...WAITING, estimatedSendAt: odd}));
+                expect(await fn('linkedin-scheduled-77'), JSON.stringify(odd)).not.toHaveProperty('estimated_send_at');
+            }
+        }
+    });
+
     it('gives missing_variables only as a list of names, and the others only as text: anything else is left out', async()=>{
         for (const missing of [[], ['FirstName']])
         {

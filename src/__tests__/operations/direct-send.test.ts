@@ -674,6 +674,25 @@ describe('a send for later', ()=>{
         });
     });
 
+    it('adds estimated_send_at to a send waiting for its schedule\'s opening, a null kept as null, only when Reply gives it', async()=>{
+        const waiting = {reference: 'linkedin-scheduled-77', state: 'waitingForSchedule', sendAfter: null, linkedInActivityId: null, sentAtUtc: null};
+        const cases: [unknown, Record<string, unknown>][] = [
+            ['2026-11-04T09:00:00Z', {estimated_send_at: '2026-11-04T09:00:00Z'}],
+            [null, {estimated_send_at: null}],
+            [undefined, {}],
+            [7, {}],
+        ];
+        for (const [estimatedSendAt, added] of cases)
+        {
+            mock_fetch.mockReset();
+            answer(json({...waiting, estimatedSendAt}));
+            expect(await run('linkedin-message', {body: TEXT}, {...LINKEDIN_OPTS, scheduleId: '41'}), JSON.stringify(estimatedSendAt)).toStrictEqual({
+                status: 'sent', contact_id: 456, contact_created: false, activity_id: null, sent_at: null,
+                reference: 'linkedin-scheduled-77', state: 'waitingForSchedule', ...added,
+            });
+        }
+    });
+
     it('adds the rendered subject and body of an email sent inside the request, each only when Reply gives it', async()=>{
         answer(accepted('send-email', {renderedSubject: 'Quick question, Marta', renderedBody: '<p>Hi Marta</p>', state: 'sent'}));
         expect(await run('send-email', {subject: SUBJECT, body: BODY}, EMAIL_OPTS)).toStrictEqual({

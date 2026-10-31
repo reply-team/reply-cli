@@ -280,7 +280,12 @@ const positive_integer = (v: unknown): number | null=>
 const HELD_KEYS: [string, string][] = [['reference', 'reference'], ['sendAfter', 'send_after'], ['state', 'state']];
 const LATER_KEYS: [string, string][] = [...HELD_KEYS, ['renderedSubject', 'rendered_subject'], ['renderedBody', 'rendered_body']];
 
-const later_of = (sent: Record<string, unknown>): Record<string, unknown>=>picked(LATER_KEYS, sent);
+// When Reply expects a send waiting for its schedule's next opening to go out, as text, or null when no opening falls
+// within the 30 days it looks ahead; left out when Reply gives neither, as a Reply before its scheduler does.
+const estimated_of = (from: Record<string, unknown>): Record<string, unknown>=>
+    typeof from.estimatedSendAt === 'string' || from.estimatedSendAt === null ? {estimated_send_at: from.estimatedSendAt} : {};
+
+const later_of = (sent: Record<string, unknown>): Record<string, unknown>=>({...picked(LATER_KEYS, sent), ...estimated_of(sent)});
 
 // What the CLI answers for a send Reply took: the contact it went to, as the add commands name it, so
 // a caller can keep its id. Neither adds a time of its own: Reply's answer to a direct email carries
@@ -429,5 +434,5 @@ const handle_direct_send = async(
     }
 };
 
-export {handle_direct_send, known_refusal, strings_of, DIRECT_SEND_REFUSALS};
+export {handle_direct_send, known_refusal, strings_of, estimated_of, DIRECT_SEND_REFUSALS};
 export type {Direct_send_name, Direct_send_opts};
