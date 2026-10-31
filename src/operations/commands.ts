@@ -348,10 +348,10 @@ const SCHEDULED = 'A send timed by --schedule-id may answer state waitingForSche
 // The retry window only a LinkedIn send takes, and the refusals of a LinkedIn send Reply cannot time.
 const LINKEDIN_SCHEDULED = '--retry-window-minutes <n> is how long Reply keeps trying to send it once it is due, 1 to 4320\n'
     + 'minutes (Reply\'s default is 90); one outside that is refused before any call (usage.range). Reply takes it only with\n'
-    + '--schedule-id or --send-after, and answers it otherwise with errors[] (reply.invalid_request), as a Reply before its\n'
-    + 'scheduler answers --schedule-id on a LinkedIn send. schedule.not_found is a --schedule-id naming no schedule this\n'
-    + 'account can read, schedule.no_slot a schedule with no active day that has a time range, so it never opens, and\n'
-    + 'contact.time_zone_missing a contact without the time zone --use-contact-time-zone reads it in; none sends anything.\n';
+    + '--schedule-id or --send-after, and answers it otherwise with errors[] (reply.invalid_request). schedule.not_found is\n'
+    + 'a --schedule-id naming no schedule this account can read, schedule.no_slot a schedule with no active day that has a\n'
+    + 'time range, so it never opens, and contact.time_zone_missing a contact without the time zone\n'
+    + '--use-contact-time-zone reads it in; none sends anything.\n';
 
 // An email Reply cannot time is refused under Reply's own codes, which reach the caller unchanged.
 const EMAIL_SCHEDULED = 'Reply refuses an email it cannot time when it takes it, and nothing is sent: a --schedule-id naming no\n'

@@ -325,6 +325,8 @@ describe('operations/commands', ()=>{
             expect(flat.includes('--retry-window-minutes <n> is how long Reply keeps trying to send it once it is due, 1 to 4320 '
                 + 'minutes (Reply\'s default is 90); one outside that is refused before any call (usage.range)'), text).toBe(linkedin);
             expect(flat.includes('Reply takes it only with --schedule-id or --send-after'), text).toBe(linkedin);
+            // A Reply without the scheduler ignores both on a LinkedIn send and sends at once; no refusal stands for it.
+            expect(flat, text).not.toContain('before its scheduler');
             expect(flat.includes('schedule.not_found is a --schedule-id naming no schedule this account can read, schedule.no_slot a '
                 + 'schedule with no active day that has a time range, so it never opens, and contact.time_zone_missing a contact without the time zone '
                 + '--use-contact-time-zone reads it in; none sends anything'), text).toBe(linkedin);

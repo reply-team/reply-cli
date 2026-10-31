@@ -350,8 +350,7 @@ retry window. `--use-contact-time-zone` reads the schedule's windows in the cont
 `--retry-window-minutes` is how long Reply keeps trying to send once the send is due, 1 to 4320
 minutes (Reply's default is 90); a number outside that is refused before any call (`usage.range`).
 Reply takes the time zone only with `--schedule-id` and the retry window only for a send made
-later, and answers them otherwise with `reply.invalid_request`; a Reply before its LinkedIn
-scheduler answers `--schedule-id` on a LinkedIn send the same way.
+later, and answers them otherwise with `reply.invalid_request`.
 
 Reply refuses a send it cannot time when it takes it, and nothing is sent. On a LinkedIn send,
 `--schedule-id` naming no schedule this account can read is `schedule.not_found`, a schedule with
