@@ -334,7 +334,8 @@ const time_zone_options = (c: Command): Command=>c
 const scheduler_options = (c: Command): Command=>time_zone_options(c)
     .option('--retry-window-minutes <n>', 'How long Reply keeps trying once the send is due, 1 to 4320 (Reply\'s default: 90)');
 
-// What a send timed by a schedule answers while it waits for the schedule's next opening, and the time zone it is read in.
+// What a send timed by a schedule answers while it waits for the schedule's next opening, the time zone it is read in, and
+// the refusals of one Reply cannot time.
 const SCHEDULED = 'A send timed by --schedule-id may answer state waitingForSchedule, held for the schedule\'s next opening:\n'
     + 'send_after is then left out, and estimated_send_at is when Reply expects to send it, or null when the schedule does\n'
     + 'not open within 30 days of the moment the send waits from: its --send-after, or when Reply took it.\n'
@@ -343,21 +344,17 @@ const SCHEDULED = 'A send timed by --schedule-id may answer state waitingForSche
     + 'Reply gives it. --use-contact-time-zone sends useContactTimeZone true: the schedule\'s windows are read in the\n'
     + 'contact\'s time zone; --no-use-contact-time-zone sends false, the schedule\'s own zone; with neither, the schedule\'s\n'
     + 'own setting holds. Reply takes it only with --schedule-id, and answers it otherwise with errors[]\n'
-    + '(reply.invalid_request).\n';
+    + '(reply.invalid_request). schedule.not_found is a --schedule-id naming no schedule this account can read,\n'
+    + 'schedule.no_slot a schedule with no active day that has a time range, so it never opens, and\n'
+    + 'contact.time_zone_missing a contact without the time zone --use-contact-time-zone reads it in; none sends anything.\n';
 
-// The retry window only a LinkedIn send takes, and the refusals of a LinkedIn send Reply cannot time.
+// The codes of a send Reply cannot time, the same on every route.
+const SCHEDULE_CODES = ['schedule.not_found', 'schedule.no_slot', 'contact.time_zone_missing'];
+
+// The retry window only a LinkedIn send takes.
 const LINKEDIN_SCHEDULED = '--retry-window-minutes <n> is how long Reply keeps trying to send it once it is due, 1 to 4320\n'
     + 'minutes (Reply\'s default is 90); one outside that is refused before any call (usage.range). Reply takes it only with\n'
-    + '--schedule-id or --send-after, and answers it otherwise with errors[] (reply.invalid_request). schedule.not_found is\n'
-    + 'a --schedule-id naming no schedule this account can read, schedule.no_slot a schedule with no active day that has a\n'
-    + 'time range, so it never opens, and contact.time_zone_missing a contact without the time zone\n'
-    + '--use-contact-time-zone reads it in; none sends anything.\n';
-
-// An email Reply cannot time is refused under Reply's own codes, which reach the caller unchanged.
-const EMAIL_SCHEDULED = 'Reply refuses an email it cannot time when it takes it, and nothing is sent: a --schedule-id naming no\n'
-    + 'schedule this account can read, a schedule with no active day that has a time range, and a contact without the time\n'
-    + 'zone --use-contact-time-zone reads it in are reply.refused, with Reply\'s contact.scheduleNotFound,\n'
-    + 'contact.scheduleHasNoSlot or contact.contactTimeZoneMissing as reply_code.\n';
+    + '--schedule-id or --send-after, and answers it otherwise with errors[] (reply.invalid_request).\n';
 
 time_zone_options(later_options(add_contact_options(contact_command.command('send-email'), true)
     .option('--email-account-id <id>', 'The mailbox to send from (see `account list`)')
@@ -369,7 +366,7 @@ time_zone_options(later_options(add_contact_options(contact_command.command('sen
         [`echo '{"subject":"Quick question","body":"<p>Hi Ann, does Tuesday work?</p>"}' | ${P} contact send-email --contact-id 456 --email-account-id 12 --message -`,
             piped_send('send-email', ANN_EMAIL, '{"subject":"Quick question","body":"<p>Hi Ann</p>"}', '--email-account-id 12')],
         ['contact.not_found', ...IMPORT_CODES, 'contact.already_held', 'email_account.not_found', 'contact.blacklisted',
-            'contact.missing_variables', 'contact.rendering_failed', ...KEY_CODES], true,
+            'contact.missing_variables', 'contact.rendering_failed', ...SCHEDULE_CODES, ...KEY_CODES], true,
         'Result: {"status":"sent","contact_id","contact_created","message_id","sent_at","reply_status"}: sent means Reply\n'
             + 'accepted the email, and reply_status is Reply\'s own word for it (new or sent). message_id is Reply\'s messageId,\n'
             + 'null when it gives none. Reply\'s answer carries no time, so sent_at is always null; the CLI adds none of its own.\n'
@@ -380,7 +377,7 @@ time_zone_options(later_options(add_contact_options(contact_command.command('sen
             + 'them; a send held for later has neither. contact.missing_variables names the variables Reply could not fill in\n'
             + 'details.missing_variables when Reply lists them, and contact.rendering_failed is a template Reply could not\n'
             + 'render, its message in detail. Neither sends anything.\n'
-            + LATER + SCHEDULED + EMAIL_SCHEDULED + SENT_TO('email', 'email'),
+            + LATER + SCHEDULED + SENT_TO('email', 'email'),
         SEND_TWICE('email')))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
@@ -390,8 +387,7 @@ time_zone_options(later_options(add_contact_options(contact_command.command('sen
 // The four LinkedIn sends share their flags, their first codes and the shape of their result.
 const LINKEDIN_SEND_CODES = [
     'contact.not_found', ...IMPORT_CODES, 'contact.already_held', 'contact.no_linkedin_profile', 'linkedin.account_not_found',
-    'linkedin.feature_disabled', 'linkedin.account_inactive', 'linkedin.invalid_cookie', 'schedule.not_found', 'schedule.no_slot',
-    'contact.time_zone_missing',
+    'linkedin.feature_disabled', 'linkedin.account_inactive', 'linkedin.invalid_cookie', ...SCHEDULE_CODES,
 ];
 const LINKEDIN_SENT = '"contact_id","contact_created","activity_id","sent_at"}:\n'
     + 'activity_id and sent_at are Reply\'s linkedInActivityId and sentAtUtc as Reply gives them, each null when it gives\n'

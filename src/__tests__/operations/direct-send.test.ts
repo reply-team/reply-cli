@@ -74,10 +74,13 @@ describe('contact send-email', ()=>{
             [json({title: 'Validation failed', errors: [{pointer: '/subject', detail: '\'subject\' must not be empty.'}]}, 400),
                 'reply.invalid_request', undefined],
             [json({code: 'contact.somethingElse'}, 400), 'reply.refused', 'contact.somethingElse'],
-            // An email Reply cannot time is refused under Reply's own codes, passed on unchanged.
-            [json({code: 'contact.scheduleNotFound'}, 404), 'reply.refused', 'contact.scheduleNotFound'],
-            [json({code: 'contact.scheduleHasNoSlot'}, 409), 'reply.refused', 'contact.scheduleHasNoSlot'],
-            [json({code: 'contact.contactTimeZoneMissing'}, 409), 'reply.refused', 'contact.contactTimeZoneMissing'],
+            // An email Reply cannot time maps to the codes a LinkedIn send's refusals of the same meaning map to, each
+            // read only under the status Reply publishes it with.
+            [json({code: 'contact.scheduleNotFound'}, 404), 'schedule.not_found', 'contact.scheduleNotFound'],
+            [json({code: 'contact.scheduleHasNoSlot'}, 409), 'schedule.no_slot', 'contact.scheduleHasNoSlot'],
+            [json({code: 'contact.contactTimeZoneMissing'}, 409), 'contact.time_zone_missing', 'contact.contactTimeZoneMissing'],
+            [json({code: 'contact.scheduleNotFound'}, 400), 'reply.refused', 'contact.scheduleNotFound'],
+            [json({code: 'contact.contactTimeZoneMissing'}, 404), 'reply.refused', 'contact.contactTimeZoneMissing'],
         ];
         for (const [res, code, reply_code] of cases)
         {

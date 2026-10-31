@@ -352,13 +352,11 @@ minutes (Reply's default is 90); a number outside that is refused before any cal
 Reply takes the time zone only with `--schedule-id` and the retry window only for a send made
 later, and answers them otherwise with `reply.invalid_request`.
 
-Reply refuses a send it cannot time when it takes it, and nothing is sent. On a LinkedIn send,
-`--schedule-id` naming no schedule this account can read is `schedule.not_found`, a schedule with
-no active day that has a time range, so it never opens, is `schedule.no_slot`, and a contact
-without the time zone `--use-contact-time-zone` reads the schedule in is
-`contact.time_zone_missing`. On an email the same three are `reply.refused`, with Reply's
-`contact.scheduleNotFound`, `contact.scheduleHasNoSlot` or `contact.contactTimeZoneMissing` as
-`reply_code`.
+Reply refuses a send it cannot time when it takes it, and nothing is sent. A `--schedule-id`
+naming no schedule this account can read is `schedule.not_found`, a schedule with no active day
+that has a time range, so it never opens, is `schedule.no_slot`, and a contact without the time
+zone `--use-contact-time-zone` reads the schedule in is `contact.time_zone_missing`. The codes are
+the same on an email and on a LinkedIn send; `reply_code` keeps the one Reply gave.
 
 ```sh
 echo '{"body":"Following up on my note."}' | reply contact linkedin-message --contact-id 456 --linkedin-account-id 34 --message - --schedule-id 41 --use-contact-time-zone --retry-window-minutes 120

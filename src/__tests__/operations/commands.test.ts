@@ -265,7 +265,7 @@ describe('operations/commands', ()=>{
     const SENT_AT_AS_GIVEN = 'sentAtUtc as Reply gives them, each null when it gives none; the CLI adds no time of its own';
     const DIRECT_SENDS: [string, string, string[], string][] = [
         ['send-email', '--email-account-id', ['contact.not_found', ...IMPORT, 'contact.already_held', 'email_account.not_found', 'contact.blacklisted',
-            'contact.missing_variables', 'contact.rendering_failed'],
+            'contact.missing_variables', 'contact.rendering_failed', 'schedule.not_found', 'schedule.no_slot', 'contact.time_zone_missing'],
             'sent_at is always null; the CLI adds none of its own'],
         ['linkedin-connect', '--linkedin-account-id', [...LINKEDIN, 'linkedin.not_connected', 'linkedin.limit_reached',
             'linkedin.message_too_long', 'linkedin.missing_variables'], SENT_AT_AS_GIVEN],
@@ -327,13 +327,11 @@ describe('operations/commands', ()=>{
             expect(flat.includes('Reply takes it only with --schedule-id or --send-after'), text).toBe(linkedin);
             // A Reply without the scheduler ignores both on a LinkedIn send and sends at once; no refusal stands for it.
             expect(flat, text).not.toContain('before its scheduler');
-            expect(flat.includes('schedule.not_found is a --schedule-id naming no schedule this account can read, schedule.no_slot a '
+            // A send Reply cannot time is refused under the same three codes on every route.
+            expect(flat, text).toContain('schedule.not_found is a --schedule-id naming no schedule this account can read, schedule.no_slot a '
                 + 'schedule with no active day that has a time range, so it never opens, and contact.time_zone_missing a contact without the time zone '
-                + '--use-contact-time-zone reads it in; none sends anything'), text).toBe(linkedin);
-            expect(flat.includes('Reply refuses an email it cannot time when it takes it, and nothing is sent: a --schedule-id naming no '
-                + 'schedule this account can read, a schedule with no active day that has a time range, and a contact without the time zone '
-                + '--use-contact-time-zone reads it in are reply.refused, with Reply\'s contact.scheduleNotFound, contact.scheduleHasNoSlot '
-                + 'or contact.contactTimeZoneMissing as reply_code'), text).toBe(!linkedin);
+                + '--use-contact-time-zone reads it in; none sends anything');
+            expect(flat, text).not.toContain('as reply_code');
             expect(flat, text).toContain('An answer without state comes from a Reply that does not know --send-after and --schedule-id');
             expect(flat, text).toContain('--idempotency-key goes as the Idempotency-Key header');
             expect(flat, text).toContain('A Reply that knows the header answers a repeat with the same key with the send the key first made; while that one is still '

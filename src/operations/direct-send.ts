@@ -126,6 +126,17 @@ const TEMPLATE_REFUSALS: Record<Channel, Record<string, Refusal>> = {
     linkedin: {},
 };
 
+// The refusals of a send Reply cannot time, whichever route it went to.
+const SCHEDULE_NOT_FOUND: Refusal = {
+    status: 404, code: 'schedule.not_found', title: 'Reply has no sending schedule by that id that this account can use, so nothing was sent.',
+};
+const SCHEDULE_NO_SLOT: Refusal = {
+    status: 409, code: 'schedule.no_slot', title: 'The sending schedule has no active day with a time range, so it never opens; nothing was sent.',
+};
+const TIME_ZONE_MISSING: Refusal = {
+    status: 409, code: 'contact.time_zone_missing', title: 'Reply holds no time zone for the contact to read the schedule in, so nothing was sent.',
+};
+
 // Reply's refusals of a direct send, by status and code. Each one is definite: nothing was sent.
 const REFUSALS: Record<string, Refusal> = {
     'contact.emailAccountNotFound': {
@@ -176,16 +187,14 @@ const REFUSALS: Record<string, Refusal> = {
     'directLinkedIn.voiceTooLong': {
         status: 400, code: 'linkedin.voice_too_long', title: 'The voice message would be longer than Reply allows, so nothing was sent.',
     },
-    // A LinkedIn send timed by a schedule: refused when it is taken, before anything is held.
-    'directLinkedIn.scheduleNotFound': {
-        status: 404, code: 'schedule.not_found', title: 'Reply has no sending schedule by that id that this account can use, so nothing was sent.',
-    },
-    'directLinkedIn.scheduleHasNoSlot': {
-        status: 409, code: 'schedule.no_slot', title: 'The sending schedule has no active day with a time range, so it never opens; nothing was sent.',
-    },
-    'directLinkedIn.contactTimeZoneMissing': {
-        status: 409, code: 'contact.time_zone_missing', title: 'Reply holds no time zone for the contact to read the schedule in, so nothing was sent.',
-    },
+    // A send timed by a schedule: refused when it is taken, before anything is held. The email route and
+    // the LinkedIn routes each name it in their own family, and both map to the code of its meaning.
+    'directLinkedIn.scheduleNotFound': SCHEDULE_NOT_FOUND,
+    'directLinkedIn.scheduleHasNoSlot': SCHEDULE_NO_SLOT,
+    'directLinkedIn.contactTimeZoneMissing': TIME_ZONE_MISSING,
+    'contact.scheduleNotFound': SCHEDULE_NOT_FOUND,
+    'contact.scheduleHasNoSlot': SCHEDULE_NO_SLOT,
+    'contact.contactTimeZoneMissing': TIME_ZONE_MISSING,
 };
 
 const LIMITS: Record<string, string> = {'directLinkedIn.dailyLimitReached': 'daily', 'directLinkedIn.weeklyLimitReached': 'weekly'};
