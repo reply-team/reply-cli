@@ -283,7 +283,8 @@ describe('operations/commands', ()=>{
         {
             const c = sub(contact_command, name);
             expect(flags(c), name).toEqual([...CONTACT_FLAGS, account_flag, '--message',
-                ...(name === 'send-email' ? ['--track-links', '--track-opens'] : []), '--send-after', '--schedule-id', '--idempotency-key']);
+                ...(name === 'send-email' ? ['--track-links', '--track-opens'] : []), '--send-after', '--schedule-id', '--idempotency-key',
+                ...(name === 'send-email' ? [] : ['--use-contact-time-zone', '--no-use-contact-time-zone', '--retry-window-minutes'])]);
             const text = help_of(c);
             const flat = text.replace(/\s+/g, ' ');
             expect(text, text).toContain('--message -');
@@ -305,6 +306,12 @@ describe('operations/commands', ()=>{
             expect(flat, text).toContain('direct-send get <reference> reads it later, and direct-send cancel <reference> stops one not yet sent');
             expect(flat.includes('A LinkedIn send timed by --schedule-id may answer state waitingForSchedule'), text).toBe(name !== 'send-email');
             expect(flat.includes('estimated_send_at'), text).toBe(name !== 'send-email');
+            expect(flat.includes('--use-contact-time-zone sends useContactTimeZone true: the schedule\'s windows are read in the '
+                + 'contact\'s time zone; --no-use-contact-time-zone sends false, the schedule\'s own zone; with neither, the schedule\'s '
+                + 'own setting holds'), text).toBe(name !== 'send-email');
+            expect(flat.includes('--retry-window-minutes <n> is how long Reply keeps trying to send it once it is due, 1 to 4320 '
+                + 'minutes (Reply\'s default is 90); one outside that is refused before any call (usage.range)'), text).toBe(name !== 'send-email');
+            expect(flat.includes('Reply takes them only with --schedule-id or --send-after'), text).toBe(name !== 'send-email');
             expect(flat, text).toContain('An answer without state comes from a Reply that does not know --send-after and --schedule-id');
             expect(flat, text).toContain('--idempotency-key goes as the Idempotency-Key header');
             expect(flat, text).toContain('A Reply that knows the header answers a repeat with the same key with the send the key first made; while that one is still '

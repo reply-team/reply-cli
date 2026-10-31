@@ -364,18 +364,32 @@ const VARIABLES = (where: string): string=>
     `Reply reads {{…}} in the ${where} as its template variables; one it cannot fill is linkedin.missing_variables.\n`;
 const LINKEDIN_EXAMPLE = '--contact-id 456 --linkedin-account-id 34';
 
-// What a LinkedIn send timed by a schedule answers while it waits for the schedule's next opening.
+// The flags only Reply's LinkedIn sends take for a send made later. Without either time-zone flag nothing is sent, so the
+// schedule's own setting holds.
+const scheduler_options = (c: Command): Command=>c
+    .option('--use-contact-time-zone', 'Read the schedule\'s windows in the contact\'s time zone (with --schedule-id)')
+    .option('--no-use-contact-time-zone', 'Read the schedule\'s windows in the schedule\'s own time zone (with --schedule-id)')
+    .option('--retry-window-minutes <n>', 'How long Reply keeps trying once the send is due, 1 to 4320 (Reply\'s default: 90)');
+
+// What a LinkedIn send timed by a schedule answers while it waits for the schedule's next opening, and the flags only
+// a LinkedIn send takes.
 const SCHEDULED = 'A LinkedIn send timed by --schedule-id may answer state waitingForSchedule, held for the schedule\'s next\n'
     + 'opening: send_after is then left out, and estimated_send_at is when Reply expects to send it, or null when no opening\n'
-    + 'falls within the 30 days it looks ahead; it is added only when Reply gives it.\n';
+    + 'falls within the 30 days it looks ahead; it is added only when Reply gives it. --use-contact-time-zone sends\n'
+    + 'useContactTimeZone true: the schedule\'s windows are read in the contact\'s time zone; --no-use-contact-time-zone sends\n'
+    + 'false, the schedule\'s own zone; with neither, the schedule\'s own setting holds. --retry-window-minutes <n> is how long\n'
+    + 'Reply keeps trying to send it once it is due, 1 to 4320 minutes (Reply\'s default is 90); one outside that is refused\n'
+    + 'before any call (usage.range). Reply takes them only with --schedule-id or --send-after, the time zone only with\n'
+    + '--schedule-id, and answers them otherwise with errors[] (reply.invalid_request), as a Reply before its scheduler\n'
+    + 'answers --schedule-id on a LinkedIn send.\n';
 
 const linkedin_send = (
     name: Exclude<Direct_send_name, 'send-email'>, description: string, message: string, examples: string[], codes: string[],
     extra: string, what: string,
 ): void=>{
-    later_options(add_contact_options(contact_command.command(name), true)
+    scheduler_options(later_options(add_contact_options(contact_command.command(name), true)
         .option('--linkedin-account-id <id>', 'The LinkedIn account to send from (see `account list`)')
-        .option('--message <stdin>', `Only -: the ${message} as JSON on stdin`))
+        .option('--message <stdin>', `Only -: the ${message} as JSON on stdin`)))
         .description(description)
         .addHelpText('after', help(examples, [...LINKEDIN_SEND_CODES, ...codes, ...KEY_CODES], true, extra + LATER + SCHEDULED + SENT_TO('linkedin', what),
             SEND_TWICE(what)))

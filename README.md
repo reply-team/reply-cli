@@ -202,6 +202,7 @@ prints JSON (indented; compact with `--json`) and says what happened in a stable
 | `reply contact linkedin-connect <contact> --linkedin-account-id N [--message -]` | a LinkedIn invitation, with or without a note → `sent` / `already_connected` |
 | `reply contact linkedin-message …` · `linkedin-inmail …` · `linkedin-voice …` | a LinkedIn message, an InMail, or an AI voice message spoken from a script → `sent` |
 | any direct send `… [--send-after <moment>] [--schedule-id N] [--idempotency-key K]` | the send held until a moment, timed by a schedule, under a key of yours → `sent`, with its `reference` and `state` |
+| a LinkedIn send `… [--use-contact-time-zone \| --no-use-contact-time-zone] [--retry-window-minutes N]` | the schedule read in the contact's time zone or its own, and how long Reply keeps trying once the send is due |
 | `reply direct-send get <reference>` | a send as Reply holds it: whether it has gone out, when, and why it failed |
 | `reply direct-send cancel <reference>` | stop a send that has not gone out yet → `state` `cancelled` |
 | `reply inbox list (--contact-id \| --sequence-id) [--source] [--channel] [--category-id] [--since]` | one page of threads |
@@ -337,6 +338,20 @@ A LinkedIn send timed by `--schedule-id` may answer `state` `waitingForSchedule`
 the schedule's next opening, so `send_after` is left out, and `estimated_send_at` is when Reply
 expects to send it, or null when no opening falls within the 30 days it looks ahead. It is added
 only when Reply gives it.
+
+The four LinkedIn sends also take `--use-contact-time-zone` / `--no-use-contact-time-zone` and
+`--retry-window-minutes <n>`; `contact send-email` takes neither. `--use-contact-time-zone` reads the
+schedule's windows in the contact's time zone and `--no-use-contact-time-zone` in the schedule's
+own; with neither, the schedule's own setting holds. `--retry-window-minutes` is how long Reply keeps
+trying to send once the send is due, 1 to 4320 minutes (Reply's default is 90); a number outside
+that is refused before any call (`usage.range`). Reply takes them only for a send made later, the
+time zone only with `--schedule-id`, and answers them otherwise with `reply.invalid_request`; a
+Reply before its LinkedIn scheduler answers `--schedule-id` on a LinkedIn send the same way.
+
+```sh
+echo '{"body":"Following up on my note."}' | reply contact linkedin-message --contact-id 456 --linkedin-account-id 34 --message - --schedule-id 41 --use-contact-time-zone --retry-window-minutes 120
+# {"status":"sent",…,"activity_id":null,"sent_at":null,"reference":"linkedin-scheduled-77","state":"waitingForSchedule","estimated_send_at":"2026-11-04T09:00:00Z"}
+```
 
 `--idempotency-key` goes to Reply as the `Idempotency-Key` header, never in the body. A Reply that
 knows the header answers a repeat with the same key with the send the key first made; while that

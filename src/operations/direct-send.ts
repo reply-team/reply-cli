@@ -2,7 +2,7 @@ import {PROGRAM_NAME} from '../config';
 import {Operation_error, Unknown_outcome_error, UsageError, type Ids} from '../utils/errors';
 import {parse_retry_after} from '../utils/client';
 import {call_reply, expect_object, refusal, is_object, reply_code_of, detail_of, open_session, type Answer} from './call';
-import {parse_id, parse_moment, parse_idempotency_key, LARGEST_SAFE_ID, type Op_globals} from './options';
+import {parse_id, parse_int_in, parse_moment, parse_idempotency_key, LARGEST_SAFE_ID, type Op_globals} from './options';
 import {read_contact_input, type Contact_flags, type Contact_ref} from './contact-input';
 import {contact_not_found, find_contact_by_address, import_contact, type Channel, type Ensured} from './contacts';
 import {read_stdin_object, stdin_inputs} from './stdin-input';
@@ -13,6 +13,7 @@ type Direct_send_name = 'send-email' | 'linkedin-connect' | 'linkedin-message' |
 type Direct_send_opts = Contact_flags & {
     emailAccountId?: string; linkedinAccountId?: string; message?: string;
     sendAfter?: string; scheduleId?: string; idempotencyKey?: string; trackLinks?: boolean; trackOpens?: boolean;
+    useContactTimeZone?: boolean; retryWindowMinutes?: string;
 };
 type Text = Record<string, string>;
 
@@ -372,6 +373,15 @@ const handle_direct_send = async(
     if (opts.scheduleId !== undefined)
     {
         later.scheduleId = parse_id(opts.scheduleId, '--schedule-id');
+    }
+    // Only Reply's LinkedIn routes take these. Which other flag each needs is Reply's rule, refused there with errors[].
+    if (by === 'linkedin' && opts.useContactTimeZone !== undefined)
+    {
+        later.useContactTimeZone = opts.useContactTimeZone;
+    }
+    if (by === 'linkedin' && opts.retryWindowMinutes !== undefined)
+    {
+        later.retryWindowMinutes = parse_int_in(opts.retryWindowMinutes, '--retry-window-minutes', 1, 4320, 0);
     }
     // Reply tracks neither unless asked, so each is sent only to turn it on.
     if (opts.trackLinks === true)

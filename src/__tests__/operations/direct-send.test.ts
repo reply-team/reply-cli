@@ -732,6 +732,56 @@ describe('a send for later', ()=>{
         expect(mock_fetch).not.toHaveBeenCalled();
     });
 
+    it('a LinkedIn send carries useContactTimeZone, true or false, and retryWindowMinutes only when given, as Reply takes them', async()=>{
+        const cases: [Partial<Direct_send_opts>, Record<string, unknown>][] = [
+            [{useContactTimeZone: true}, {useContactTimeZone: true}],
+            [{useContactTimeZone: false}, {useContactTimeZone: false}],
+            [{retryWindowMinutes: '1'}, {retryWindowMinutes: 1}],
+            [{retryWindowMinutes: ' 4320 '}, {retryWindowMinutes: 4320}],
+            [{useContactTimeZone: true, retryWindowMinutes: '90'}, {useContactTimeZone: true, retryWindowMinutes: 90}],
+            [{}, {}],
+        ];
+        for (const [name, message, opts] of SENDS.filter(([n])=>n !== 'send-email'))
+        {
+            for (const [extra, carried] of cases)
+            {
+                mock_fetch.mockReset();
+                answer(accepted(name, {}));
+                await run(name, message, {...opts, ...LATER, ...extra});
+                const body = sent()[0].body as Record<string, unknown>;
+                const label = `${name} ${JSON.stringify(extra)}`;
+                expect(body.scheduleId, label).toBe(41);
+                expect(Object.fromEntries(Object.entries(body).filter(([k])=>k === 'useContactTimeZone' || k === 'retryWindowMinutes')), label)
+                    .toStrictEqual(carried);
+            }
+        }
+    });
+
+    it('refuses a retry window outside 1 to 4320 minutes before any call, and leaves the rules between the fields to Reply', async()=>{
+        for (const [name, message, opts] of SENDS.filter(([n])=>n !== 'send-email'))
+        {
+            for (const raw of ['0', '4321', '-5', '1.5', 'ninety', '', '90m'])
+            {
+                const e = await failure(name, message, {...opts, retryWindowMinutes: raw});
+                expect(e, `${name} ${JSON.stringify(raw)}`).toMatchObject({code: 'usage.range', exit_code: 2});
+            }
+        }
+        expect(mock_fetch).not.toHaveBeenCalled();
+        // Without --schedule-id or --send-after either goes to Reply as given, for Reply to refuse with errors[].
+        answer(json({errors: [{pointer: '/useContactTimeZone', detail: 'Only with scheduleId.'}]}, 400));
+        const e = await failure('linkedin-message', {body: TEXT}, {...LINKEDIN_OPTS, useContactTimeZone: true, retryWindowMinutes: '30'});
+        expect(sent()[0].body).toMatchObject({useContactTimeZone: true, retryWindowMinutes: 30});
+        expect(e).toMatchObject({code: 'reply.invalid_request', exit_code: 1, details: {fields: ['useContactTimeZone']}});
+    });
+
+    it('a direct email never carries either, even when the options reach it', async()=>{
+        answer(accepted('send-email', {}));
+        await run('send-email', {subject: SUBJECT, body: BODY}, {...EMAIL_OPTS, ...LATER, useContactTimeZone: true, retryWindowMinutes: '30'});
+        const body = sent()[0].body as Record<string, unknown>;
+        expect('useContactTimeZone' in body).toBe(false);
+        expect('retryWindowMinutes' in body).toBe(false);
+    });
+
     it('a key does not make a lost answer safe to repeat: a Reply that ignores the header would send it twice', async()=>{
         mock_fetch.mockRejectedValueOnce(lost_connection());
         const e = await failure('send-email', {subject: SUBJECT, body: BODY}, {...EMAIL_OPTS, ...LATER});
