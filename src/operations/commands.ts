@@ -298,22 +298,22 @@ const later_options = (c: Command): Command=>c
     .option('--idempotency-key <key>', 'Your own key for this send, sent as the Idempotency-Key header');
 
 const LATER = 'With --send-after Reply holds the send until that moment, given with its offset and sent to Reply in UTC; a moment\n'
-    + 'without an offset is refused (usage.date). --schedule-id names the sending schedule Reply times the send by. The answer\n'
-    + 'then adds Reply\'s reference, send_after and state, each only when Reply gives it: status "sent" means Reply took the\n'
-    + 'send; state, when Reply gives it, says whether it has gone out: queued, waitingForSchedule or sending is not yet,\n'
-    + 'then sent, failed or cancelled. direct-send get <reference> reads it later, and direct-send cancel <reference> stops one not yet sent. An\n'
-    + 'answer without state comes from a Reply that does not know --send-after and --schedule-id: it sent at once, as\n'
-    + 'without them. --idempotency-key goes as the Idempotency-Key header, never in the body. A Reply that knows the header\n'
-    + 'answers a repeat with the same key with the send the key first made; while that one is still being made the answer\n'
-    + 'is idempotency_key.in_use, and the same key on a different send is idempotency_key.reused. Neither sends anything.\n'
-    + 'A repeat of a send given a person\'s fields answers contact.already_held first, since the first one created the\n'
-    + 'contact: that is safe too, as nothing is sent twice. idempotency_key.reused names the send the key was first taken\n'
-    + 'for in details: reference, state and send_after, each only when Reply gives it. Any other refusal of a send Reply\n'
-    + 'already holds names that send the same way, beside the refusal\'s own details; its code is the refusal\'s own.\n'
-    + 'A 400 to the send with neither a code nor errors[] is Reply failing while it made the send: like a 5xx or a lost\n'
-    + 'answer, it is outcome.unknown (exit 3). So is a 400 directLinkedIn.unknown to a LinkedIn send, Reply\'s answer when\n'
-    + 'it failed while making the send or could not map the provider\'s answer; Reply\'s code is kept in reply_code. A 400\n'
-    + 'with errors[] is reply.invalid_request, and nothing was sent.\n';
+    + 'without an offset is refused (usage.date). --schedule-id names the sending schedule Reply times the send by. The\n'
+    + 'answer then adds Reply\'s reference, send_after and state, each only when Reply gives it: status "sent" means Reply\n'
+    + 'took the send; state, when Reply gives it, says whether it has gone out: queued, waitingForSchedule or sending is not\n'
+    + 'yet, then sent, failed or cancelled. direct-send get <reference> reads it later, and direct-send cancel <reference>\n'
+    + 'stops one not yet sent. An answer without state comes from a Reply that does not know --send-after and --schedule-id:\n'
+    + 'it sent at once, as without them. --idempotency-key goes as the Idempotency-Key header, never in the body. A Reply\n'
+    + 'that knows the header answers a repeat with the same key with the send the key first made; while that one is still\n'
+    + 'being made the answer is idempotency_key.in_use, and the same key on a different send is idempotency_key.reused.\n'
+    + 'Neither sends anything. A repeat of a send given a person\'s fields answers contact.already_held first, since the first\n'
+    + 'one created the contact: that is safe too, as nothing is sent twice. idempotency_key.reused names the send the key was\n'
+    + 'first taken for in details: reference, state and send_after, each only when Reply gives it. Any other refusal of a\n'
+    + 'send Reply already holds names that send the same way, beside the refusal\'s own details; its code is the refusal\'s\n'
+    + 'own. A 400 to the send with neither a code nor errors[] is Reply failing while it made the send: like a 5xx or a lost\n'
+    + 'answer, it is outcome.unknown (exit 3). So is a 400 directLinkedIn.unknown to a LinkedIn send, Reply\'s answer when it\n'
+    + 'failed while making the send or could not map the provider\'s answer; Reply\'s code is kept in reply_code. A 400 with\n'
+    + 'errors[] is reply.invalid_request, and nothing was sent.\n';
 
 // The refusals of a send's key, the same on every direct send, after each send's own.
 const KEY_CODES = ['idempotency_key.in_use', 'idempotency_key.reused'];
@@ -624,13 +624,12 @@ const DIRECT_SEND = 'Result: {"reference","channel","contact_id","state","send_a
     + 'failure_reason is a sentence for a person, never parsed; failure_code is Reply\'s code for the failure, the one to\n'
     + 'branch on. A failed send may carry no failure_code: it is then null, and failure_reason is all Reply says of it.\n'
     + 'missing_variables lists the template variables Reply could not fill, and rendered_subject and rendered_body are the\n'
-    + 'text as Reply filled it in. estimated_send_at is added only when Reply gives it: when Reply expects a send waiting\n'
-    + 'for its schedule\'s next opening to go out, or null when the schedule does not open within 30 days of the moment the\n'
-    + 'send waits from: its --send-after, or now once that has passed. estimated_send_at means something only with state\n'
+    + 'text as Reply filled it in. estimated_send_at is added only when Reply gives it: when Reply expects a send waiting for\n'
+    + 'its schedule\'s next opening to go out, or null when the schedule does not open within 30 days of the moment the send\n'
+    + 'waits from: its --send-after, or now once that has passed. estimated_send_at means something only with state\n'
     + 'waitingForSchedule, where null says the schedule does not open within those 30 days; Reply gives it null on any other\n'
-    + 'state, and that null says nothing.\n'
-    + 'A Reply without this route answers reply.refused with status 404 and no reply_code; a\n'
-    + 'reference of any other form never leaves the CLI, so that 404 means this Reply has no such route.\n'
+    + 'state, and that null says nothing. A Reply without this route answers reply.refused with status 404 and no reply_code;\n'
+    + 'a reference of any other form never leaves the CLI, so that 404 means this Reply has no such route.\n'
     + 'direct_send.not_found is a reference that Reply has no send for, a send of another team included.\n'
     + 'direct_send.not_owned is an email send made by a teammate this user may not act for.\n';
 
@@ -649,14 +648,13 @@ direct_send_command.command('cancel')
     .addHelpText('after', help([ex('direct-send cancel email-1001')],
         ['direct_send.not_found', 'direct_send.not_owned', 'direct_send.already_sent', 'direct_send.already_failed',
             'direct_send.already_sending', 'direct_send.cancel_not_confirmed'], true,
-        DIRECT_SEND + 'The answer is the send as Reply now holds it, state cancelled. Cancelling a send already cancelled answers\n'
-            + 'it again, so running it again is safe. direct_send.already_sent, direct_send.already_failed and\n'
-            + 'direct_send.already_sending mean the send was past cancelling; nothing changed. direct_send.already_sending is a\n'
-            + 'LinkedIn send made for later that Reply is handing to the account\'s queue or that waits or runs there, even while\n'
-            + 'direct-send get still reads it queued. direct_send.cancel_not_confirmed\n'
-            + 'is a 503 from Reply that could not confirm the cancel: the send is still queued or waiting for its schedule, so\n'
-            + 'run the cancel again, as Reply asks;\n'
-            + 'retry_after carries Reply\'s Retry-After when it sends one. Any other 5xx is outcome.unknown (exit 3).\n'))
+        DIRECT_SEND + 'The answer is the send as Reply now holds it, state cancelled. Cancelling a send already cancelled answers it again,\n'
+            + 'so running it again is safe. direct_send.already_sent, direct_send.already_failed and direct_send.already_sending mean\n'
+            + 'the send was past cancelling; nothing changed. direct_send.already_sending is a LinkedIn send made for later that\n'
+            + 'Reply is handing to the account\'s queue or that waits or runs there, even while direct-send get still reads it queued.\n'
+            + 'direct_send.cancel_not_confirmed is a 503 from Reply that could not confirm the cancel: the send is still queued or\n'
+            + 'waiting for its schedule, so run the cancel again, as Reply asks; retry_after carries Reply\'s Retry-After when it\n'
+            + 'sends one. Any other 5xx is outcome.unknown (exit 3).\n'))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
         await handle_direct_send_cancel(cmd.args[0], ctx, g);
