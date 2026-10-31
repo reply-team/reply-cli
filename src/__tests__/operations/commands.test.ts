@@ -52,6 +52,8 @@ describe('operations/commands', ()=>{
             expect(flat, name).toContain('email-<n>, linkedin-<n> or linkedin-scheduled-<n>, the form Reply\'s route takes');
             expect(flat, name).toContain('any other form is refused before any call (usage.reference, exit 2), and nothing else is read from it');
             expect(flat, name).toContain('a reference of any other form never leaves the CLI, so that 404 means this Reply has no such route');
+            expect(flat, name).toContain('direct_send.not_found is a reference that Reply has no send for, a send of another team '
+                + 'included. direct_send.not_owned is an email send made by a teammate this user may not act for');
             expect(flat, name).not.toContain('step up');
             expect(c.registeredArguments[0].description, name).toContain('email-<n>, linkedin-<n> or linkedin-scheduled-<n>');
             expect(flat, name).toContain('failure_code, missing_variables, rendered_subject and rendered_body are added only when Reply gives them');
@@ -63,6 +65,8 @@ describe('operations/commands', ()=>{
         expect(cancel).toContain('Cancelling a send already cancelled answers it again, so running it again is safe');
         expect(cancel).toContain('direct_send.already_sent, direct_send.already_failed and direct_send.already_sending mean the send '
             + 'was past cancelling; nothing changed');
+        expect(cancel).toContain('direct_send.already_sending is a LinkedIn send made for later that Reply is handing to the '
+            + 'account\'s queue or that waits or runs there, even while direct-send get still reads it queued');
         expect(cancel).toContain('direct_send.cancel_not_confirmed is a 503 from Reply that could not confirm the cancel: the send '
             + 'is still queued or waiting for its schedule, so run the cancel again, as Reply asks; retry_after carries Reply\'s Retry-After when it sends one. Any other 5xx '
             + 'is outcome.unknown (exit 3)');
@@ -313,8 +317,8 @@ describe('operations/commands', ()=>{
             expect(flat.includes('--retry-window-minutes <n> is how long Reply keeps trying to send it once it is due, 1 to 4320 '
                 + 'minutes (Reply\'s default is 90); one outside that is refused before any call (usage.range)'), text).toBe(name !== 'send-email');
             expect(flat.includes('Reply takes them only with --schedule-id or --send-after'), text).toBe(name !== 'send-email');
-            expect(flat.includes('schedule.not_found is a --schedule-id Reply has no schedule for, schedule.no_slot a schedule with '
-                + 'no window Reply can send in, and contact.time_zone_missing a contact without the time zone '
+            expect(flat.includes('schedule.not_found is a --schedule-id naming no schedule this account can read, schedule.no_slot a '
+                + 'schedule with no active day that has a time range, so it never opens, and contact.time_zone_missing a contact without the time zone '
                 + '--use-contact-time-zone reads it in; none sends anything'), text).toBe(name !== 'send-email');
             expect(flat, text).toContain('An answer without state comes from a Reply that does not know --send-after and --schedule-id');
             expect(flat, text).toContain('--idempotency-key goes as the Idempotency-Key header');

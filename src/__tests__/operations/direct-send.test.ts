@@ -176,6 +176,10 @@ describe('the LinkedIn sends', ()=>{
             expect(shown(e), shown(e)).not.toContain('Marta');
             expect(mock_fetch, `${name} ${reply_code}`).toHaveBeenCalledTimes(1);
         }
+        mock_fetch.mockReset();
+        answer(json({status: 409, code: 'directLinkedIn.scheduleHasNoSlot'}, 409));
+        expect((await failure('linkedin-message', {body: TEXT}, LINKEDIN_OPTS) as {title?: string}).title)
+            .toBe('The sending schedule has no active day with a time range, so it never opens; nothing was sent.');
     });
 
     it('reads contact-not-found, the limits and already-connected only under the status Reply publishes each with', async()=>{

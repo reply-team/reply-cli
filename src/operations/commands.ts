@@ -382,9 +382,9 @@ const SCHEDULED = 'A LinkedIn send timed by --schedule-id may answer state waiti
     + 'Reply keeps trying to send it once it is due, 1 to 4320 minutes (Reply\'s default is 90); one outside that is refused\n'
     + 'before any call (usage.range). Reply takes them only with --schedule-id or --send-after, the time zone only with\n'
     + '--schedule-id, and answers them otherwise with errors[] (reply.invalid_request), as a Reply before its scheduler\n'
-    + 'answers --schedule-id on a LinkedIn send. schedule.not_found is a --schedule-id Reply has no schedule for,\n'
-    + 'schedule.no_slot a schedule with no window Reply can send in, and contact.time_zone_missing a contact without the\n'
-    + 'time zone --use-contact-time-zone reads it in; none sends anything.\n';
+    + 'answers --schedule-id on a LinkedIn send. schedule.not_found is a --schedule-id naming no schedule this account can\n'
+    + 'read, schedule.no_slot a schedule with no active day that has a time range, so it never opens, and\n'
+    + 'contact.time_zone_missing a contact without the time zone --use-contact-time-zone reads it in; none sends anything.\n';
 
 const linkedin_send = (
     name: Exclude<Direct_send_name, 'send-email'>, description: string, message: string, examples: string[], codes: string[],
@@ -614,7 +614,8 @@ const DIRECT_SEND = 'Result: {"reference","channel","contact_id","state","send_a
     + 'for its schedule\'s next opening to go out, or null when no opening falls within the 30 days it looks ahead.\n'
     + 'A Reply without this route answers reply.refused with status 404 and no reply_code; a\n'
     + 'reference of any other form never leaves the CLI, so that 404 means this Reply has no such route.\n'
-    + 'direct_send.not_found is a reference that Reply has no send for.\n';
+    + 'direct_send.not_found is a reference that Reply has no send for, a send of another team included.\n'
+    + 'direct_send.not_owned is an email send made by a teammate this user may not act for.\n';
 
 direct_send_command.command('get')
     .argument('<reference>', 'The send\'s reference, email-<n>, linkedin-<n> or linkedin-scheduled-<n>, as a send made with --send-after answered it')
@@ -633,7 +634,9 @@ direct_send_command.command('cancel')
             'direct_send.already_sending', 'direct_send.cancel_not_confirmed'], true,
         DIRECT_SEND + 'The answer is the send as Reply now holds it, state cancelled. Cancelling a send already cancelled answers\n'
             + 'it again, so running it again is safe. direct_send.already_sent, direct_send.already_failed and\n'
-            + 'direct_send.already_sending mean the send was past cancelling; nothing changed. direct_send.cancel_not_confirmed\n'
+            + 'direct_send.already_sending mean the send was past cancelling; nothing changed. direct_send.already_sending is a\n'
+            + 'LinkedIn send made for later that Reply is handing to the account\'s queue or that waits or runs there, even while\n'
+            + 'direct-send get still reads it queued. direct_send.cancel_not_confirmed\n'
             + 'is a 503 from Reply that could not confirm the cancel: the send is still queued or waiting for its schedule, so\n'
             + 'run the cancel again, as Reply asks;\n'
             + 'retry_after carries Reply\'s Retry-After when it sends one. Any other 5xx is outcome.unknown (exit 3).\n'))

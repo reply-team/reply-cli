@@ -348,8 +348,8 @@ that is refused before any call (`usage.range`). Reply takes them only for a sen
 time zone only with `--schedule-id`, and answers them otherwise with `reply.invalid_request`; a
 Reply before its LinkedIn scheduler answers `--schedule-id` on a LinkedIn send the same way.
 Reply refuses a LinkedIn send it cannot time when it takes it, and nothing is sent: `--schedule-id`
-naming no schedule is `schedule.not_found`, a schedule with no window Reply can send in is
-`schedule.no_slot`, and a contact without the time zone `--use-contact-time-zone` reads the
+naming no schedule this account can read is `schedule.not_found`, a schedule with no active day
+that has a time range, so it never opens, is `schedule.no_slot`, and a contact without the time zone `--use-contact-time-zone` reads the
 schedule in is `contact.time_zone_missing`.
 
 ```sh
@@ -385,8 +385,11 @@ added only when Reply gives them, and so is `estimated_send_at`, read the same w
 `failure_code` is Reply's code for the failure, the one to branch on. A failed send may carry no
 `failure_code`: it is then null, and `failure_reason` is all Reply says of it. `direct-send cancel` of a send already cancelled answers it
 again. A send already gone out, failed or going out is `direct_send.already_sent`,
-`direct_send.already_failed` or `direct_send.already_sending`, and a reference Reply has no send for
-is `direct_send.not_found`. A `503` that Reply answers with `directSend.cancelNotConfirmed` is
+`direct_send.already_failed` or `direct_send.already_sending`; the last is a LinkedIn send made for
+later that Reply is handing to the account's queue or that waits or runs there, even while
+`direct-send get` still reads it `queued`. A reference Reply has no send for, a send of another
+team included, is `direct_send.not_found`, and an email send made by a teammate this user may not
+act for is `direct_send.not_owned`, to a read and a cancel alike. A `503` that Reply answers with `directSend.cancelNotConfirmed` is
 `direct_send.cancel_not_confirmed` (exit 1): Reply could not confirm the cancel, and says the send is
 still queued or waiting for its schedule, so run the cancel again, as Reply asks; `retry_after` carries Reply's `Retry-After` when it sends one.
 Any other `5xx` to a cancel stays `outcome.unknown` (exit 3).

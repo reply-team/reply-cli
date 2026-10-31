@@ -103,6 +103,11 @@ describe('direct-send get', ()=>{
             [{state: 'failed', failureCode: 'directSend.dispatchWindowMissed'}, {state: 'failed', failure_code: 'directSend.dispatchWindowMissed'}],
             [{state: 'failed', failureCode: 'directSend.dispatchInterrupted'}, {state: 'failed', failure_code: 'directSend.dispatchInterrupted'}],
             [{state: 'failed', failureCode: 'directLinkedIn.notConnected'}, {state: 'failed', failure_code: 'directLinkedIn.notConnected'}],
+            [{state: 'failed', failureCode: 'directLinkedIn.contactNotFound'}, {state: 'failed', failure_code: 'directLinkedIn.contactNotFound'}],
+            [{state: 'failed', failureCode: 'directLinkedIn.scheduleNotFound'}, {state: 'failed', failure_code: 'directLinkedIn.scheduleNotFound'}],
+            [{state: 'failed', failureCode: 'directLinkedIn.contactTimeZoneMissing'},
+                {state: 'failed', failure_code: 'directLinkedIn.contactTimeZoneMissing'}],
+            [{state: 'failed', failureCode: 'directLinkedIn.aCodeNotYetKnown'}, {state: 'failed', failure_code: 'directLinkedIn.aCodeNotYetKnown'}],
             [{state: 'cancelled', cancelledAt: '2026-11-02T09:15:00Z'}, {state: 'cancelled', cancelled_at: '2026-11-02T09:15:00Z'}],
         ];
         for (const [given, read] of cases)

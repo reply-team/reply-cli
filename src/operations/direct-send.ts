@@ -181,7 +181,7 @@ const REFUSALS: Record<string, Refusal> = {
         status: 404, code: 'schedule.not_found', title: 'Reply has no sending schedule by that id that this account can use, so nothing was sent.',
     },
     'directLinkedIn.scheduleHasNoSlot': {
-        status: 409, code: 'schedule.no_slot', title: 'The sending schedule has no window Reply can send in, so nothing was sent.',
+        status: 409, code: 'schedule.no_slot', title: 'The sending schedule has no active day with a time range, so it never opens; nothing was sent.',
     },
     'directLinkedIn.contactTimeZoneMissing': {
         status: 409, code: 'contact.time_zone_missing', title: 'Reply holds no time zone for the contact to read the schedule in, so nothing was sent.',
