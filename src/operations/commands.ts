@@ -612,10 +612,13 @@ direct_send_command.command('cancel')
     .argument('<reference>', 'The send\'s reference, email-<n>, linkedin-<n> or linkedin-scheduled-<n>, as a send made with --send-after answered it')
     .description('Stop a direct send that has not gone out yet')
     .addHelpText('after', help([ex('direct-send cancel email-1001')],
-        ['direct_send.not_found', 'direct_send.not_owned', 'direct_send.already_sent', 'direct_send.already_failed'], true,
+        ['direct_send.not_found', 'direct_send.not_owned', 'direct_send.already_sent', 'direct_send.already_failed',
+            'direct_send.already_sending', 'direct_send.cancel_not_confirmed'], true,
         DIRECT_SEND + 'The answer is the send as Reply now holds it, state cancelled. Cancelling a send already cancelled answers\n'
-            + 'it again, so running it again is safe. direct_send.already_sent and direct_send.already_failed mean the send\n'
-            + 'was past cancelling; nothing changed.\n'))
+            + 'it again, so running it again is safe. direct_send.already_sent, direct_send.already_failed and\n'
+            + 'direct_send.already_sending mean the send was past cancelling; nothing changed. direct_send.cancel_not_confirmed\n'
+            + 'is a 503 from Reply that could not confirm the cancel: it may not have taken, and running it again is safe;\n'
+            + 'retry_after carries Reply\'s Retry-After when it sends one. Any other 5xx is outcome.unknown (exit 3).\n'))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
         await handle_direct_send_cancel(cmd.args[0], ctx, g);

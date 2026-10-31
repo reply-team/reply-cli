@@ -33,7 +33,8 @@ describe('operations/commands', ()=>{
     it('direct-send get and cancel each take one reference and no flag, and list the refusals Reply gives each', ()=>{
         const expected: [string, string[], boolean][] = [
             ['get', ['direct_send.not_found', 'direct_send.not_owned'], false],
-            ['cancel', ['direct_send.not_found', 'direct_send.not_owned', 'direct_send.already_sent', 'direct_send.already_failed'], true],
+            ['cancel', ['direct_send.not_found', 'direct_send.not_owned', 'direct_send.already_sent', 'direct_send.already_failed',
+                'direct_send.already_sending', 'direct_send.cancel_not_confirmed'], true],
         ];
         for (const [name, codes, write] of expected)
         {
@@ -58,8 +59,13 @@ describe('operations/commands', ()=>{
             expect(flat, name).toContain('estimated_send_at is added only when Reply gives it: when Reply expects a send waiting for its '
                 + 'schedule\'s next opening to go out, or null when no opening falls within the 30 days it looks ahead');
         }
-        expect(help_of(sub(direct_send_command, 'cancel')).replace(/\s+/g, ' '))
-            .toContain('Cancelling a send already cancelled answers it again, so running it again is safe');
+        const cancel = help_of(sub(direct_send_command, 'cancel')).replace(/\s+/g, ' ');
+        expect(cancel).toContain('Cancelling a send already cancelled answers it again, so running it again is safe');
+        expect(cancel).toContain('direct_send.already_sent, direct_send.already_failed and direct_send.already_sending mean the send '
+            + 'was past cancelling; nothing changed');
+        expect(cancel).toContain('direct_send.cancel_not_confirmed is a 503 from Reply that could not confirm the cancel: it may not '
+            + 'have taken, and running it again is safe; retry_after carries Reply\'s Retry-After when it sends one. Any other 5xx '
+            + 'is outcome.unknown (exit 3)');
     });
 
     it('schedule list takes no flag and no id, and says how a time zone, a weekday, a time and a state are written', ()=>{

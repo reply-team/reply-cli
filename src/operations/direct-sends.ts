@@ -1,6 +1,6 @@
 import {Unknown_outcome_error, UsageError} from '../utils/errors';
 import {call_reply, expect_object, refusal, unreadable, open_session, type Answer} from './call';
-import {known_refusal, strings_of, estimated_of, DIRECT_SEND_REFUSALS} from './direct-send';
+import {known_refusal, strings_of, estimated_of, DIRECT_SEND_REFUSALS, CANCEL_REFUSALS} from './direct-send';
 import {print_result} from './result';
 import type {Op_globals} from './options';
 import type {Cli_context} from '../context';
@@ -74,7 +74,7 @@ const handle_direct_send_cancel = async(reference: string, ctx: Cli_context, g: 
         const a = await call_reply(s, 'POST', path, 'write');
         if (a.status !== 200)
         {
-            throw known_refusal(a, DIRECT_SEND_REFUSALS) ?? refusal(a, 'write');
+            throw known_refusal(a, DIRECT_SEND_REFUSALS) ?? known_refusal(a, CANCEL_REFUSALS) ?? refusal(a, 'write');
         }
         print_result(direct_send_of(a, 'write'), g);
     } catch (e) {

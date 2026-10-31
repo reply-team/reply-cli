@@ -365,8 +365,12 @@ added only when Reply gives them, and so is `estimated_send_at`, read the same w
 `failure_reason` is a sentence for a person and never parsed;
 `failure_code` is Reply's code for the failure, the one to branch on. A failed send may carry no
 `failure_code`: it is then null, and `failure_reason` is all Reply says of it. `direct-send cancel` of a send already cancelled answers it
-again. A send already gone out or failed is `direct_send.already_sent` or
-`direct_send.already_failed`, and a reference Reply has no send for is `direct_send.not_found`.
+again. A send already gone out, failed or going out is `direct_send.already_sent`,
+`direct_send.already_failed` or `direct_send.already_sending`, and a reference Reply has no send for
+is `direct_send.not_found`. A `503` that Reply answers with `directSend.cancelNotConfirmed` is
+`direct_send.cancel_not_confirmed` (exit 1): Reply could not confirm the cancel, so it may not have
+taken, and running it again is safe; `retry_after` carries Reply's `Retry-After` when it sends one.
+Any other `5xx` to a cancel stays `outcome.unknown` (exit 3).
 
 `reply inbox changes` reads the inbox feed forward. Each page holds the threads whose latest message,
 inbound or outbound, changed, oldest first and as Reply gives them, with `has_more` and a `cursor`.

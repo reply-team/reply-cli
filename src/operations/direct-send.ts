@@ -93,8 +93,9 @@ const read_text = (name: Direct_send_name, send: Direct_send, source: string | u
 
 // A refusal Reply publishes, under the status it comes with; details reads what the problem body
 // carries beside its code, for the error output's details.
+// waits passes on the Retry-After Reply sends with a refusal worth repeating.
 type Refusal = {
-    status: number; code: string; title: string; hint?: string;
+    status: number; code: string; title: string; hint?: string; waits?: boolean;
     details?: (body: Record<string, unknown>) => Record<string, unknown> | undefined;
 };
 
@@ -210,6 +211,18 @@ const DIRECT_SEND_REFUSALS: Record<string, Refusal> = {
     'directSend.alreadyFailed': {
         status: 409, code: 'direct_send.already_failed', title: 'The direct send has already failed, so it was not cancelled.',
     },
+    'directSend.alreadySending': {
+        status: 409, code: 'direct_send.already_sending', title: 'The direct send is already going out, so it was not cancelled.',
+    },
+};
+// A cancel Reply could not confirm: it may not have taken, and Reply says repeating it is safe, so it is a refusal of its
+// own rather than an outcome left unknown. Only a cancel answers it; a read answering this code maps as any other 5xx.
+const CANCEL_REFUSALS: Record<string, Refusal> = {
+    'directSend.cancelNotConfirmed': {
+        status: 503, code: 'direct_send.cancel_not_confirmed', title: 'Reply could not confirm the cancel; it may not have taken.',
+        hint: 'The send may or may not have been cancelled; running it again is safe, and direct-send get reads where it stands.',
+        waits: true,
+    },
 };
 
 // The refusal a table holds for this answer, under the status Reply publishes it with, or undefined.
@@ -219,6 +232,7 @@ const known_refusal = (a: Answer, table: Record<string, Refusal>): Operation_err
     return known !== undefined && known.status === a.status
         ? new Operation_error(known.code, known.title, {
             status: a.status, reply_code, detail: detail_of(a), hint: known.hint, details: known.details?.(a.data as Record<string, unknown>),
+            retry_after: known.waits === true ? parse_retry_after(a.headers['retry-after']) ?? undefined : undefined,
         })
         : undefined;
 };
@@ -434,5 +448,5 @@ const handle_direct_send = async(
     }
 };
 
-export {handle_direct_send, known_refusal, strings_of, estimated_of, DIRECT_SEND_REFUSALS};
+export {handle_direct_send, known_refusal, strings_of, estimated_of, DIRECT_SEND_REFUSALS, CANCEL_REFUSALS};
 export type {Direct_send_name, Direct_send_opts};

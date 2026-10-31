@@ -1,5 +1,5 @@
 import {describe, it, expect, beforeEach} from 'vitest';
-import {mock_fetch, json, ctx, sent, answer, capture} from './helpers';
+import {mock_fetch, json, ctx, sent, answer, capture, instant_timers, real_timers} from './helpers';
 import {handle_direct_send_get, handle_direct_send_cancel} from '../../operations/direct-sends';
 
 beforeEach(()=>{ mock_fetch.mockReset(); });
@@ -251,13 +251,15 @@ describe('direct-send cancel', ()=>{
         expect(mock_fetch).toHaveBeenCalledTimes(2);
     });
 
-    it('maps Reply\'s four refusals of a cancel, each definite', async()=>{
+    it('maps Reply\'s five refusals of a cancel, each definite', async()=>{
         const cases: [Response, string][] = [
             [json({code: 'directSend.notFound'}, 404), 'direct_send.not_found'],
             [json({code: 'directSend.notOwned'}, 403), 'direct_send.not_owned'],
             [json({code: 'directSend.alreadySent'}, 409), 'direct_send.already_sent'],
             [json({code: 'directSend.alreadyFailed'}, 409), 'direct_send.already_failed'],
+            [json({code: 'directSend.alreadySending'}, 409), 'direct_send.already_sending'],
             [json({code: 'directSend.alreadySent'}, 400), 'reply.refused'],
+            [json({code: 'directSend.alreadySending'}, 400), 'reply.refused'],
         ];
         for (const [res, code] of cases)
         {
@@ -283,6 +285,8 @@ describe('direct-send cancel', ()=>{
         const answers: [string, ()=>void][] = [
             ['lost answer', ()=>{ mock_fetch.mockRejectedValueOnce(lost_connection()); }],
             ['503', ()=>answer(json({title: 'Service Unavailable'}, 503))],
+            ['503 with another code', ()=>answer(json({code: 'directSend.somethingElse'}, 503))],
+            ['500 with the unconfirmed cancel\'s code', ()=>answer(json({code: 'directSend.cancelNotConfirmed'}, 500))],
             ['unreadable 200', ()=>answer(json('<html>ok</html>', 200))],
         ];
         for (const [label, give] of answers)
@@ -293,6 +297,36 @@ describe('direct-send cancel', ()=>{
             expect(e, label).toMatchObject({code: 'outcome.unknown', exit_code: 3});
             expect((e as {hint?: string}).hint ?? '', label).toContain('running it again is safe');
             expect(mock_fetch, label).toHaveBeenCalledTimes(1);
+        }
+    });
+
+    it('a 503 directSend.cancelNotConfirmed is direct_send.cancel_not_confirmed (exit 1), made once, says running it again '
+        + 'is safe, and passes on Reply\'s wait', async()=>{
+        const cases: [Record<string, string>, number | undefined][] = [[{}, undefined], [{'Retry-After': '5'}, 5]];
+        for (const [headers, retry_after] of cases)
+        {
+            mock_fetch.mockReset();
+            answer(json({code: 'directSend.cancelNotConfirmed', detail: 'The cancel could not be confirmed.'}, 503, headers));
+            const e = await failure(()=>handle_direct_send_cancel('linkedin-scheduled-77', ctx(), {}));
+            expect(e, JSON.stringify(headers)).toMatchObject({
+                code: 'direct_send.cancel_not_confirmed', exit_code: 1, status: 503, reply_code: 'directSend.cancelNotConfirmed',
+                detail: 'The cancel could not be confirmed.',
+            });
+            expect((e as {retry_after?: number}).retry_after, JSON.stringify(headers)).toBe(retry_after);
+            expect((e as {hint?: string}).hint ?? '').toContain('running it again is safe');
+            expect(mock_fetch).toHaveBeenCalledTimes(1);
+        }
+    });
+
+    it('reads an unconfirmed cancel only on a cancel: a read answering its code maps as any other 5xx', async()=>{
+        instant_timers();
+        try {
+            mock_fetch.mockImplementation(()=>Promise.resolve(json({code: 'directSend.cancelNotConfirmed'}, 503)));
+            expect(await failure(()=>handle_direct_send_get('linkedin-scheduled-77', ctx(), {})))
+                .toMatchObject({code: 'reply.unavailable', exit_code: 1});
+        } finally {
+            real_timers();
+            mock_fetch.mockReset();
         }
     });
 
