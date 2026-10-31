@@ -327,7 +327,8 @@ schedule list`). The answer then adds Reply's `reference`, `send_after` and `sta
 Reply gives it. `status: "sent"` means Reply took the send, and `state`, when present, says whether
 it has gone out: `queued` or `sending` is not yet, then `sent`, `failed` or `cancelled`. `reply
 direct-send get <reference>` reads the send later, and `reply direct-send cancel <reference>` stops
-one that has not gone out. The reference is Reply's, `email-<n>` or `linkedin-<n>`, the form
+one that has not gone out. The reference is Reply's, `email-<n>`, `linkedin-<n>` or
+`linkedin-scheduled-<n>` (a LinkedIn send held for later keeps that one for its whole life), the form
 Reply's route takes: a reference of any other form is refused before any call (`usage.reference`,
 exit 2), and nothing else is read from it. An answer without `state` comes from a Reply that does
 not know these flags yet: it sent at once, as without them.

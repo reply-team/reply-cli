@@ -581,9 +581,9 @@ const direct_send_command = new Command('direct-send').description('Read or canc
 
 const DIRECT_SEND = 'Result: {"reference","channel","contact_id","state","send_after","sent_at","message_id","failure_reason",\n'
     + '"cancelled_at"}, Reply\'s fields under these names, each null when Reply gives none. The reference is Reply\'s, from the\n'
-    + 'answer of a send made with --send-after: email-<n> or linkedin-<n>, the form Reply\'s route takes. A reference of\n'
-    + 'any other form is refused before any call (usage.reference, exit 2), and nothing else is read from it. state is\n'
-    + 'Reply\'s own word: queued or sending is not yet sent, then sent, failed or cancelled. failure_code,\n'
+    + 'answer of a send made with --send-after: email-<n>, linkedin-<n> or linkedin-scheduled-<n>, the form Reply\'s route\n'
+    + 'takes. A reference of any other form is refused before any call (usage.reference, exit 2), and nothing else is read\n'
+    + 'from it. state is Reply\'s own word: queued or sending is not yet sent, then sent, failed or cancelled. failure_code,\n'
     + 'missing_variables, rendered_subject and rendered_body are added only when Reply gives them: failure_reason is a\n'
     + 'sentence for a person, never parsed; failure_code is Reply\'s code for the failure, the one to branch on.\n'
     + 'missing_variables lists the template variables Reply could not fill, and rendered_subject and rendered_body are the\n'
@@ -592,7 +592,7 @@ const DIRECT_SEND = 'Result: {"reference","channel","contact_id","state","send_a
     + 'direct_send.not_found is a reference that Reply has no send for.\n';
 
 direct_send_command.command('get')
-    .argument('<reference>', 'The send\'s reference, email-<n> or linkedin-<n>, as a send made with --send-after answered it')
+    .argument('<reference>', 'The send\'s reference, email-<n>, linkedin-<n> or linkedin-scheduled-<n>, as a send made with --send-after answered it')
     .description('One direct send as Reply holds it: whether it has gone out, when, and why it failed')
     .addHelpText('after', help([ex('direct-send get email-1001')], ['direct_send.not_found', 'direct_send.not_owned'], false, DIRECT_SEND))
     .action(run(async(cmd)=>{
@@ -601,7 +601,7 @@ direct_send_command.command('get')
     }));
 
 direct_send_command.command('cancel')
-    .argument('<reference>', 'The send\'s reference, email-<n> or linkedin-<n>, as a send made with --send-after answered it')
+    .argument('<reference>', 'The send\'s reference, email-<n>, linkedin-<n> or linkedin-scheduled-<n>, as a send made with --send-after answered it')
     .description('Stop a direct send that has not gone out yet')
     .addHelpText('after', help([ex('direct-send cancel email-1001')],
         ['direct_send.not_found', 'direct_send.not_owned', 'direct_send.already_sent', 'direct_send.already_failed'], true,

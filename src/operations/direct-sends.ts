@@ -7,8 +7,9 @@ import type {Cli_context} from '../context';
 
 // Reply's route takes exactly this form and answers anything else with a bare 404, as it does when it
 // has no such route at all. Checking the form here keeps that 404 meaning only the latter; nothing else
-// is read from the reference, and the form leaves nothing to encode.
-const REFERENCE = /^(email|linkedin)-[1-9]\d{0,9}$/;
+// is read from the reference, and the form leaves nothing to encode. A LinkedIn send held for later keeps
+// linkedin-scheduled-<n> for its whole life; one sent at once is linkedin-<n>.
+const REFERENCE = /^(email|linkedin|linkedin-scheduled)-[1-9]\d{0,9}$/;
 
 const path_of = (reference: string): string=>{
     if (reference.trim() === '')
@@ -17,7 +18,7 @@ const path_of = (reference: string): string=>{
     }
     if (!REFERENCE.test(reference))
     {
-        throw new UsageError('That is not a reference Reply gives: email-<n> or linkedin-<n>, n from 1.',
+        throw new UsageError('That is not a reference Reply gives: email-<n>, linkedin-<n> or linkedin-scheduled-<n>, n from 1.',
             {code: 'usage.reference', hint: 'A send made with --send-after answers its reference.'});
     }
     return `/v3/direct-sends/${reference}`;

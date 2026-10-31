@@ -106,7 +106,35 @@ describe('direct-send get', ()=>{
             {
                 const e = await failure(()=>fn(reference, ctx(), {}));
                 expect(e, `${fn.name} ${JSON.stringify(reference)}`).toMatchObject({code: 'usage.reference', exit_code: 2});
-                expect((e as Error).message, JSON.stringify(reference)).toContain('email-<n> or linkedin-<n>');
+                expect((e as Error).message, JSON.stringify(reference)).toContain('email-<n>, linkedin-<n> or linkedin-scheduled-<n>');
+            }
+        }
+        expect(mock_fetch).not.toHaveBeenCalled();
+    });
+
+    it('sends a deferred LinkedIn send\'s reference, linkedin-scheduled-<n>, as given to get and cancel', async()=>{
+        for (const reference of ['linkedin-scheduled-1', 'linkedin-scheduled-1042', 'linkedin-scheduled-9999999999'])
+        {
+            for (const [fn, suffix] of [[get, ''], [cancel, '/cancel']] as const)
+            {
+                mock_fetch.mockReset();
+                answer(json({...QUEUED, channel: 'linkedin', reference}));
+                expect((await fn(reference)).reference, reference).toBe(reference);
+                expect(sent()[0].url, reference).toBe(`https://api/v3/direct-sends/${reference}${suffix}`);
+            }
+        }
+    });
+
+    it('refuses a malformed scheduled reference before any call, by the same one-spelling rule', async()=>{
+        const malformed = ['linkedin-scheduled-0', 'linkedin-scheduled-01', 'linkedin-scheduled-12345678901', 'linkedin-scheduled-',
+            'linkedin-scheduled', 'linkedin-scheduled--1', 'linkedin-scheduled-1a', 'LINKEDIN-SCHEDULED-1', 'email-scheduled-1',
+            'scheduled-1', 'linkedin-scheduled-scheduled-1', ' linkedin-scheduled-1', 'linkedin-scheduled-1/cancel'];
+        for (const reference of malformed)
+        {
+            for (const fn of [handle_direct_send_get, handle_direct_send_cancel])
+            {
+                expect(await failure(()=>fn(reference, ctx(), {})), `${fn.name} ${JSON.stringify(reference)}`)
+                    .toMatchObject({code: 'usage.reference', exit_code: 2});
             }
         }
         expect(mock_fetch).not.toHaveBeenCalled();

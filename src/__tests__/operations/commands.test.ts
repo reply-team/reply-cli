@@ -47,11 +47,11 @@ describe('operations/commands', ()=>{
             expect(flat, name).toContain('The reference is Reply\'s, from the answer of a send made with --send-after');
             expect(flat, name).toContain('state is Reply\'s own word: queued or sending is not yet sent, then sent, failed or cancelled');
             expect(flat, name).toContain('A Reply without this route answers reply.refused with status 404 and no reply_code');
-            expect(flat, name).toContain('email-<n> or linkedin-<n>, the form Reply\'s route takes');
+            expect(flat, name).toContain('email-<n>, linkedin-<n> or linkedin-scheduled-<n>, the form Reply\'s route takes');
             expect(flat, name).toContain('any other form is refused before any call (usage.reference, exit 2), and nothing else is read from it');
             expect(flat, name).toContain('a reference of any other form never leaves the CLI, so that 404 means this Reply has no such route');
             expect(flat, name).not.toContain('step up');
-            expect(c.registeredArguments[0].description, name).toContain('email-<n> or linkedin-<n>');
+            expect(c.registeredArguments[0].description, name).toContain('email-<n>, linkedin-<n> or linkedin-scheduled-<n>');
             expect(flat, name).toContain('failure_code, missing_variables, rendered_subject and rendered_body are added only when Reply gives them');
             expect(flat, name).toContain('failure_reason is a sentence for a person, never parsed; failure_code is Reply\'s code for the failure');
         }
