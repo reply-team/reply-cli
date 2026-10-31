@@ -94,6 +94,25 @@ describe('direct-send get', ()=>{
         }
     });
 
+    it('reads a LinkedIn send through the states Reply\'s scheduler gives it, and a failure with or without its code', async()=>{
+        const LINKEDIN = {...QUEUED, reference: 'linkedin-scheduled-77', channel: 'linkedin'};
+        const cases: [Record<string, unknown>, Record<string, unknown>][] = [
+            [{state: 'waitingForSchedule', sendAfter: null, estimatedSendAt: null}, {state: 'waitingForSchedule', send_after: null}],
+            [{state: 'sending'}, {state: 'sending'}],
+            [{state: 'failed', failureReason: 'The send failed.', failureCode: null}, {state: 'failed', failure_code: null}],
+            [{state: 'failed', failureCode: 'directSend.dispatchWindowMissed'}, {state: 'failed', failure_code: 'directSend.dispatchWindowMissed'}],
+            [{state: 'failed', failureCode: 'directSend.dispatchInterrupted'}, {state: 'failed', failure_code: 'directSend.dispatchInterrupted'}],
+            [{state: 'failed', failureCode: 'directLinkedIn.notConnected'}, {state: 'failed', failure_code: 'directLinkedIn.notConnected'}],
+            [{state: 'cancelled', cancelledAt: '2026-11-02T09:15:00Z'}, {state: 'cancelled', cancelled_at: '2026-11-02T09:15:00Z'}],
+        ];
+        for (const [given, read] of cases)
+        {
+            mock_fetch.mockReset();
+            answer(json({...LINKEDIN, ...given}));
+            expect(await get('linkedin-scheduled-77'), JSON.stringify(given)).toMatchObject({reference: 'linkedin-scheduled-77', ...read});
+        }
+    });
+
     it('gives missing_variables only as a list of names, and the others only as text: anything else is left out', async()=>{
         for (const missing of [[], ['FirstName']])
         {

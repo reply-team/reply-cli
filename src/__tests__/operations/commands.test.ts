@@ -45,7 +45,8 @@ describe('operations/commands', ()=>{
             expect(text, name).toContain(codes.map(code=>`  ${code}\n`).join(''));
             expect(text.includes('outcome.unknown'), name).toBe(write);
             expect(flat, name).toContain('The reference is Reply\'s, from the answer of a send made with --send-after');
-            expect(flat, name).toContain('state is Reply\'s own word: queued or sending is not yet sent, then sent, failed or cancelled');
+            expect(flat, name).toContain('state is Reply\'s own word: queued, waitingForSchedule or sending is not yet sent, then sent, failed or cancelled');
+            expect(flat, name).toContain('A failed send may carry no failure_code: it is then null');
             expect(flat, name).toContain('A Reply without this route answers reply.refused with status 404 and no reply_code');
             expect(flat, name).toContain('email-<n>, linkedin-<n> or linkedin-scheduled-<n>, the form Reply\'s route takes');
             expect(flat, name).toContain('any other form is refused before any call (usage.reference, exit 2), and nothing else is read from it');
@@ -294,7 +295,7 @@ describe('operations/commands', ()=>{
             expect(flat, text).toContain('read from stdin only');
             // A send for later: what status and state each say, and what an older Reply does with the flags.
             expect(flat, text).toContain('status "sent" means Reply took the send; state, when Reply gives it, says whether it has gone '
-                + 'out: queued or sending is not yet, then sent, failed or cancelled');
+                + 'out: queued, waitingForSchedule or sending is not yet, then sent, failed or cancelled');
             expect(flat, text).toContain('direct-send get <reference> reads it later, and direct-send cancel <reference> stops one not yet sent');
             expect(flat.includes('A LinkedIn send timed by --schedule-id may answer state waitingForSchedule'), text).toBe(name !== 'send-email');
             expect(flat.includes('estimated_send_at'), text).toBe(name !== 'send-email');

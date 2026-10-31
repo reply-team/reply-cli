@@ -325,7 +325,7 @@ Every direct send also takes `--send-after <moment>`, `--schedule-id <id>` and `
 (`usage.date`). `--schedule-id` names the sending schedule Reply times the send by (see `reply
 schedule list`). The answer then adds Reply's `reference`, `send_after` and `state`, each only when
 Reply gives it. `status: "sent"` means Reply took the send, and `state`, when present, says whether
-it has gone out: `queued` or `sending` is not yet, then `sent`, `failed` or `cancelled`. `reply
+it has gone out: `queued`, `waitingForSchedule` or `sending` is not yet, then `sent`, `failed` or `cancelled`. `reply
 direct-send get <reference>` reads the send later, and `reply direct-send cancel <reference>` stops
 one that has not gone out. The reference is Reply's, `email-<n>`, `linkedin-<n>` or
 `linkedin-scheduled-<n>` (a LinkedIn send held for later keeps that one for its whole life), the form
@@ -363,7 +363,8 @@ Both answer the send under the CLI's names, each null when Reply gives none: `re
 `cancelled_at`. `failure_code`, `missing_variables`, `rendered_subject` and `rendered_body` are
 added only when Reply gives them, and so is `estimated_send_at`, read the same way as on the send.
 `failure_reason` is a sentence for a person and never parsed;
-`failure_code` is Reply's code for the failure, the one to branch on. `direct-send cancel` of a send already cancelled answers it
+`failure_code` is Reply's code for the failure, the one to branch on. A failed send may carry no
+`failure_code`: it is then null, and `failure_reason` is all Reply says of it. `direct-send cancel` of a send already cancelled answers it
 again. A send already gone out or failed is `direct_send.already_sent` or
 `direct_send.already_failed`, and a reference Reply has no send for is `direct_send.not_found`.
 
