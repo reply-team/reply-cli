@@ -350,10 +350,12 @@ const SCHEDULED = 'A send timed by --schedule-id may answer state waitingForSche
 // The codes of a send Reply cannot time, the same on every route.
 const SCHEDULE_CODES = ['schedule.not_found', 'schedule.no_slot', 'contact.time_zone_missing'];
 
-// The retry window only a LinkedIn send takes.
+// The retry window only a LinkedIn send takes, and what a Reply before the LinkedIn scheduler does with the schedule.
 const LINKEDIN_SCHEDULED = '--retry-window-minutes <n> is how long Reply keeps trying to send it once it is due, 1 to 4320\n'
     + 'minutes (Reply\'s default is 90); one outside that is refused before any call (usage.range). Reply takes it only with\n'
-    + '--schedule-id or --send-after, and answers it otherwise with errors[] (reply.invalid_request).\n';
+    + '--schedule-id or --send-after, and answers it otherwise with errors[] (reply.invalid_request). A Reply that knows\n'
+    + 'direct sends but not yet the LinkedIn scheduler answers --schedule-id or --use-contact-time-zone on a LinkedIn send\n'
+    + 'with errors[] naming the field (reply.invalid_request), and one that knows neither sends at once, as without them.\n';
 
 time_zone_options(later_options(add_contact_options(contact_command.command('send-email'), true)
     .option('--email-account-id <id>', 'The mailbox to send from (see `account list`)')

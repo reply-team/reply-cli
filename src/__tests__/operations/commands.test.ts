@@ -313,7 +313,8 @@ describe('operations/commands', ()=>{
             expect(flat, text).toContain('status "sent" means Reply took the send; state, when Reply gives it, says whether it has gone '
                 + 'out: queued, waitingForSchedule or sending is not yet, then sent, failed or cancelled');
             expect(flat, text).toContain('direct-send get <reference> reads it later, and direct-send cancel <reference> stops one not yet sent');
-            // Every send takes a schedule and its time zone; only the LinkedIn sends take a retry window and map the refusals.
+            // Every send takes a schedule and its time zone, and maps the refusals of a send Reply cannot time; only the LinkedIn
+            // sends take a retry window.
             const linkedin = name !== 'send-email';
             expect(flat, text).toContain('A send timed by --schedule-id may answer state waitingForSchedule');
             expect(flat, text).toContain('send_after is then left out, and estimated_send_at is when Reply expects to send it.');
@@ -327,8 +328,11 @@ describe('operations/commands', ()=>{
             expect(flat.includes('--retry-window-minutes <n> is how long Reply keeps trying to send it once it is due, 1 to 4320 '
                 + 'minutes (Reply\'s default is 90); one outside that is refused before any call (usage.range)'), text).toBe(linkedin);
             expect(flat.includes('Reply takes it only with --schedule-id or --send-after'), text).toBe(linkedin);
-            // A Reply without the scheduler ignores both on a LinkedIn send and sends at once; no refusal stands for it.
-            expect(flat, text).not.toContain('before its scheduler');
+            // A Reply with direct sends but not yet the LinkedIn scheduler refuses the schedule's fields on a LinkedIn send, naming
+            // the field; one with neither ignores them and sends at once. Only the LinkedIn sends say so.
+            expect(flat.includes('A Reply that knows direct sends but not yet the LinkedIn scheduler answers --schedule-id or '
+                + '--use-contact-time-zone on a LinkedIn send with errors[] naming the field (reply.invalid_request), and one that knows '
+                + 'neither sends at once, as without them.'), text).toBe(linkedin);
             // A send Reply cannot time is refused under the same three codes on every route.
             expect(flat, text).toContain('schedule.not_found is a --schedule-id naming no schedule this account can read, schedule.no_slot a '
                 + 'schedule with no active day that has a time range, so it never opens, and contact.time_zone_missing a contact without the time zone '
