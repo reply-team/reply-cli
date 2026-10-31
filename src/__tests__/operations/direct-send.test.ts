@@ -74,6 +74,13 @@ describe('contact send-email', ()=>{
             [json({title: 'Validation failed', errors: [{pointer: '/subject', detail: '\'subject\' must not be empty.'}]}, 400),
                 'reply.invalid_request', undefined],
             [json({code: 'contact.somethingElse'}, 400), 'reply.refused', 'contact.somethingElse'],
+            // An email Reply cannot time maps to the codes a LinkedIn send's refusals of the same meaning map to, each
+            // read only under the status Reply publishes it with.
+            [json({code: 'contact.scheduleNotFound'}, 404), 'schedule.not_found', 'contact.scheduleNotFound'],
+            [json({code: 'contact.scheduleHasNoSlot'}, 409), 'schedule.no_slot', 'contact.scheduleHasNoSlot'],
+            [json({code: 'contact.contactTimeZoneMissing'}, 409), 'contact.time_zone_missing', 'contact.contactTimeZoneMissing'],
+            [json({code: 'contact.scheduleNotFound'}, 400), 'reply.refused', 'contact.scheduleNotFound'],
+            [json({code: 'contact.contactTimeZoneMissing'}, 404), 'reply.refused', 'contact.contactTimeZoneMissing'],
         ];
         for (const [res, code, reply_code] of cases)
         {
@@ -156,6 +163,11 @@ describe('the LinkedIn sends', ()=>{
             [['linkedin-inmail', {subject: SUBJECT, body: TEXT}], 400, 'directLinkedIn.noInMailCredits', 'linkedin.no_inmail_credits'],
             [['linkedin-voice', {script: SCRIPT}], 400, 'directLinkedIn.voiceProfileMissing', 'linkedin.voice_profile_missing'],
             [['linkedin-voice', {script: SCRIPT}], 400, 'directLinkedIn.voiceTooLong', 'linkedin.voice_too_long'],
+            [message, 404, 'directLinkedIn.scheduleNotFound', 'schedule.not_found'],
+            [['linkedin-connect', {note: NOTE}], 409, 'directLinkedIn.scheduleHasNoSlot', 'schedule.no_slot'],
+            [['linkedin-voice', {script: SCRIPT}], 409, 'directLinkedIn.contactTimeZoneMissing', 'contact.time_zone_missing'],
+            [message, 400, 'directLinkedIn.scheduleNotFound', 'reply.refused'],
+            [message, 404, 'directLinkedIn.contactTimeZoneMissing', 'reply.refused'],
             // Reply's code is read only under the status it publishes it with.
             [message, 400, 'directLinkedIn.notConnected', 'reply.refused'],
             [message, 403, 'directLinkedIn.somethingElse', 'access.denied'],
@@ -171,6 +183,10 @@ describe('the LinkedIn sends', ()=>{
             expect(shown(e), shown(e)).not.toContain('Marta');
             expect(mock_fetch, `${name} ${reply_code}`).toHaveBeenCalledTimes(1);
         }
+        mock_fetch.mockReset();
+        answer(json({status: 409, code: 'directLinkedIn.scheduleHasNoSlot'}, 409));
+        expect((await failure('linkedin-message', {body: TEXT}, LINKEDIN_OPTS) as {title?: string}).title)
+            .toBe('The sending schedule has no active day with a time range, so it never opens; nothing was sent.');
     });
 
     it('reads contact-not-found, the limits and already-connected only under the status Reply publishes each with', async()=>{
@@ -674,6 +690,25 @@ describe('a send for later', ()=>{
         });
     });
 
+    it('adds estimated_send_at to a send waiting for its schedule\'s opening, a null kept as null, only when Reply gives it', async()=>{
+        const waiting = {reference: 'linkedin-scheduled-77', state: 'waitingForSchedule', sendAfter: null, linkedInActivityId: null, sentAtUtc: null};
+        const cases: [unknown, Record<string, unknown>][] = [
+            ['2026-11-04T09:00:00Z', {estimated_send_at: '2026-11-04T09:00:00Z'}],
+            [null, {estimated_send_at: null}],
+            [undefined, {}],
+            [7, {}],
+        ];
+        for (const [estimatedSendAt, added] of cases)
+        {
+            mock_fetch.mockReset();
+            answer(json({...waiting, estimatedSendAt}));
+            expect(await run('linkedin-message', {body: TEXT}, {...LINKEDIN_OPTS, scheduleId: '41'}), JSON.stringify(estimatedSendAt)).toStrictEqual({
+                status: 'sent', contact_id: 456, contact_created: false, activity_id: null, sent_at: null,
+                reference: 'linkedin-scheduled-77', state: 'waitingForSchedule', ...added,
+            });
+        }
+    });
+
     it('adds the rendered subject and body of an email sent inside the request, each only when Reply gives it', async()=>{
         answer(accepted('send-email', {renderedSubject: 'Quick question, Marta', renderedBody: '<p>Hi Marta</p>', state: 'sent'}));
         expect(await run('send-email', {subject: SUBJECT, body: BODY}, EMAIL_OPTS)).toStrictEqual({
@@ -711,6 +746,67 @@ describe('a send for later', ()=>{
             }
         }
         expect(mock_fetch).not.toHaveBeenCalled();
+    });
+
+    it('a LinkedIn send carries useContactTimeZone, true or false, and retryWindowMinutes only when given, as Reply takes them', async()=>{
+        const cases: [Partial<Direct_send_opts>, Record<string, unknown>][] = [
+            [{useContactTimeZone: true}, {useContactTimeZone: true}],
+            [{useContactTimeZone: false}, {useContactTimeZone: false}],
+            [{retryWindowMinutes: '1'}, {retryWindowMinutes: 1}],
+            [{retryWindowMinutes: ' 4320 '}, {retryWindowMinutes: 4320}],
+            [{useContactTimeZone: true, retryWindowMinutes: '90'}, {useContactTimeZone: true, retryWindowMinutes: 90}],
+            [{}, {}],
+        ];
+        for (const [name, message, opts] of SENDS.filter(([n])=>n !== 'send-email'))
+        {
+            for (const [extra, carried] of cases)
+            {
+                mock_fetch.mockReset();
+                answer(accepted(name, {}));
+                await run(name, message, {...opts, ...LATER, ...extra});
+                const body = sent()[0].body as Record<string, unknown>;
+                const label = `${name} ${JSON.stringify(extra)}`;
+                expect(body.scheduleId, label).toBe(41);
+                expect(Object.fromEntries(Object.entries(body).filter(([k])=>k === 'useContactTimeZone' || k === 'retryWindowMinutes')), label)
+                    .toStrictEqual(carried);
+            }
+        }
+    });
+
+    it('refuses a retry window outside 1 to 4320 minutes before any call, and leaves the rules between the fields to Reply', async()=>{
+        for (const [name, message, opts] of SENDS.filter(([n])=>n !== 'send-email'))
+        {
+            for (const raw of ['0', '4321', '-5', '1.5', 'ninety', '', '90m'])
+            {
+                const e = await failure(name, message, {...opts, retryWindowMinutes: raw});
+                expect(e, `${name} ${JSON.stringify(raw)}`).toMatchObject({code: 'usage.range', exit_code: 2});
+            }
+        }
+        expect(mock_fetch).not.toHaveBeenCalled();
+        // Without --schedule-id or --send-after either goes to Reply as given, for Reply to refuse with errors[].
+        answer(json({errors: [{pointer: '/useContactTimeZone', detail: 'Only with scheduleId.'}]}, 400));
+        const e = await failure('linkedin-message', {body: TEXT}, {...LINKEDIN_OPTS, useContactTimeZone: true, retryWindowMinutes: '30'});
+        expect(sent()[0].body).toMatchObject({useContactTimeZone: true, retryWindowMinutes: 30});
+        expect(e).toMatchObject({code: 'reply.invalid_request', exit_code: 1, details: {fields: ['useContactTimeZone']}});
+    });
+
+    it('a direct email carries useContactTimeZone, true or false, only when given, and never a retry window', async()=>{
+        const cases: [Partial<Direct_send_opts>, Record<string, unknown>][] = [
+            [{useContactTimeZone: true}, {useContactTimeZone: true}],
+            [{useContactTimeZone: false, retryWindowMinutes: '30'}, {useContactTimeZone: false}],
+            [{retryWindowMinutes: '30'}, {}],
+            [{}, {}],
+        ];
+        for (const [extra, carried] of cases)
+        {
+            mock_fetch.mockReset();
+            answer(accepted('send-email', {}));
+            await run('send-email', {subject: SUBJECT, body: BODY}, {...EMAIL_OPTS, ...LATER, ...extra});
+            const body = sent()[0].body as Record<string, unknown>;
+            expect(body.scheduleId, JSON.stringify(extra)).toBe(41);
+            expect(Object.fromEntries(Object.entries(body).filter(([k])=>k === 'useContactTimeZone' || k === 'retryWindowMinutes')),
+                JSON.stringify(extra)).toStrictEqual(carried);
+        }
     });
 
     it('a key does not make a lost answer safe to repeat: a Reply that ignores the header would send it twice', async()=>{

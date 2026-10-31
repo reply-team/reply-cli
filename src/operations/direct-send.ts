@@ -2,7 +2,7 @@ import {PROGRAM_NAME} from '../config';
 import {Operation_error, Unknown_outcome_error, UsageError, type Ids} from '../utils/errors';
 import {parse_retry_after} from '../utils/client';
 import {call_reply, expect_object, refusal, is_object, reply_code_of, detail_of, open_session, type Answer} from './call';
-import {parse_id, parse_moment, parse_idempotency_key, LARGEST_SAFE_ID, type Op_globals} from './options';
+import {parse_id, parse_int_in, parse_moment, parse_idempotency_key, LARGEST_SAFE_ID, type Op_globals} from './options';
 import {read_contact_input, type Contact_flags, type Contact_ref} from './contact-input';
 import {contact_not_found, find_contact_by_address, import_contact, type Channel, type Ensured} from './contacts';
 import {read_stdin_object, stdin_inputs} from './stdin-input';
@@ -13,6 +13,7 @@ type Direct_send_name = 'send-email' | 'linkedin-connect' | 'linkedin-message' |
 type Direct_send_opts = Contact_flags & {
     emailAccountId?: string; linkedinAccountId?: string; message?: string;
     sendAfter?: string; scheduleId?: string; idempotencyKey?: string; trackLinks?: boolean; trackOpens?: boolean;
+    useContactTimeZone?: boolean; retryWindowMinutes?: string;
 };
 type Text = Record<string, string>;
 
@@ -93,8 +94,9 @@ const read_text = (name: Direct_send_name, send: Direct_send, source: string | u
 
 // A refusal Reply publishes, under the status it comes with; details reads what the problem body
 // carries beside its code, for the error output's details.
+// waits passes on the Retry-After Reply sends with a refusal worth repeating.
 type Refusal = {
-    status: number; code: string; title: string; hint?: string;
+    status: number; code: string; title: string; hint?: string; waits?: boolean;
     details?: (body: Record<string, unknown>) => Record<string, unknown> | undefined;
 };
 
@@ -122,6 +124,17 @@ const TEMPLATE_REFUSALS: Record<Channel, Record<string, Refusal>> = {
         },
     },
     linkedin: {},
+};
+
+// The refusals of a send Reply cannot time, whichever route it went to.
+const SCHEDULE_NOT_FOUND: Refusal = {
+    status: 404, code: 'schedule.not_found', title: 'Reply has no sending schedule by that id that this account can use, so nothing was sent.',
+};
+const SCHEDULE_NO_SLOT: Refusal = {
+    status: 409, code: 'schedule.no_slot', title: 'The sending schedule has no active day with a time range, so it never opens; nothing was sent.',
+};
+const TIME_ZONE_MISSING: Refusal = {
+    status: 409, code: 'contact.time_zone_missing', title: 'Reply holds no time zone for the contact to read the schedule in, so nothing was sent.',
 };
 
 // Reply's refusals of a direct send, by status and code. Each one is definite: nothing was sent.
@@ -174,6 +187,14 @@ const REFUSALS: Record<string, Refusal> = {
     'directLinkedIn.voiceTooLong': {
         status: 400, code: 'linkedin.voice_too_long', title: 'The voice message would be longer than Reply allows, so nothing was sent.',
     },
+    // A send timed by a schedule: refused when it is taken, before anything is held. The email route and
+    // the LinkedIn routes each name it in their own family, and both map to the code of its meaning.
+    'directLinkedIn.scheduleNotFound': SCHEDULE_NOT_FOUND,
+    'directLinkedIn.scheduleHasNoSlot': SCHEDULE_NO_SLOT,
+    'directLinkedIn.contactTimeZoneMissing': TIME_ZONE_MISSING,
+    'contact.scheduleNotFound': SCHEDULE_NOT_FOUND,
+    'contact.scheduleHasNoSlot': SCHEDULE_NO_SLOT,
+    'contact.contactTimeZoneMissing': TIME_ZONE_MISSING,
 };
 
 const LIMITS: Record<string, string> = {'directLinkedIn.dailyLimitReached': 'daily', 'directLinkedIn.weeklyLimitReached': 'weekly'};
@@ -210,6 +231,19 @@ const DIRECT_SEND_REFUSALS: Record<string, Refusal> = {
     'directSend.alreadyFailed': {
         status: 409, code: 'direct_send.already_failed', title: 'The direct send has already failed, so it was not cancelled.',
     },
+    'directSend.alreadySending': {
+        status: 409, code: 'direct_send.already_sending', title: 'The direct send is already going out, so it was not cancelled.',
+    },
+};
+// A cancel Reply could not confirm: Reply says the send is still queued or waiting for its schedule and asks for the
+// cancel again, so it is a refusal of its own rather than an outcome left unknown. Only a cancel answers it; a read
+// answering this code maps as any other 5xx.
+const CANCEL_REFUSALS: Record<string, Refusal> = {
+    'directSend.cancelNotConfirmed': {
+        status: 503, code: 'direct_send.cancel_not_confirmed', title: 'Reply could not confirm the cancel; the send is still waiting to go out.',
+        hint: 'Reply says the send is still queued or waiting for its schedule: run the cancel again, as Reply asks; running it again is safe.',
+        waits: true,
+    },
 };
 
 // The refusal a table holds for this answer, under the status Reply publishes it with, or undefined.
@@ -219,6 +253,7 @@ const known_refusal = (a: Answer, table: Record<string, Refusal>): Operation_err
     return known !== undefined && known.status === a.status
         ? new Operation_error(known.code, known.title, {
             status: a.status, reply_code, detail: detail_of(a), hint: known.hint, details: known.details?.(a.data as Record<string, unknown>),
+            retry_after: known.waits === true ? parse_retry_after(a.headers['retry-after']) ?? undefined : undefined,
         })
         : undefined;
 };
@@ -280,7 +315,12 @@ const positive_integer = (v: unknown): number | null=>
 const HELD_KEYS: [string, string][] = [['reference', 'reference'], ['sendAfter', 'send_after'], ['state', 'state']];
 const LATER_KEYS: [string, string][] = [...HELD_KEYS, ['renderedSubject', 'rendered_subject'], ['renderedBody', 'rendered_body']];
 
-const later_of = (sent: Record<string, unknown>): Record<string, unknown>=>picked(LATER_KEYS, sent);
+// When Reply expects a send waiting for its schedule's next opening to go out, as text, or null when no opening falls
+// within 30 days of the moment the send waits from; left out when Reply gives neither, as a Reply before its scheduler does.
+const estimated_of = (from: Record<string, unknown>): Record<string, unknown>=>
+    typeof from.estimatedSendAt === 'string' || from.estimatedSendAt === null ? {estimated_send_at: from.estimatedSendAt} : {};
+
+const later_of = (sent: Record<string, unknown>): Record<string, unknown>=>({...picked(LATER_KEYS, sent), ...estimated_of(sent)});
 
 // What the CLI answers for a send Reply took: the contact it went to, as the add commands name it, so
 // a caller can keep its id. Neither adds a time of its own: Reply's answer to a direct email carries
@@ -353,6 +393,16 @@ const handle_direct_send = async(
     if (opts.scheduleId !== undefined)
     {
         later.scheduleId = parse_id(opts.scheduleId, '--schedule-id');
+    }
+    // Every send route takes the time zone, and only Reply's LinkedIn routes take the retry window. Which other flag each
+    // needs is Reply's rule, refused there with errors[].
+    if (opts.useContactTimeZone !== undefined)
+    {
+        later.useContactTimeZone = opts.useContactTimeZone;
+    }
+    if (by === 'linkedin' && opts.retryWindowMinutes !== undefined)
+    {
+        later.retryWindowMinutes = parse_int_in(opts.retryWindowMinutes, '--retry-window-minutes', 1, 4320, 0);
     }
     // Reply tracks neither unless asked, so each is sent only to turn it on.
     if (opts.trackLinks === true)
@@ -429,5 +479,5 @@ const handle_direct_send = async(
     }
 };
 
-export {handle_direct_send, known_refusal, strings_of, DIRECT_SEND_REFUSALS};
+export {handle_direct_send, known_refusal, strings_of, estimated_of, DIRECT_SEND_REFUSALS, CANCEL_REFUSALS};
 export type {Direct_send_name, Direct_send_opts};

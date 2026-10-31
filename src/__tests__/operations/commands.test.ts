@@ -33,7 +33,8 @@ describe('operations/commands', ()=>{
     it('direct-send get and cancel each take one reference and no flag, and list the refusals Reply gives each', ()=>{
         const expected: [string, string[], boolean][] = [
             ['get', ['direct_send.not_found', 'direct_send.not_owned'], false],
-            ['cancel', ['direct_send.not_found', 'direct_send.not_owned', 'direct_send.already_sent', 'direct_send.already_failed'], true],
+            ['cancel', ['direct_send.not_found', 'direct_send.not_owned', 'direct_send.already_sent', 'direct_send.already_failed',
+                'direct_send.already_sending', 'direct_send.cancel_not_confirmed'], true],
         ];
         for (const [name, codes, write] of expected)
         {
@@ -45,18 +46,34 @@ describe('operations/commands', ()=>{
             expect(text, name).toContain(codes.map(code=>`  ${code}\n`).join(''));
             expect(text.includes('outcome.unknown'), name).toBe(write);
             expect(flat, name).toContain('The reference is Reply\'s, from the answer of a send made with --send-after');
-            expect(flat, name).toContain('state is Reply\'s own word: queued or sending is not yet sent, then sent, failed or cancelled');
+            expect(flat, name).toContain('state is Reply\'s own word: queued, waitingForSchedule or sending is not yet sent, then sent, failed or cancelled');
+            expect(flat, name).toContain('A failed send may carry no failure_code: it is then null');
             expect(flat, name).toContain('A Reply without this route answers reply.refused with status 404 and no reply_code');
-            expect(flat, name).toContain('email-<n> or linkedin-<n>, the form Reply\'s route takes');
+            expect(flat, name).toContain('email-<n>, linkedin-<n> or linkedin-scheduled-<n>, the form Reply\'s route takes');
             expect(flat, name).toContain('any other form is refused before any call (usage.reference, exit 2), and nothing else is read from it');
             expect(flat, name).toContain('a reference of any other form never leaves the CLI, so that 404 means this Reply has no such route');
+            expect(flat, name).toContain('direct_send.not_found is a reference that Reply has no send for, a send of another team '
+                + 'included. direct_send.not_owned is an email send made by a teammate this user may not act for');
             expect(flat, name).not.toContain('step up');
-            expect(c.registeredArguments[0].description, name).toContain('email-<n> or linkedin-<n>');
+            expect(c.registeredArguments[0].description, name).toContain('email-<n>, linkedin-<n> or linkedin-scheduled-<n>');
             expect(flat, name).toContain('failure_code, missing_variables, rendered_subject and rendered_body are added only when Reply gives them');
             expect(flat, name).toContain('failure_reason is a sentence for a person, never parsed; failure_code is Reply\'s code for the failure');
+            expect(flat, name).toContain('estimated_send_at is added only when Reply gives it, and is when Reply expects a send waiting '
+                + 'for its schedule\'s next opening to go out');
+            expect(flat, name).toContain('Reply sets estimated_send_at in waitingForSchedule only and gives it null in every other state; '
+                + 'it is null in waitingForSchedule too when the schedule does not open within 30 days of the moment the send waits '
+                + 'from: its --send-after, or now once that has passed');
+            expect(flat, name).not.toContain('that null says nothing');
         }
-        expect(help_of(sub(direct_send_command, 'cancel')).replace(/\s+/g, ' '))
-            .toContain('Cancelling a send already cancelled answers it again, so running it again is safe');
+        const cancel = help_of(sub(direct_send_command, 'cancel')).replace(/\s+/g, ' ');
+        expect(cancel).toContain('Cancelling a send already cancelled answers it again, so running it again is safe');
+        expect(cancel).toContain('direct_send.already_sent, direct_send.already_failed and direct_send.already_sending mean the send '
+            + 'was past cancelling; nothing changed');
+        expect(cancel).toContain('direct_send.already_sending is a LinkedIn send made for later that Reply is handing to the '
+            + 'account\'s queue or that waits or runs there, even while direct-send get still reads it queued');
+        expect(cancel).toContain('direct_send.cancel_not_confirmed is a 503 from Reply that could not confirm the cancel: the send '
+            + 'is still queued or waiting for its schedule, so run the cancel again, as Reply asks; retry_after carries Reply\'s Retry-After when it sends one. Any other 5xx '
+            + 'is outcome.unknown (exit 3)');
     });
 
     it('schedule list takes no flag and no id, and says how a time zone, a weekday, a time and a state are written', ()=>{
@@ -244,11 +261,12 @@ describe('operations/commands', ()=>{
     // says sent_at is.
     const IMPORT = ['contact.not_unique', 'contact.invalid_email', 'contact.invalid_linkedin_url', 'account.contact_limit_reached'];
     const LINKEDIN = ['contact.not_found', ...IMPORT, 'contact.already_held', 'contact.no_linkedin_profile', 'linkedin.account_not_found',
-        'linkedin.feature_disabled', 'linkedin.account_inactive', 'linkedin.invalid_cookie'];
+        'linkedin.feature_disabled', 'linkedin.account_inactive', 'linkedin.invalid_cookie', 'schedule.not_found', 'schedule.no_slot',
+        'contact.time_zone_missing'];
     const SENT_AT_AS_GIVEN = 'sentAtUtc as Reply gives them, each null when it gives none; the CLI adds no time of its own';
     const DIRECT_SENDS: [string, string, string[], string][] = [
         ['send-email', '--email-account-id', ['contact.not_found', ...IMPORT, 'contact.already_held', 'email_account.not_found', 'contact.blacklisted',
-            'contact.missing_variables', 'contact.rendering_failed'],
+            'contact.missing_variables', 'contact.rendering_failed', 'schedule.not_found', 'schedule.no_slot', 'contact.time_zone_missing'],
             'sent_at is always null; the CLI adds none of its own'],
         ['linkedin-connect', '--linkedin-account-id', [...LINKEDIN, 'linkedin.not_connected', 'linkedin.limit_reached',
             'linkedin.message_too_long', 'linkedin.missing_variables'], SENT_AT_AS_GIVEN],
@@ -274,7 +292,8 @@ describe('operations/commands', ()=>{
         {
             const c = sub(contact_command, name);
             expect(flags(c), name).toEqual([...CONTACT_FLAGS, account_flag, '--message',
-                ...(name === 'send-email' ? ['--track-links', '--track-opens'] : []), '--send-after', '--schedule-id', '--idempotency-key']);
+                ...(name === 'send-email' ? ['--track-links', '--track-opens'] : []), '--send-after', '--schedule-id', '--idempotency-key',
+                '--use-contact-time-zone', '--no-use-contact-time-zone', ...(name === 'send-email' ? [] : ['--retry-window-minutes'])]);
             const text = help_of(c);
             const flat = text.replace(/\s+/g, ' ');
             expect(text, text).toContain('--message -');
@@ -292,8 +311,29 @@ describe('operations/commands', ()=>{
             expect(flat, text).toContain('read from stdin only');
             // A send for later: what status and state each say, and what an older Reply does with the flags.
             expect(flat, text).toContain('status "sent" means Reply took the send; state, when Reply gives it, says whether it has gone '
-                + 'out: queued or sending is not yet, then sent, failed or cancelled');
+                + 'out: queued, waitingForSchedule or sending is not yet, then sent, failed or cancelled');
             expect(flat, text).toContain('direct-send get <reference> reads it later, and direct-send cancel <reference> stops one not yet sent');
+            // Every send takes a schedule and its time zone; only the LinkedIn sends take a retry window and map the refusals.
+            const linkedin = name !== 'send-email';
+            expect(flat, text).toContain('A send timed by --schedule-id may answer state waitingForSchedule');
+            expect(flat, text).toContain('send_after is then left out, and estimated_send_at is when Reply expects to send it.');
+            expect(flat, text).toContain('Reply sets estimated_send_at in waitingForSchedule only and gives it null in every other state; '
+                + 'it is null in waitingForSchedule too when the schedule does not open within 30 days of the moment the send waits '
+                + 'from: its --send-after, or when Reply took it');
+            expect(flat, text).not.toContain('that null says nothing');
+            expect(flat, text).toContain('--use-contact-time-zone sends useContactTimeZone true: the schedule\'s windows are read in the '
+                + 'contact\'s time zone; --no-use-contact-time-zone sends false, the schedule\'s own zone; with neither, the schedule\'s '
+                + 'own setting holds. Reply takes it only with --schedule-id, and answers it otherwise with errors[] (reply.invalid_request)');
+            expect(flat.includes('--retry-window-minutes <n> is how long Reply keeps trying to send it once it is due, 1 to 4320 '
+                + 'minutes (Reply\'s default is 90); one outside that is refused before any call (usage.range)'), text).toBe(linkedin);
+            expect(flat.includes('Reply takes it only with --schedule-id or --send-after'), text).toBe(linkedin);
+            // A Reply without the scheduler ignores both on a LinkedIn send and sends at once; no refusal stands for it.
+            expect(flat, text).not.toContain('before its scheduler');
+            // A send Reply cannot time is refused under the same three codes on every route.
+            expect(flat, text).toContain('schedule.not_found is a --schedule-id naming no schedule this account can read, schedule.no_slot a '
+                + 'schedule with no active day that has a time range, so it never opens, and contact.time_zone_missing a contact without the time zone '
+                + '--use-contact-time-zone reads it in; none sends anything');
+            expect(flat, text).not.toContain('as reply_code');
             expect(flat, text).toContain('An answer without state comes from a Reply that does not know --send-after and --schedule-id');
             expect(flat, text).toContain('--idempotency-key goes as the Idempotency-Key header');
             expect(flat, text).toContain('A Reply that knows the header answers a repeat with the same key with the send the key first made; while that one is still '

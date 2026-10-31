@@ -298,22 +298,22 @@ const later_options = (c: Command): Command=>c
     .option('--idempotency-key <key>', 'Your own key for this send, sent as the Idempotency-Key header');
 
 const LATER = 'With --send-after Reply holds the send until that moment, given with its offset and sent to Reply in UTC; a moment\n'
-    + 'without an offset is refused (usage.date). --schedule-id names the sending schedule Reply times the send by. The answer\n'
-    + 'then adds Reply\'s reference, send_after and state, each only when Reply gives it: status "sent" means Reply took the\n'
-    + 'send; state, when Reply gives it, says whether it has gone out: queued or sending is not yet, then sent, failed or\n'
-    + 'cancelled. direct-send get <reference> reads it later, and direct-send cancel <reference> stops one not yet sent. An\n'
-    + 'answer without state comes from a Reply that does not know --send-after and --schedule-id: it sent at once, as\n'
-    + 'without them. --idempotency-key goes as the Idempotency-Key header, never in the body. A Reply that knows the header\n'
-    + 'answers a repeat with the same key with the send the key first made; while that one is still being made the answer\n'
-    + 'is idempotency_key.in_use, and the same key on a different send is idempotency_key.reused. Neither sends anything.\n'
-    + 'A repeat of a send given a person\'s fields answers contact.already_held first, since the first one created the\n'
-    + 'contact: that is safe too, as nothing is sent twice. idempotency_key.reused names the send the key was first taken\n'
-    + 'for in details: reference, state and send_after, each only when Reply gives it. Any other refusal of a send Reply\n'
-    + 'already holds names that send the same way, beside the refusal\'s own details; its code is the refusal\'s own.\n'
-    + 'A 400 to the send with neither a code nor errors[] is Reply failing while it made the send: like a 5xx or a lost\n'
-    + 'answer, it is outcome.unknown (exit 3). So is a 400 directLinkedIn.unknown to a LinkedIn send, Reply\'s answer when\n'
-    + 'it failed while making the send or could not map the provider\'s answer; Reply\'s code is kept in reply_code. A 400\n'
-    + 'with errors[] is reply.invalid_request, and nothing was sent.\n';
+    + 'without an offset is refused (usage.date). --schedule-id names the sending schedule Reply times the send by. The\n'
+    + 'answer then adds Reply\'s reference, send_after and state, each only when Reply gives it: status "sent" means Reply\n'
+    + 'took the send; state, when Reply gives it, says whether it has gone out: queued, waitingForSchedule or sending is not\n'
+    + 'yet, then sent, failed or cancelled. direct-send get <reference> reads it later, and direct-send cancel <reference>\n'
+    + 'stops one not yet sent. An answer without state comes from a Reply that does not know --send-after and --schedule-id:\n'
+    + 'it sent at once, as without them. --idempotency-key goes as the Idempotency-Key header, never in the body. A Reply\n'
+    + 'that knows the header answers a repeat with the same key with the send the key first made; while that one is still\n'
+    + 'being made the answer is idempotency_key.in_use, and the same key on a different send is idempotency_key.reused.\n'
+    + 'Neither sends anything. A repeat of a send given a person\'s fields answers contact.already_held first, since the first\n'
+    + 'one created the contact: that is safe too, as nothing is sent twice. idempotency_key.reused names the send the key was\n'
+    + 'first taken for in details: reference, state and send_after, each only when Reply gives it. Any other refusal of a\n'
+    + 'send Reply already holds names that send the same way, beside the refusal\'s own details; its code is the refusal\'s\n'
+    + 'own. A 400 to the send with neither a code nor errors[] is Reply failing while it made the send: like a 5xx or a lost\n'
+    + 'answer, it is outcome.unknown (exit 3). So is a 400 directLinkedIn.unknown to a LinkedIn send, Reply\'s answer when it\n'
+    + 'failed while making the send or could not map the provider\'s answer; Reply\'s code is kept in reply_code. A 400 with\n'
+    + 'errors[] is reply.invalid_request, and nothing was sent.\n';
 
 // The refusals of a send's key, the same on every direct send, after each send's own.
 const KEY_CODES = ['idempotency_key.in_use', 'idempotency_key.reused'];
@@ -324,17 +324,48 @@ const piped_send = (command: string, contact: string, message: string, flags: st
 const ANN_EMAIL = '{"email":"ann@example.com","first_name":"Ann"}';
 const ANN_PROFILE = '{"linkedin_url":"https://www.linkedin.com/in/ann-example","first_name":"Ann"}';
 
-later_options(add_contact_options(contact_command.command('send-email'), true)
+// The time zone a send timed by a schedule is read in, which every send takes. Without either flag nothing is sent, so
+// the schedule's own setting holds.
+const time_zone_options = (c: Command): Command=>c
+    .option('--use-contact-time-zone', 'Read the schedule\'s windows in the contact\'s time zone (with --schedule-id)')
+    .option('--no-use-contact-time-zone', 'Read the schedule\'s windows in the schedule\'s own time zone (with --schedule-id)');
+
+// The flags Reply's LinkedIn sends take for a send made later: the time zone, and the retry window only they take.
+const scheduler_options = (c: Command): Command=>time_zone_options(c)
+    .option('--retry-window-minutes <n>', 'How long Reply keeps trying once the send is due, 1 to 4320 (Reply\'s default: 90)');
+
+// What a send timed by a schedule answers while it waits for the schedule's next opening, the time zone it is read in, and
+// the refusals of one Reply cannot time.
+const SCHEDULED = 'A send timed by --schedule-id may answer state waitingForSchedule, held for the schedule\'s next opening: send_after is\n'
+    + 'then left out, and estimated_send_at is when Reply expects to send it. Reply sets estimated_send_at in\n'
+    + 'waitingForSchedule only and gives it null in every other state; it is null in waitingForSchedule too when the schedule\n'
+    + 'does not open within 30 days of the moment the send waits from: its --send-after, or when Reply took it. It is added\n'
+    + 'only when Reply gives it. --use-contact-time-zone sends useContactTimeZone true: the schedule\'s windows are read in\n'
+    + 'the contact\'s time zone; --no-use-contact-time-zone sends false, the schedule\'s own zone; with neither, the schedule\'s\n'
+    + 'own setting holds. Reply takes it only with --schedule-id, and answers it otherwise with errors[]\n'
+    + '(reply.invalid_request). schedule.not_found is a --schedule-id naming no schedule this account can read,\n'
+    + 'schedule.no_slot a schedule with no active day that has a time range, so it never opens, and contact.time_zone_missing\n'
+    + 'a contact without the time zone --use-contact-time-zone reads it in; none sends anything.\n';
+
+// The codes of a send Reply cannot time, the same on every route.
+const SCHEDULE_CODES = ['schedule.not_found', 'schedule.no_slot', 'contact.time_zone_missing'];
+
+// The retry window only a LinkedIn send takes.
+const LINKEDIN_SCHEDULED = '--retry-window-minutes <n> is how long Reply keeps trying to send it once it is due, 1 to 4320\n'
+    + 'minutes (Reply\'s default is 90); one outside that is refused before any call (usage.range). Reply takes it only with\n'
+    + '--schedule-id or --send-after, and answers it otherwise with errors[] (reply.invalid_request).\n';
+
+time_zone_options(later_options(add_contact_options(contact_command.command('send-email'), true)
     .option('--email-account-id <id>', 'The mailbox to send from (see `account list`)')
     .option('--message <stdin>', 'Only -: the email {subject, body} as JSON on stdin')
     .option('--track-links', 'Track the links in the email (off unless given)')
-    .option('--track-opens', 'Track the opens of the email (off unless given)'))
+    .option('--track-opens', 'Track the opens of the email (off unless given)')))
     .description('Send one email to a contact now, outside any sequence, from the mailbox you name')
     .addHelpText('after', help(
         [`echo '{"subject":"Quick question","body":"<p>Hi Ann, does Tuesday work?</p>"}' | ${P} contact send-email --contact-id 456 --email-account-id 12 --message -`,
             piped_send('send-email', ANN_EMAIL, '{"subject":"Quick question","body":"<p>Hi Ann</p>"}', '--email-account-id 12')],
         ['contact.not_found', ...IMPORT_CODES, 'contact.already_held', 'email_account.not_found', 'contact.blacklisted',
-            'contact.missing_variables', 'contact.rendering_failed', ...KEY_CODES], true,
+            'contact.missing_variables', 'contact.rendering_failed', ...SCHEDULE_CODES, ...KEY_CODES], true,
         'Result: {"status":"sent","contact_id","contact_created","message_id","sent_at","reply_status"}: sent means Reply\n'
             + 'accepted the email, and reply_status is Reply\'s own word for it (new or sent). message_id is Reply\'s messageId,\n'
             + 'null when it gives none. Reply\'s answer carries no time, so sent_at is always null; the CLI adds none of its own.\n'
@@ -345,7 +376,7 @@ later_options(add_contact_options(contact_command.command('send-email'), true)
             + 'them; a send held for later has neither. contact.missing_variables names the variables Reply could not fill in\n'
             + 'details.missing_variables when Reply lists them, and contact.rendering_failed is a template Reply could not\n'
             + 'render, its message in detail. Neither sends anything.\n'
-            + LATER + SENT_TO('email', 'email'),
+            + LATER + SCHEDULED + SENT_TO('email', 'email'),
         SEND_TWICE('email')))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
@@ -355,7 +386,7 @@ later_options(add_contact_options(contact_command.command('send-email'), true)
 // The four LinkedIn sends share their flags, their first codes and the shape of their result.
 const LINKEDIN_SEND_CODES = [
     'contact.not_found', ...IMPORT_CODES, 'contact.already_held', 'contact.no_linkedin_profile', 'linkedin.account_not_found',
-    'linkedin.feature_disabled', 'linkedin.account_inactive', 'linkedin.invalid_cookie',
+    'linkedin.feature_disabled', 'linkedin.account_inactive', 'linkedin.invalid_cookie', ...SCHEDULE_CODES,
 ];
 const LINKEDIN_SENT = '"contact_id","contact_created","activity_id","sent_at"}:\n'
     + 'activity_id and sent_at are Reply\'s linkedInActivityId and sentAtUtc as Reply gives them, each null when it gives\n'
@@ -368,11 +399,11 @@ const linkedin_send = (
     name: Exclude<Direct_send_name, 'send-email'>, description: string, message: string, examples: string[], codes: string[],
     extra: string, what: string,
 ): void=>{
-    later_options(add_contact_options(contact_command.command(name), true)
+    scheduler_options(later_options(add_contact_options(contact_command.command(name), true)
         .option('--linkedin-account-id <id>', 'The LinkedIn account to send from (see `account list`)')
-        .option('--message <stdin>', `Only -: the ${message} as JSON on stdin`))
+        .option('--message <stdin>', `Only -: the ${message} as JSON on stdin`)))
         .description(description)
-        .addHelpText('after', help(examples, [...LINKEDIN_SEND_CODES, ...codes, ...KEY_CODES], true, extra + LATER + SENT_TO('linkedin', what),
+        .addHelpText('after', help(examples, [...LINKEDIN_SEND_CODES, ...codes, ...KEY_CODES], true, extra + LATER + SCHEDULED + LINKEDIN_SCHEDULED + SENT_TO('linkedin', what),
             SEND_TWICE(what)))
         .action(run(async(cmd)=>{
             const {g, ctx} = ctx_of(cmd);
@@ -581,18 +612,24 @@ const direct_send_command = new Command('direct-send').description('Read or canc
 
 const DIRECT_SEND = 'Result: {"reference","channel","contact_id","state","send_after","sent_at","message_id","failure_reason",\n'
     + '"cancelled_at"}, Reply\'s fields under these names, each null when Reply gives none. The reference is Reply\'s, from the\n'
-    + 'answer of a send made with --send-after: email-<n> or linkedin-<n>, the form Reply\'s route takes. A reference of\n'
-    + 'any other form is refused before any call (usage.reference, exit 2), and nothing else is read from it. state is\n'
-    + 'Reply\'s own word: queued or sending is not yet sent, then sent, failed or cancelled. failure_code,\n'
-    + 'missing_variables, rendered_subject and rendered_body are added only when Reply gives them: failure_reason is a\n'
-    + 'sentence for a person, never parsed; failure_code is Reply\'s code for the failure, the one to branch on.\n'
+    + 'answer of a send made with --send-after: email-<n>, linkedin-<n> or linkedin-scheduled-<n>, the form Reply\'s route\n'
+    + 'takes. A reference of any other form is refused before any call (usage.reference, exit 2), and nothing else is read\n'
+    + 'from it. state is Reply\'s own word: queued, waitingForSchedule or sending is not yet sent, then sent, failed or\n'
+    + 'cancelled. failure_code, missing_variables, rendered_subject and rendered_body are added only when Reply gives them:\n'
+    + 'failure_reason is a sentence for a person, never parsed; failure_code is Reply\'s code for the failure, the one to\n'
+    + 'branch on. A failed send may carry no failure_code: it is then null, and failure_reason is all Reply says of it.\n'
     + 'missing_variables lists the template variables Reply could not fill, and rendered_subject and rendered_body are the\n'
-    + 'text as Reply filled it in. A Reply without this route answers reply.refused with status 404 and no reply_code; a\n'
-    + 'reference of any other form never leaves the CLI, so that 404 means this Reply has no such route.\n'
-    + 'direct_send.not_found is a reference that Reply has no send for.\n';
+    + 'text as Reply filled it in. estimated_send_at is added only when Reply gives it, and is when Reply expects a send\n'
+    + 'waiting for its schedule\'s next opening to go out. Reply sets estimated_send_at in waitingForSchedule only and gives\n'
+    + 'it null in every other state; it is null in waitingForSchedule too when the schedule does not open within 30 days of\n'
+    + 'the moment the send waits from: its --send-after, or now once that has passed. A Reply without this route answers\n'
+    + 'reply.refused with status 404 and no reply_code; a reference of any other form never leaves the CLI, so that 404 means\n'
+    + 'this Reply has no such route.\n'
+    + 'direct_send.not_found is a reference that Reply has no send for, a send of another team included.\n'
+    + 'direct_send.not_owned is an email send made by a teammate this user may not act for.\n';
 
 direct_send_command.command('get')
-    .argument('<reference>', 'The send\'s reference, email-<n> or linkedin-<n>, as a send made with --send-after answered it')
+    .argument('<reference>', 'The send\'s reference, email-<n>, linkedin-<n> or linkedin-scheduled-<n>, as a send made with --send-after answered it')
     .description('One direct send as Reply holds it: whether it has gone out, when, and why it failed')
     .addHelpText('after', help([ex('direct-send get email-1001')], ['direct_send.not_found', 'direct_send.not_owned'], false, DIRECT_SEND))
     .action(run(async(cmd)=>{
@@ -601,13 +638,18 @@ direct_send_command.command('get')
     }));
 
 direct_send_command.command('cancel')
-    .argument('<reference>', 'The send\'s reference, email-<n> or linkedin-<n>, as a send made with --send-after answered it')
+    .argument('<reference>', 'The send\'s reference, email-<n>, linkedin-<n> or linkedin-scheduled-<n>, as a send made with --send-after answered it')
     .description('Stop a direct send that has not gone out yet')
     .addHelpText('after', help([ex('direct-send cancel email-1001')],
-        ['direct_send.not_found', 'direct_send.not_owned', 'direct_send.already_sent', 'direct_send.already_failed'], true,
-        DIRECT_SEND + 'The answer is the send as Reply now holds it, state cancelled. Cancelling a send already cancelled answers\n'
-            + 'it again, so running it again is safe. direct_send.already_sent and direct_send.already_failed mean the send\n'
-            + 'was past cancelling; nothing changed.\n'))
+        ['direct_send.not_found', 'direct_send.not_owned', 'direct_send.already_sent', 'direct_send.already_failed',
+            'direct_send.already_sending', 'direct_send.cancel_not_confirmed'], true,
+        DIRECT_SEND + 'The answer is the send as Reply now holds it, state cancelled. Cancelling a send already cancelled answers it again,\n'
+            + 'so running it again is safe. direct_send.already_sent, direct_send.already_failed and direct_send.already_sending mean\n'
+            + 'the send was past cancelling; nothing changed. direct_send.already_sending is a LinkedIn send made for later that\n'
+            + 'Reply is handing to the account\'s queue or that waits or runs there, even while direct-send get still reads it queued.\n'
+            + 'direct_send.cancel_not_confirmed is a 503 from Reply that could not confirm the cancel: the send is still queued or\n'
+            + 'waiting for its schedule, so run the cancel again, as Reply asks; retry_after carries Reply\'s Retry-After when it\n'
+            + 'sends one. Any other 5xx is outcome.unknown (exit 3).\n'))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
         await handle_direct_send_cancel(cmd.args[0], ctx, g);

@@ -1,5 +1,5 @@
 import {describe, it, expect, beforeEach} from 'vitest';
-import {mock_fetch, json, ctx, sent, answer, capture} from './helpers';
+import {mock_fetch, json, ctx, sent, answer, capture, instant_timers, real_timers} from './helpers';
 import {handle_direct_send_get, handle_direct_send_cancel} from '../../operations/direct-sends';
 
 beforeEach(()=>{ mock_fetch.mockReset(); });
@@ -68,6 +68,56 @@ describe('direct-send get', ()=>{
         }
     });
 
+    it('adds estimated_send_at, Reply\'s estimatedSendAt, as text or null and only when Reply gives it, to get and cancel', async()=>{
+        const WAITING = {...QUEUED, reference: 'linkedin-scheduled-77', channel: 'linkedin', state: 'waitingForSchedule', sendAfter: null};
+        const cases: [unknown, Record<string, unknown>][] = [
+            ['2026-11-04T09:00:00Z', {estimated_send_at: '2026-11-04T09:00:00Z'}],
+            [null, {estimated_send_at: null}],
+        ];
+        for (const fn of [get, cancel])
+        {
+            for (const [estimatedSendAt, added] of cases)
+            {
+                mock_fetch.mockReset();
+                answer(json({...WAITING, estimatedSendAt}));
+                expect(await fn('linkedin-scheduled-77'), JSON.stringify(estimatedSendAt)).toStrictEqual({
+                    reference: 'linkedin-scheduled-77', channel: 'linkedin', contact_id: 456, state: 'waitingForSchedule', send_after: null,
+                    ...added, sent_at: null, message_id: null, failure_reason: null, cancelled_at: null,
+                });
+            }
+            for (const odd of [undefined, 7, ['2026-11-04T09:00:00Z']])
+            {
+                mock_fetch.mockReset();
+                answer(json({...WAITING, estimatedSendAt: odd}));
+                expect(await fn('linkedin-scheduled-77'), JSON.stringify(odd)).not.toHaveProperty('estimated_send_at');
+            }
+        }
+    });
+
+    it('reads a LinkedIn send through the states Reply\'s scheduler gives it, and a failure with or without its code', async()=>{
+        const LINKEDIN = {...QUEUED, reference: 'linkedin-scheduled-77', channel: 'linkedin'};
+        const cases: [Record<string, unknown>, Record<string, unknown>][] = [
+            [{state: 'waitingForSchedule', sendAfter: null, estimatedSendAt: null}, {state: 'waitingForSchedule', send_after: null}],
+            [{state: 'sending'}, {state: 'sending'}],
+            [{state: 'failed', failureReason: 'The send failed.', failureCode: null}, {state: 'failed', failure_code: null}],
+            [{state: 'failed', failureCode: 'directSend.dispatchWindowMissed'}, {state: 'failed', failure_code: 'directSend.dispatchWindowMissed'}],
+            [{state: 'failed', failureCode: 'directSend.dispatchInterrupted'}, {state: 'failed', failure_code: 'directSend.dispatchInterrupted'}],
+            [{state: 'failed', failureCode: 'directLinkedIn.notConnected'}, {state: 'failed', failure_code: 'directLinkedIn.notConnected'}],
+            [{state: 'failed', failureCode: 'directLinkedIn.contactNotFound'}, {state: 'failed', failure_code: 'directLinkedIn.contactNotFound'}],
+            [{state: 'failed', failureCode: 'directLinkedIn.scheduleNotFound'}, {state: 'failed', failure_code: 'directLinkedIn.scheduleNotFound'}],
+            [{state: 'failed', failureCode: 'directLinkedIn.contactTimeZoneMissing'},
+                {state: 'failed', failure_code: 'directLinkedIn.contactTimeZoneMissing'}],
+            [{state: 'failed', failureCode: 'directLinkedIn.aCodeNotYetKnown'}, {state: 'failed', failure_code: 'directLinkedIn.aCodeNotYetKnown'}],
+            [{state: 'cancelled', cancelledAt: '2026-11-02T09:15:00Z'}, {state: 'cancelled', cancelled_at: '2026-11-02T09:15:00Z'}],
+        ];
+        for (const [given, read] of cases)
+        {
+            mock_fetch.mockReset();
+            answer(json({...LINKEDIN, ...given}));
+            expect(await get('linkedin-scheduled-77'), JSON.stringify(given)).toMatchObject({reference: 'linkedin-scheduled-77', ...read});
+        }
+    });
+
     it('gives missing_variables only as a list of names, and the others only as text: anything else is left out', async()=>{
         for (const missing of [[], ['FirstName']])
         {
@@ -106,7 +156,35 @@ describe('direct-send get', ()=>{
             {
                 const e = await failure(()=>fn(reference, ctx(), {}));
                 expect(e, `${fn.name} ${JSON.stringify(reference)}`).toMatchObject({code: 'usage.reference', exit_code: 2});
-                expect((e as Error).message, JSON.stringify(reference)).toContain('email-<n> or linkedin-<n>');
+                expect((e as Error).message, JSON.stringify(reference)).toContain('email-<n>, linkedin-<n> or linkedin-scheduled-<n>');
+            }
+        }
+        expect(mock_fetch).not.toHaveBeenCalled();
+    });
+
+    it('sends a deferred LinkedIn send\'s reference, linkedin-scheduled-<n>, as given to get and cancel', async()=>{
+        for (const reference of ['linkedin-scheduled-1', 'linkedin-scheduled-1042', 'linkedin-scheduled-9999999999'])
+        {
+            for (const [fn, suffix] of [[get, ''], [cancel, '/cancel']] as const)
+            {
+                mock_fetch.mockReset();
+                answer(json({...QUEUED, channel: 'linkedin', reference}));
+                expect((await fn(reference)).reference, reference).toBe(reference);
+                expect(sent()[0].url, reference).toBe(`https://api/v3/direct-sends/${reference}${suffix}`);
+            }
+        }
+    });
+
+    it('refuses a malformed scheduled reference before any call, by the same one-spelling rule', async()=>{
+        const malformed = ['linkedin-scheduled-0', 'linkedin-scheduled-01', 'linkedin-scheduled-12345678901', 'linkedin-scheduled-',
+            'linkedin-scheduled', 'linkedin-scheduled--1', 'linkedin-scheduled-1a', 'LINKEDIN-SCHEDULED-1', 'email-scheduled-1',
+            'scheduled-1', 'linkedin-scheduled-scheduled-1', ' linkedin-scheduled-1', 'linkedin-scheduled-1/cancel'];
+        for (const reference of malformed)
+        {
+            for (const fn of [handle_direct_send_get, handle_direct_send_cancel])
+            {
+                expect(await failure(()=>fn(reference, ctx(), {})), `${fn.name} ${JSON.stringify(reference)}`)
+                    .toMatchObject({code: 'usage.reference', exit_code: 2});
             }
         }
         expect(mock_fetch).not.toHaveBeenCalled();
@@ -178,13 +256,15 @@ describe('direct-send cancel', ()=>{
         expect(mock_fetch).toHaveBeenCalledTimes(2);
     });
 
-    it('maps Reply\'s four refusals of a cancel, each definite', async()=>{
+    it('maps Reply\'s five refusals of a cancel, each definite', async()=>{
         const cases: [Response, string][] = [
             [json({code: 'directSend.notFound'}, 404), 'direct_send.not_found'],
             [json({code: 'directSend.notOwned'}, 403), 'direct_send.not_owned'],
             [json({code: 'directSend.alreadySent'}, 409), 'direct_send.already_sent'],
             [json({code: 'directSend.alreadyFailed'}, 409), 'direct_send.already_failed'],
+            [json({code: 'directSend.alreadySending'}, 409), 'direct_send.already_sending'],
             [json({code: 'directSend.alreadySent'}, 400), 'reply.refused'],
+            [json({code: 'directSend.alreadySending'}, 400), 'reply.refused'],
         ];
         for (const [res, code] of cases)
         {
@@ -210,6 +290,8 @@ describe('direct-send cancel', ()=>{
         const answers: [string, ()=>void][] = [
             ['lost answer', ()=>{ mock_fetch.mockRejectedValueOnce(lost_connection()); }],
             ['503', ()=>answer(json({title: 'Service Unavailable'}, 503))],
+            ['503 with another code', ()=>answer(json({code: 'directSend.somethingElse'}, 503))],
+            ['500 with the unconfirmed cancel\'s code', ()=>answer(json({code: 'directSend.cancelNotConfirmed'}, 500))],
             ['unreadable 200', ()=>answer(json('<html>ok</html>', 200))],
         ];
         for (const [label, give] of answers)
@@ -220,6 +302,38 @@ describe('direct-send cancel', ()=>{
             expect(e, label).toMatchObject({code: 'outcome.unknown', exit_code: 3});
             expect((e as {hint?: string}).hint ?? '', label).toContain('running it again is safe');
             expect(mock_fetch, label).toHaveBeenCalledTimes(1);
+        }
+    });
+
+    it('a 503 directSend.cancelNotConfirmed is direct_send.cancel_not_confirmed (exit 1), made once, says the send is still '
+        + 'waiting and to cancel again, and passes on Reply\'s wait', async()=>{
+        const cases: [Record<string, string>, number | undefined][] = [[{}, undefined], [{'Retry-After': '5'}, 5]];
+        for (const [headers, retry_after] of cases)
+        {
+            mock_fetch.mockReset();
+            answer(json({code: 'directSend.cancelNotConfirmed', detail: 'The cancel could not be confirmed.'}, 503, headers));
+            const e = await failure(()=>handle_direct_send_cancel('linkedin-scheduled-77', ctx(), {}));
+            expect(e, JSON.stringify(headers)).toMatchObject({
+                code: 'direct_send.cancel_not_confirmed', exit_code: 1, status: 503, reply_code: 'directSend.cancelNotConfirmed',
+                detail: 'The cancel could not be confirmed.',
+            });
+            expect((e as {retry_after?: number}).retry_after, JSON.stringify(headers)).toBe(retry_after);
+            expect((e as {title?: string}).title).toBe('Reply could not confirm the cancel; the send is still waiting to go out.');
+            expect((e as {hint?: string}).hint).toBe('Reply says the send is still queued or waiting for its schedule: run the '
+                + 'cancel again, as Reply asks; running it again is safe.');
+            expect(mock_fetch).toHaveBeenCalledTimes(1);
+        }
+    });
+
+    it('reads an unconfirmed cancel only on a cancel: a read answering its code maps as any other 5xx', async()=>{
+        instant_timers();
+        try {
+            mock_fetch.mockImplementation(()=>Promise.resolve(json({code: 'directSend.cancelNotConfirmed'}, 503)));
+            expect(await failure(()=>handle_direct_send_get('linkedin-scheduled-77', ctx(), {})))
+                .toMatchObject({code: 'reply.unavailable', exit_code: 1});
+        } finally {
+            real_timers();
+            mock_fetch.mockReset();
         }
     });
 

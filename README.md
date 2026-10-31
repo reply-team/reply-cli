@@ -202,6 +202,8 @@ prints JSON (indented; compact with `--json`) and says what happened in a stable
 | `reply contact linkedin-connect <contact> --linkedin-account-id N [--message -]` | a LinkedIn invitation, with or without a note → `sent` / `already_connected` |
 | `reply contact linkedin-message …` · `linkedin-inmail …` · `linkedin-voice …` | a LinkedIn message, an InMail, or an AI voice message spoken from a script → `sent` |
 | any direct send `… [--send-after <moment>] [--schedule-id N] [--idempotency-key K]` | the send held until a moment, timed by a schedule, under a key of yours → `sent`, with its `reference` and `state` |
+| any direct send `… [--use-contact-time-zone \| --no-use-contact-time-zone]` | with `--schedule-id`, the schedule read in the contact's time zone or its own |
+| a LinkedIn send `… [--retry-window-minutes N]` | how long Reply keeps trying once the send is due |
 | `reply direct-send get <reference>` | a send as Reply holds it: whether it has gone out, when, and why it failed |
 | `reply direct-send cancel <reference>` | stop a send that has not gone out yet → `state` `cancelled` |
 | `reply inbox list (--contact-id \| --sequence-id) [--source] [--channel] [--category-id] [--since]` | one page of threads |
@@ -319,18 +321,46 @@ Reply cannot fill is `contact.missing_variables`, with the names under the error
 # {"error":{"code":"contact.missing_variables",…,"details":{"missing_variables":["FirstName","Company"]}}}
 ```
 
-Every direct send also takes `--send-after <moment>`, `--schedule-id <id>` and `--idempotency-key
-<key>`. Reply holds the send until the moment, given with its offset (`2026-11-03T14:00:00Z`,
-`2026-11-03T16:00:00+02:00`) and sent to Reply in UTC; a moment without an offset is refused
-(`usage.date`). `--schedule-id` names the sending schedule Reply times the send by (see `reply
-schedule list`). The answer then adds Reply's `reference`, `send_after` and `state`, each only when
-Reply gives it. `status: "sent"` means Reply took the send, and `state`, when present, says whether
-it has gone out: `queued` or `sending` is not yet, then `sent`, `failed` or `cancelled`. `reply
-direct-send get <reference>` reads the send later, and `reply direct-send cancel <reference>` stops
-one that has not gone out. The reference is Reply's, `email-<n>` or `linkedin-<n>`, the form
-Reply's route takes: a reference of any other form is refused before any call (`usage.reference`,
-exit 2), and nothing else is read from it. An answer without `state` comes from a Reply that does
-not know these flags yet: it sent at once, as without them.
+Every direct send also takes `--send-after <moment>`, `--schedule-id <id>` and
+`--idempotency-key <key>`. Reply holds the send until the moment, given with its offset
+(`2026-11-03T14:00:00Z`, `2026-11-03T16:00:00+02:00`) and sent to Reply in UTC; a moment without an
+offset is refused (`usage.date`). `--schedule-id` names the sending schedule Reply times the send by
+(see `reply schedule list`). The answer then adds Reply's `reference`, `send_after` and `state`,
+each only when Reply gives it. `status: "sent"` means Reply took the send, and `state`, when
+present, says whether it has gone out: `queued`, `waitingForSchedule` or `sending` is not yet, then
+`sent`, `failed` or `cancelled`. `reply direct-send get <reference>` reads the send later, and
+`reply direct-send cancel <reference>` stops one that has not gone out. The reference is Reply's,
+`email-<n>`, `linkedin-<n>` or `linkedin-scheduled-<n>` (a LinkedIn send held for later keeps that
+one for its whole life), the form Reply's route takes: a reference of any other form is refused
+before any call (`usage.reference`, exit 2), and nothing else is read from it. An answer without
+`state` comes from a Reply that does not know these flags yet: it sent at once, as without them.
+
+A send timed by `--schedule-id` may answer `state` `waitingForSchedule`: Reply holds it for the
+schedule's next opening, so `send_after` is left out, and `estimated_send_at` is when Reply expects
+to send it, an ISO-8601 UTC moment; Reply sends it within about 10 minutes of that moment. Reply
+sets `estimated_send_at` in `waitingForSchedule` only and gives it null in every other state; it is
+null in `waitingForSchedule` too when the schedule does not open within 30 days of the moment the
+send waits from: its `--send-after`, or when Reply took it. It is added only when Reply gives it.
+
+Every direct send also takes `--use-contact-time-zone` / `--no-use-contact-time-zone`, and the four
+LinkedIn sends take `--retry-window-minutes <n>` as well; `contact send-email` does not take the
+retry window. `--use-contact-time-zone` reads the schedule's windows in the contact's time zone and
+`--no-use-contact-time-zone` in the schedule's own; with neither, the schedule's own setting holds.
+`--retry-window-minutes` is how long Reply keeps trying to send once the send is due, 1 to 4320
+minutes (Reply's default is 90); a number outside that is refused before any call (`usage.range`).
+Reply takes the time zone only with `--schedule-id` and the retry window only for a send made
+later, and answers them otherwise with `reply.invalid_request`.
+
+Reply refuses a send it cannot time when it takes it, and nothing is sent. A `--schedule-id`
+naming no schedule this account can read is `schedule.not_found`, a schedule with no active day
+that has a time range, so it never opens, is `schedule.no_slot`, and a contact without the time
+zone `--use-contact-time-zone` reads the schedule in is `contact.time_zone_missing`. The codes are
+the same on an email and on a LinkedIn send; `reply_code` keeps the one Reply gave.
+
+```sh
+echo '{"body":"Following up on my note."}' | reply contact linkedin-message --contact-id 456 --linkedin-account-id 34 --message - --schedule-id 41 --use-contact-time-zone --retry-window-minutes 120
+# {"status":"sent",…,"activity_id":null,"sent_at":null,"reference":"linkedin-scheduled-77","state":"waitingForSchedule","estimated_send_at":"2026-11-04T09:00:00Z"}
+```
 
 `--idempotency-key` goes to Reply as the `Idempotency-Key` header, never in the body. A Reply that
 knows the header answers a repeat with the same key with the send the key first made; while that
@@ -352,13 +382,25 @@ reply direct-send get linkedin-1042
 reply direct-send cancel linkedin-1042
 ```
 
-Both answer the send under the CLI's names, each null when Reply gives none: `reference`,
-`channel`, `contact_id`, `state`, `send_after`, `sent_at`, `message_id`, `failure_reason` and
-`cancelled_at`. `failure_code`, `missing_variables`, `rendered_subject` and `rendered_body` are
-added only when Reply gives them. `failure_reason` is a sentence for a person and never parsed;
-`failure_code` is Reply's code for the failure, the one to branch on. `direct-send cancel` of a send already cancelled answers it
-again. A send already gone out or failed is `direct_send.already_sent` or
-`direct_send.already_failed`, and a reference Reply has no send for is `direct_send.not_found`.
+Both answer the send under the CLI's names, each null when Reply gives none: `reference`, `channel`,
+`contact_id`, `state`, `send_after`, `sent_at`, `message_id`, `failure_reason` and `cancelled_at`.
+`failure_code`, `missing_variables`, `rendered_subject` and `rendered_body` are added only when
+Reply gives them, and so is `estimated_send_at`, read the same way as on the send but as of the
+read: set in `waitingForSchedule` only and null in every other state, and null there too when the
+schedule does not open within 30 days counted from `--send-after`, or from now once that has passed.
+`failure_reason` is a sentence for a person and never parsed; `failure_code` is Reply's code for the
+failure, the one to branch on. A failed send may carry no `failure_code`: it is then null, and
+`failure_reason` is all Reply says of it. `direct-send cancel` of a send already cancelled answers
+it again. A send already gone out, failed or going out is `direct_send.already_sent`,
+`direct_send.already_failed` or `direct_send.already_sending`; the last is a LinkedIn send made for
+later that Reply is handing to the account's queue or that waits or runs there, even while
+`direct-send get` still reads it `queued`. A reference Reply has no send for, a send of another team
+included, is `direct_send.not_found`, and an email send made by a teammate this user may not act for
+is `direct_send.not_owned`, to a read and a cancel alike. A `503` that Reply answers with
+`directSend.cancelNotConfirmed` is `direct_send.cancel_not_confirmed` (exit 1): Reply could not
+confirm the cancel, and says the send is still queued or waiting for its schedule, so run the cancel
+again, as Reply asks; `retry_after` carries Reply's `Retry-After` when it sends one. Any other `5xx`
+to a cancel stays `outcome.unknown` (exit 3).
 
 `reply inbox changes` reads the inbox feed forward. Each page holds the threads whose latest message,
 inbound or outbound, changed, oldest first and as Reply gives them, with `has_more` and a `cursor`.
