@@ -375,8 +375,9 @@ const scheduler_options = (c: Command): Command=>c
 // What a LinkedIn send timed by a schedule answers while it waits for the schedule's next opening, and the flags only
 // a LinkedIn send takes.
 const SCHEDULED = 'A LinkedIn send timed by --schedule-id may answer state waitingForSchedule, held for the schedule\'s next\n'
-    + 'opening: send_after is then left out, and estimated_send_at is when Reply expects to send it, or null when no opening\n'
-    + 'falls within the 30 days it looks ahead; it is added only when Reply gives it. --use-contact-time-zone sends\n'
+    + 'opening: send_after is then left out, and estimated_send_at is when Reply expects to send it, or null when the\n'
+    + 'schedule does not open within 30 days of the moment the send waits from: its --send-after, or when Reply took it.\n'
+    + 'estimated_send_at is added only when Reply gives it. --use-contact-time-zone sends\n'
     + 'useContactTimeZone true: the schedule\'s windows are read in the contact\'s time zone; --no-use-contact-time-zone sends\n'
     + 'false, the schedule\'s own zone; with neither, the schedule\'s own setting holds. --retry-window-minutes <n> is how long\n'
     + 'Reply keeps trying to send it once it is due, 1 to 4320 minutes (Reply\'s default is 90); one outside that is refused\n'
@@ -611,7 +612,8 @@ const DIRECT_SEND = 'Result: {"reference","channel","contact_id","state","send_a
     + 'branch on. A failed send may carry no failure_code: it is then null, and failure_reason is all Reply says of it.\n'
     + 'missing_variables lists the template variables Reply could not fill, and rendered_subject and rendered_body are the\n'
     + 'text as Reply filled it in. estimated_send_at is added only when Reply gives it: when Reply expects a send waiting\n'
-    + 'for its schedule\'s next opening to go out, or null when no opening falls within the 30 days it looks ahead.\n'
+    + 'for its schedule\'s next opening to go out, or null when the schedule does not open within 30 days of the moment the\n'
+    + 'send waits from: its --send-after, or now once that has passed.\n'
     + 'A Reply without this route answers reply.refused with status 404 and no reply_code; a\n'
     + 'reference of any other form never leaves the CLI, so that 404 means this Reply has no such route.\n'
     + 'direct_send.not_found is a reference that Reply has no send for, a send of another team included.\n'

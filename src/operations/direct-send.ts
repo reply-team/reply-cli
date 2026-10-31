@@ -307,7 +307,7 @@ const HELD_KEYS: [string, string][] = [['reference', 'reference'], ['sendAfter',
 const LATER_KEYS: [string, string][] = [...HELD_KEYS, ['renderedSubject', 'rendered_subject'], ['renderedBody', 'rendered_body']];
 
 // When Reply expects a send waiting for its schedule's next opening to go out, as text, or null when no opening falls
-// within the 30 days it looks ahead; left out when Reply gives neither, as a Reply before its scheduler does.
+// within 30 days of the moment the send waits from; left out when Reply gives neither, as a Reply before its scheduler does.
 const estimated_of = (from: Record<string, unknown>): Record<string, unknown>=>
     typeof from.estimatedSendAt === 'string' || from.estimatedSendAt === null ? {estimated_send_at: from.estimatedSendAt} : {};
 

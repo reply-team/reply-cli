@@ -59,7 +59,8 @@ describe('operations/commands', ()=>{
             expect(flat, name).toContain('failure_code, missing_variables, rendered_subject and rendered_body are added only when Reply gives them');
             expect(flat, name).toContain('failure_reason is a sentence for a person, never parsed; failure_code is Reply\'s code for the failure');
             expect(flat, name).toContain('estimated_send_at is added only when Reply gives it: when Reply expects a send waiting for its '
-                + 'schedule\'s next opening to go out, or null when no opening falls within the 30 days it looks ahead');
+                + 'schedule\'s next opening to go out, or null when the schedule does not open within 30 days of the moment the send '
+                + 'waits from: its --send-after, or now once that has passed');
         }
         const cancel = help_of(sub(direct_send_command, 'cancel')).replace(/\s+/g, ' ');
         expect(cancel).toContain('Cancelling a send already cancelled answers it again, so running it again is safe');
@@ -311,6 +312,8 @@ describe('operations/commands', ()=>{
             expect(flat, text).toContain('direct-send get <reference> reads it later, and direct-send cancel <reference> stops one not yet sent');
             expect(flat.includes('A LinkedIn send timed by --schedule-id may answer state waitingForSchedule'), text).toBe(name !== 'send-email');
             expect(flat.includes('estimated_send_at'), text).toBe(name !== 'send-email');
+            expect(flat.includes('estimated_send_at is when Reply expects to send it, or null when the schedule does not open within '
+                + '30 days of the moment the send waits from: its --send-after, or when Reply took it'), text).toBe(name !== 'send-email');
             expect(flat.includes('--use-contact-time-zone sends useContactTimeZone true: the schedule\'s windows are read in the '
                 + 'contact\'s time zone; --no-use-contact-time-zone sends false, the schedule\'s own zone; with neither, the schedule\'s '
                 + 'own setting holds'), text).toBe(name !== 'send-email');
