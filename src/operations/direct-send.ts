@@ -385,8 +385,9 @@ const handle_direct_send = async(
     {
         later.scheduleId = parse_id(opts.scheduleId, '--schedule-id');
     }
-    // Only Reply's LinkedIn routes take these. Which other flag each needs is Reply's rule, refused there with errors[].
-    if (by === 'linkedin' && opts.useContactTimeZone !== undefined)
+    // Every send route takes the time zone, and only Reply's LinkedIn routes take the retry window. Which other flag each
+    // needs is Reply's rule, refused there with errors[].
+    if (opts.useContactTimeZone !== undefined)
     {
         later.useContactTimeZone = opts.useContactTimeZone;
     }

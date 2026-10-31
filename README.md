@@ -202,7 +202,8 @@ prints JSON (indented; compact with `--json`) and says what happened in a stable
 | `reply contact linkedin-connect <contact> --linkedin-account-id N [--message -]` | a LinkedIn invitation, with or without a note → `sent` / `already_connected` |
 | `reply contact linkedin-message …` · `linkedin-inmail …` · `linkedin-voice …` | a LinkedIn message, an InMail, or an AI voice message spoken from a script → `sent` |
 | any direct send `… [--send-after <moment>] [--schedule-id N] [--idempotency-key K]` | the send held until a moment, timed by a schedule, under a key of yours → `sent`, with its `reference` and `state` |
-| a LinkedIn send `… [--use-contact-time-zone \| --no-use-contact-time-zone] [--retry-window-minutes N]` | the schedule read in the contact's time zone or its own, and how long Reply keeps trying once the send is due |
+| any direct send `… [--use-contact-time-zone \| --no-use-contact-time-zone]` | with `--schedule-id`, the schedule read in the contact's time zone or its own |
+| a LinkedIn send `… [--retry-window-minutes N]` | how long Reply keeps trying once the send is due |
 | `reply direct-send get <reference>` | a send as Reply holds it: whether it has gone out, when, and why it failed |
 | `reply direct-send cancel <reference>` | stop a send that has not gone out yet → `state` `cancelled` |
 | `reply inbox list (--contact-id \| --sequence-id) [--source] [--channel] [--category-id] [--since]` | one page of threads |
@@ -334,26 +335,31 @@ Reply's route takes: a reference of any other form is refused before any call (`
 exit 2), and nothing else is read from it. An answer without `state` comes from a Reply that does
 not know these flags yet: it sent at once, as without them.
 
-A LinkedIn send timed by `--schedule-id` may answer `state` `waitingForSchedule`: Reply holds it for
-the schedule's next opening, so `send_after` is left out, and `estimated_send_at` is when Reply
-expects to send it, an ISO-8601 UTC moment, or null when the schedule does not open within 30 days
-of the moment the send waits from: its `--send-after`, or when Reply took it. Reply sends it within
-about 10 minutes of that moment. `estimated_send_at` means something only with `state`
+A send timed by `--schedule-id` may answer `state` `waitingForSchedule`: Reply holds it for the
+schedule's next opening, so `send_after` is left out, and `estimated_send_at` is when Reply expects
+to send it, an ISO-8601 UTC moment, or null when the schedule does not open within 30 days of the
+moment the send waits from: its `--send-after`, or when Reply took it. Reply sends it within about
+10 minutes of that moment. `estimated_send_at` means something only with `state`
 `waitingForSchedule`, where null says the schedule does not open within those 30 days; Reply gives
 it null on any other state, and that null says nothing. It is added only when Reply gives it.
 
-The four LinkedIn sends also take `--use-contact-time-zone` / `--no-use-contact-time-zone` and
-`--retry-window-minutes <n>`; `contact send-email` takes neither. `--use-contact-time-zone` reads the
-schedule's windows in the contact's time zone and `--no-use-contact-time-zone` in the schedule's
-own; with neither, the schedule's own setting holds. `--retry-window-minutes` is how long Reply keeps
-trying to send once the send is due, 1 to 4320 minutes (Reply's default is 90); a number outside
-that is refused before any call (`usage.range`). Reply takes them only for a send made later, the
-time zone only with `--schedule-id`, and answers them otherwise with `reply.invalid_request`; a
-Reply before its LinkedIn scheduler answers `--schedule-id` on a LinkedIn send the same way.
-Reply refuses a LinkedIn send it cannot time when it takes it, and nothing is sent: `--schedule-id`
-naming no schedule this account can read is `schedule.not_found`, a schedule with no active day
-that has a time range, so it never opens, is `schedule.no_slot`, and a contact without the time zone `--use-contact-time-zone` reads the
-schedule in is `contact.time_zone_missing`.
+Every direct send also takes `--use-contact-time-zone` / `--no-use-contact-time-zone`, and the four
+LinkedIn sends take `--retry-window-minutes <n>` as well; `contact send-email` does not take the
+retry window. `--use-contact-time-zone` reads the schedule's windows in the contact's time zone and
+`--no-use-contact-time-zone` in the schedule's own; with neither, the schedule's own setting holds.
+`--retry-window-minutes` is how long Reply keeps trying to send once the send is due, 1 to 4320
+minutes (Reply's default is 90); a number outside that is refused before any call (`usage.range`).
+Reply takes the time zone only with `--schedule-id` and the retry window only for a send made
+later, and answers them otherwise with `reply.invalid_request`; a Reply before its LinkedIn
+scheduler answers `--schedule-id` on a LinkedIn send the same way.
+
+Reply refuses a send it cannot time when it takes it, and nothing is sent. On a LinkedIn send,
+`--schedule-id` naming no schedule this account can read is `schedule.not_found`, a schedule with
+no active day that has a time range, so it never opens, is `schedule.no_slot`, and a contact
+without the time zone `--use-contact-time-zone` reads the schedule in is
+`contact.time_zone_missing`. On an email the same three are `reply.refused`, with Reply's
+`contact.scheduleNotFound`, `contact.scheduleHasNoSlot` or `contact.contactTimeZoneMissing` as
+`reply_code`.
 
 ```sh
 echo '{"body":"Following up on my note."}' | reply contact linkedin-message --contact-id 456 --linkedin-account-id 34 --message - --schedule-id 41 --use-contact-time-zone --retry-window-minutes 120

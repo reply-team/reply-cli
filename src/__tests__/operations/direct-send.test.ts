@@ -74,6 +74,10 @@ describe('contact send-email', ()=>{
             [json({title: 'Validation failed', errors: [{pointer: '/subject', detail: '\'subject\' must not be empty.'}]}, 400),
                 'reply.invalid_request', undefined],
             [json({code: 'contact.somethingElse'}, 400), 'reply.refused', 'contact.somethingElse'],
+            // An email Reply cannot time is refused under Reply's own codes, passed on unchanged.
+            [json({code: 'contact.scheduleNotFound'}, 404), 'reply.refused', 'contact.scheduleNotFound'],
+            [json({code: 'contact.scheduleHasNoSlot'}, 409), 'reply.refused', 'contact.scheduleHasNoSlot'],
+            [json({code: 'contact.contactTimeZoneMissing'}, 409), 'reply.refused', 'contact.contactTimeZoneMissing'],
         ];
         for (const [res, code, reply_code] of cases)
         {
@@ -783,12 +787,23 @@ describe('a send for later', ()=>{
         expect(e).toMatchObject({code: 'reply.invalid_request', exit_code: 1, details: {fields: ['useContactTimeZone']}});
     });
 
-    it('a direct email never carries either, even when the options reach it', async()=>{
-        answer(accepted('send-email', {}));
-        await run('send-email', {subject: SUBJECT, body: BODY}, {...EMAIL_OPTS, ...LATER, useContactTimeZone: true, retryWindowMinutes: '30'});
-        const body = sent()[0].body as Record<string, unknown>;
-        expect('useContactTimeZone' in body).toBe(false);
-        expect('retryWindowMinutes' in body).toBe(false);
+    it('a direct email carries useContactTimeZone, true or false, only when given, and never a retry window', async()=>{
+        const cases: [Partial<Direct_send_opts>, Record<string, unknown>][] = [
+            [{useContactTimeZone: true}, {useContactTimeZone: true}],
+            [{useContactTimeZone: false, retryWindowMinutes: '30'}, {useContactTimeZone: false}],
+            [{retryWindowMinutes: '30'}, {}],
+            [{}, {}],
+        ];
+        for (const [extra, carried] of cases)
+        {
+            mock_fetch.mockReset();
+            answer(accepted('send-email', {}));
+            await run('send-email', {subject: SUBJECT, body: BODY}, {...EMAIL_OPTS, ...LATER, ...extra});
+            const body = sent()[0].body as Record<string, unknown>;
+            expect(body.scheduleId, JSON.stringify(extra)).toBe(41);
+            expect(Object.fromEntries(Object.entries(body).filter(([k])=>k === 'useContactTimeZone' || k === 'retryWindowMinutes')),
+                JSON.stringify(extra)).toStrictEqual(carried);
+        }
     });
 
     it('a key does not make a lost answer safe to repeat: a Reply that ignores the header would send it twice', async()=>{

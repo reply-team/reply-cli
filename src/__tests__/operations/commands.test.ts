@@ -292,7 +292,7 @@ describe('operations/commands', ()=>{
             const c = sub(contact_command, name);
             expect(flags(c), name).toEqual([...CONTACT_FLAGS, account_flag, '--message',
                 ...(name === 'send-email' ? ['--track-links', '--track-opens'] : []), '--send-after', '--schedule-id', '--idempotency-key',
-                ...(name === 'send-email' ? [] : ['--use-contact-time-zone', '--no-use-contact-time-zone', '--retry-window-minutes'])]);
+                '--use-contact-time-zone', '--no-use-contact-time-zone', ...(name === 'send-email' ? [] : ['--retry-window-minutes'])]);
             const text = help_of(c);
             const flat = text.replace(/\s+/g, ' ');
             expect(text, text).toContain('--message -');
@@ -312,22 +312,26 @@ describe('operations/commands', ()=>{
             expect(flat, text).toContain('status "sent" means Reply took the send; state, when Reply gives it, says whether it has gone '
                 + 'out: queued, waitingForSchedule or sending is not yet, then sent, failed or cancelled');
             expect(flat, text).toContain('direct-send get <reference> reads it later, and direct-send cancel <reference> stops one not yet sent');
-            expect(flat.includes('A LinkedIn send timed by --schedule-id may answer state waitingForSchedule'), text).toBe(name !== 'send-email');
-            expect(flat.includes('estimated_send_at'), text).toBe(name !== 'send-email');
-            expect(flat.includes('estimated_send_at is when Reply expects to send it, or null when the schedule does not open within '
-                + '30 days of the moment the send waits from: its --send-after, or when Reply took it'), text).toBe(name !== 'send-email');
-            expect(flat.includes('estimated_send_at means something only with state waitingForSchedule, where null says the '
-                + 'schedule does not open within those 30 days; Reply gives it null on any other state, and that null says nothing'),
-            text).toBe(name !== 'send-email');
-            expect(flat.includes('--use-contact-time-zone sends useContactTimeZone true: the schedule\'s windows are read in the '
+            // Every send takes a schedule and its time zone; only the LinkedIn sends take a retry window and map the refusals.
+            const linkedin = name !== 'send-email';
+            expect(flat, text).toContain('A send timed by --schedule-id may answer state waitingForSchedule');
+            expect(flat, text).toContain('estimated_send_at is when Reply expects to send it, or null when the schedule does not open within '
+                + '30 days of the moment the send waits from: its --send-after, or when Reply took it');
+            expect(flat, text).toContain('estimated_send_at means something only with state waitingForSchedule, where null says the '
+                + 'schedule does not open within those 30 days; Reply gives it null on any other state, and that null says nothing');
+            expect(flat, text).toContain('--use-contact-time-zone sends useContactTimeZone true: the schedule\'s windows are read in the '
                 + 'contact\'s time zone; --no-use-contact-time-zone sends false, the schedule\'s own zone; with neither, the schedule\'s '
-                + 'own setting holds'), text).toBe(name !== 'send-email');
+                + 'own setting holds. Reply takes it only with --schedule-id, and answers it otherwise with errors[] (reply.invalid_request)');
             expect(flat.includes('--retry-window-minutes <n> is how long Reply keeps trying to send it once it is due, 1 to 4320 '
-                + 'minutes (Reply\'s default is 90); one outside that is refused before any call (usage.range)'), text).toBe(name !== 'send-email');
-            expect(flat.includes('Reply takes them only with --schedule-id or --send-after'), text).toBe(name !== 'send-email');
+                + 'minutes (Reply\'s default is 90); one outside that is refused before any call (usage.range)'), text).toBe(linkedin);
+            expect(flat.includes('Reply takes it only with --schedule-id or --send-after'), text).toBe(linkedin);
             expect(flat.includes('schedule.not_found is a --schedule-id naming no schedule this account can read, schedule.no_slot a '
                 + 'schedule with no active day that has a time range, so it never opens, and contact.time_zone_missing a contact without the time zone '
-                + '--use-contact-time-zone reads it in; none sends anything'), text).toBe(name !== 'send-email');
+                + '--use-contact-time-zone reads it in; none sends anything'), text).toBe(linkedin);
+            expect(flat.includes('Reply refuses an email it cannot time when it takes it, and nothing is sent: a --schedule-id naming no '
+                + 'schedule this account can read, a schedule with no active day that has a time range, and a contact without the time zone '
+                + '--use-contact-time-zone reads it in are reply.refused, with Reply\'s contact.scheduleNotFound, contact.scheduleHasNoSlot '
+                + 'or contact.contactTimeZoneMissing as reply_code'), text).toBe(!linkedin);
             expect(flat, text).toContain('An answer without state comes from a Reply that does not know --send-after and --schedule-id');
             expect(flat, text).toContain('--idempotency-key goes as the Idempotency-Key header');
             expect(flat, text).toContain('A Reply that knows the header answers a repeat with the same key with the send the key first made; while that one is still '
