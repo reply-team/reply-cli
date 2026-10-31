@@ -355,7 +355,8 @@ later_options(add_contact_options(contact_command.command('send-email'), true)
 // The four LinkedIn sends share their flags, their first codes and the shape of their result.
 const LINKEDIN_SEND_CODES = [
     'contact.not_found', ...IMPORT_CODES, 'contact.already_held', 'contact.no_linkedin_profile', 'linkedin.account_not_found',
-    'linkedin.feature_disabled', 'linkedin.account_inactive', 'linkedin.invalid_cookie',
+    'linkedin.feature_disabled', 'linkedin.account_inactive', 'linkedin.invalid_cookie', 'schedule.not_found', 'schedule.no_slot',
+    'contact.time_zone_missing',
 ];
 const LINKEDIN_SENT = '"contact_id","contact_created","activity_id","sent_at"}:\n'
     + 'activity_id and sent_at are Reply\'s linkedInActivityId and sentAtUtc as Reply gives them, each null when it gives\n'
@@ -381,7 +382,9 @@ const SCHEDULED = 'A LinkedIn send timed by --schedule-id may answer state waiti
     + 'Reply keeps trying to send it once it is due, 1 to 4320 minutes (Reply\'s default is 90); one outside that is refused\n'
     + 'before any call (usage.range). Reply takes them only with --schedule-id or --send-after, the time zone only with\n'
     + '--schedule-id, and answers them otherwise with errors[] (reply.invalid_request), as a Reply before its scheduler\n'
-    + 'answers --schedule-id on a LinkedIn send.\n';
+    + 'answers --schedule-id on a LinkedIn send. schedule.not_found is a --schedule-id Reply has no schedule for,\n'
+    + 'schedule.no_slot a schedule with no window Reply can send in, and contact.time_zone_missing a contact without the\n'
+    + 'time zone --use-contact-time-zone reads it in; none sends anything.\n';
 
 const linkedin_send = (
     name: Exclude<Direct_send_name, 'send-email'>, description: string, message: string, examples: string[], codes: string[],

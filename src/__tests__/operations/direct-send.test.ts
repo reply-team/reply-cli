@@ -156,6 +156,11 @@ describe('the LinkedIn sends', ()=>{
             [['linkedin-inmail', {subject: SUBJECT, body: TEXT}], 400, 'directLinkedIn.noInMailCredits', 'linkedin.no_inmail_credits'],
             [['linkedin-voice', {script: SCRIPT}], 400, 'directLinkedIn.voiceProfileMissing', 'linkedin.voice_profile_missing'],
             [['linkedin-voice', {script: SCRIPT}], 400, 'directLinkedIn.voiceTooLong', 'linkedin.voice_too_long'],
+            [message, 404, 'directLinkedIn.scheduleNotFound', 'schedule.not_found'],
+            [['linkedin-connect', {note: NOTE}], 409, 'directLinkedIn.scheduleHasNoSlot', 'schedule.no_slot'],
+            [['linkedin-voice', {script: SCRIPT}], 409, 'directLinkedIn.contactTimeZoneMissing', 'contact.time_zone_missing'],
+            [message, 400, 'directLinkedIn.scheduleNotFound', 'reply.refused'],
+            [message, 404, 'directLinkedIn.contactTimeZoneMissing', 'reply.refused'],
             // Reply's code is read only under the status it publishes it with.
             [message, 400, 'directLinkedIn.notConnected', 'reply.refused'],
             [message, 403, 'directLinkedIn.somethingElse', 'access.denied'],

@@ -253,7 +253,8 @@ describe('operations/commands', ()=>{
     // says sent_at is.
     const IMPORT = ['contact.not_unique', 'contact.invalid_email', 'contact.invalid_linkedin_url', 'account.contact_limit_reached'];
     const LINKEDIN = ['contact.not_found', ...IMPORT, 'contact.already_held', 'contact.no_linkedin_profile', 'linkedin.account_not_found',
-        'linkedin.feature_disabled', 'linkedin.account_inactive', 'linkedin.invalid_cookie'];
+        'linkedin.feature_disabled', 'linkedin.account_inactive', 'linkedin.invalid_cookie', 'schedule.not_found', 'schedule.no_slot',
+        'contact.time_zone_missing'];
     const SENT_AT_AS_GIVEN = 'sentAtUtc as Reply gives them, each null when it gives none; the CLI adds no time of its own';
     const DIRECT_SENDS: [string, string, string[], string][] = [
         ['send-email', '--email-account-id', ['contact.not_found', ...IMPORT, 'contact.already_held', 'email_account.not_found', 'contact.blacklisted',
@@ -312,6 +313,9 @@ describe('operations/commands', ()=>{
             expect(flat.includes('--retry-window-minutes <n> is how long Reply keeps trying to send it once it is due, 1 to 4320 '
                 + 'minutes (Reply\'s default is 90); one outside that is refused before any call (usage.range)'), text).toBe(name !== 'send-email');
             expect(flat.includes('Reply takes them only with --schedule-id or --send-after'), text).toBe(name !== 'send-email');
+            expect(flat.includes('schedule.not_found is a --schedule-id Reply has no schedule for, schedule.no_slot a schedule with '
+                + 'no window Reply can send in, and contact.time_zone_missing a contact without the time zone '
+                + '--use-contact-time-zone reads it in; none sends anything'), text).toBe(name !== 'send-email');
             expect(flat, text).toContain('An answer without state comes from a Reply that does not know --send-after and --schedule-id');
             expect(flat, text).toContain('--idempotency-key goes as the Idempotency-Key header');
             expect(flat, text).toContain('A Reply that knows the header answers a repeat with the same key with the send the key first made; while that one is still '

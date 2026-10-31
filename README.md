@@ -347,6 +347,10 @@ trying to send once the send is due, 1 to 4320 minutes (Reply's default is 90); 
 that is refused before any call (`usage.range`). Reply takes them only for a send made later, the
 time zone only with `--schedule-id`, and answers them otherwise with `reply.invalid_request`; a
 Reply before its LinkedIn scheduler answers `--schedule-id` on a LinkedIn send the same way.
+Reply refuses a LinkedIn send it cannot time when it takes it, and nothing is sent: `--schedule-id`
+naming no schedule is `schedule.not_found`, a schedule with no window Reply can send in is
+`schedule.no_slot`, and a contact without the time zone `--use-contact-time-zone` reads the
+schedule in is `contact.time_zone_missing`.
 
 ```sh
 echo '{"body":"Following up on my note."}' | reply contact linkedin-message --contact-id 456 --linkedin-account-id 34 --message - --schedule-id 41 --use-contact-time-zone --retry-window-minutes 120

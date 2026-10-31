@@ -176,6 +176,16 @@ const REFUSALS: Record<string, Refusal> = {
     'directLinkedIn.voiceTooLong': {
         status: 400, code: 'linkedin.voice_too_long', title: 'The voice message would be longer than Reply allows, so nothing was sent.',
     },
+    // A LinkedIn send timed by a schedule: refused when it is taken, before anything is held.
+    'directLinkedIn.scheduleNotFound': {
+        status: 404, code: 'schedule.not_found', title: 'Reply has no sending schedule by that id that this account can use, so nothing was sent.',
+    },
+    'directLinkedIn.scheduleHasNoSlot': {
+        status: 409, code: 'schedule.no_slot', title: 'The sending schedule has no window Reply can send in, so nothing was sent.',
+    },
+    'directLinkedIn.contactTimeZoneMissing': {
+        status: 409, code: 'contact.time_zone_missing', title: 'Reply holds no time zone for the contact to read the schedule in, so nothing was sent.',
+    },
 };
 
 const LIMITS: Record<string, string> = {'directLinkedIn.dailyLimitReached': 'daily', 'directLinkedIn.weeklyLimitReached': 'weekly'};
