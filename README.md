@@ -338,7 +338,9 @@ A LinkedIn send timed by `--schedule-id` may answer `state` `waitingForSchedule`
 the schedule's next opening, so `send_after` is left out, and `estimated_send_at` is when Reply
 expects to send it, an ISO-8601 UTC moment, or null when the schedule does not open within 30 days
 of the moment the send waits from: its `--send-after`, or when Reply took it. Reply sends it within
-about 10 minutes of that moment. It is added only when Reply gives it.
+about 10 minutes of that moment. `estimated_send_at` means something only with `state`
+`waitingForSchedule`, where null says the schedule does not open within those 30 days; Reply gives
+it null on any other state, and that null says nothing. It is added only when Reply gives it.
 
 The four LinkedIn sends also take `--use-contact-time-zone` / `--no-use-contact-time-zone` and
 `--retry-window-minutes <n>`; `contact send-email` takes neither. `--use-contact-time-zone` reads the
@@ -382,7 +384,8 @@ Both answer the send under the CLI's names, each null when Reply gives none: `re
 `channel`, `contact_id`, `state`, `send_after`, `sent_at`, `message_id`, `failure_reason` and
 `cancelled_at`. `failure_code`, `missing_variables`, `rendered_subject` and `rendered_body` are
 added only when Reply gives them, and so is `estimated_send_at`, read the same way as on the send
-but as of the read: its 30 days then count from `--send-after`, or from now once that has passed.
+but as of the read: its 30 days then count from `--send-after`, or from now once that has passed,
+and it means something only while `state` is `waitingForSchedule`.
 `failure_reason` is a sentence for a person and never parsed;
 `failure_code` is Reply's code for the failure, the one to branch on. A failed send may carry no
 `failure_code`: it is then null, and `failure_reason` is all Reply says of it. `direct-send cancel` of a send already cancelled answers it
