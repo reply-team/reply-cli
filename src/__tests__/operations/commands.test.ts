@@ -58,11 +58,12 @@ describe('operations/commands', ()=>{
             expect(c.registeredArguments[0].description, name).toContain('email-<n>, linkedin-<n> or linkedin-scheduled-<n>');
             expect(flat, name).toContain('failure_code, missing_variables, rendered_subject and rendered_body are added only when Reply gives them');
             expect(flat, name).toContain('failure_reason is a sentence for a person, never parsed; failure_code is Reply\'s code for the failure');
-            expect(flat, name).toContain('estimated_send_at is added only when Reply gives it: when Reply expects a send waiting for its '
-                + 'schedule\'s next opening to go out, or null when the schedule does not open within 30 days of the moment the send '
-                + 'waits from: its --send-after, or now once that has passed');
-            expect(flat, name).toContain('estimated_send_at means something only with state waitingForSchedule, where null says the '
-                + 'schedule does not open within those 30 days; Reply gives it null on any other state, and that null says nothing');
+            expect(flat, name).toContain('estimated_send_at is added only when Reply gives it, and is when Reply expects a send waiting '
+                + 'for its schedule\'s next opening to go out');
+            expect(flat, name).toContain('Reply sets estimated_send_at in waitingForSchedule only and gives it null in every other state; '
+                + 'it is null in waitingForSchedule too when the schedule does not open within 30 days of the moment the send waits '
+                + 'from: its --send-after, or now once that has passed');
+            expect(flat, name).not.toContain('that null says nothing');
         }
         const cancel = help_of(sub(direct_send_command, 'cancel')).replace(/\s+/g, ' ');
         expect(cancel).toContain('Cancelling a send already cancelled answers it again, so running it again is safe');
@@ -315,10 +316,11 @@ describe('operations/commands', ()=>{
             // Every send takes a schedule and its time zone; only the LinkedIn sends take a retry window and map the refusals.
             const linkedin = name !== 'send-email';
             expect(flat, text).toContain('A send timed by --schedule-id may answer state waitingForSchedule');
-            expect(flat, text).toContain('estimated_send_at is when Reply expects to send it, or null when the schedule does not open within '
-                + '30 days of the moment the send waits from: its --send-after, or when Reply took it');
-            expect(flat, text).toContain('estimated_send_at means something only with state waitingForSchedule, where null says the '
-                + 'schedule does not open within those 30 days; Reply gives it null on any other state, and that null says nothing');
+            expect(flat, text).toContain('send_after is then left out, and estimated_send_at is when Reply expects to send it.');
+            expect(flat, text).toContain('Reply sets estimated_send_at in waitingForSchedule only and gives it null in every other state; '
+                + 'it is null in waitingForSchedule too when the schedule does not open within 30 days of the moment the send waits '
+                + 'from: its --send-after, or when Reply took it');
+            expect(flat, text).not.toContain('that null says nothing');
             expect(flat, text).toContain('--use-contact-time-zone sends useContactTimeZone true: the schedule\'s windows are read in the '
                 + 'contact\'s time zone; --no-use-contact-time-zone sends false, the schedule\'s own zone; with neither, the schedule\'s '
                 + 'own setting holds. Reply takes it only with --schedule-id, and answers it otherwise with errors[] (reply.invalid_request)');

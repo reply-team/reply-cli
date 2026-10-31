@@ -336,17 +336,16 @@ const scheduler_options = (c: Command): Command=>time_zone_options(c)
 
 // What a send timed by a schedule answers while it waits for the schedule's next opening, the time zone it is read in, and
 // the refusals of one Reply cannot time.
-const SCHEDULED = 'A send timed by --schedule-id may answer state waitingForSchedule, held for the schedule\'s next opening:\n'
-    + 'send_after is then left out, and estimated_send_at is when Reply expects to send it, or null when the schedule does\n'
-    + 'not open within 30 days of the moment the send waits from: its --send-after, or when Reply took it.\n'
-    + 'estimated_send_at means something only with state waitingForSchedule, where null says the schedule does not open\n'
-    + 'within those 30 days; Reply gives it null on any other state, and that null says nothing. It is added only when\n'
-    + 'Reply gives it. --use-contact-time-zone sends useContactTimeZone true: the schedule\'s windows are read in the\n'
-    + 'contact\'s time zone; --no-use-contact-time-zone sends false, the schedule\'s own zone; with neither, the schedule\'s\n'
+const SCHEDULED = 'A send timed by --schedule-id may answer state waitingForSchedule, held for the schedule\'s next opening: send_after is\n'
+    + 'then left out, and estimated_send_at is when Reply expects to send it. Reply sets estimated_send_at in\n'
+    + 'waitingForSchedule only and gives it null in every other state; it is null in waitingForSchedule too when the schedule\n'
+    + 'does not open within 30 days of the moment the send waits from: its --send-after, or when Reply took it. It is added\n'
+    + 'only when Reply gives it. --use-contact-time-zone sends useContactTimeZone true: the schedule\'s windows are read in\n'
+    + 'the contact\'s time zone; --no-use-contact-time-zone sends false, the schedule\'s own zone; with neither, the schedule\'s\n'
     + 'own setting holds. Reply takes it only with --schedule-id, and answers it otherwise with errors[]\n'
     + '(reply.invalid_request). schedule.not_found is a --schedule-id naming no schedule this account can read,\n'
-    + 'schedule.no_slot a schedule with no active day that has a time range, so it never opens, and\n'
-    + 'contact.time_zone_missing a contact without the time zone --use-contact-time-zone reads it in; none sends anything.\n';
+    + 'schedule.no_slot a schedule with no active day that has a time range, so it never opens, and contact.time_zone_missing\n'
+    + 'a contact without the time zone --use-contact-time-zone reads it in; none sends anything.\n';
 
 // The codes of a send Reply cannot time, the same on every route.
 const SCHEDULE_CODES = ['schedule.not_found', 'schedule.no_slot', 'contact.time_zone_missing'];
@@ -620,12 +619,12 @@ const DIRECT_SEND = 'Result: {"reference","channel","contact_id","state","send_a
     + 'failure_reason is a sentence for a person, never parsed; failure_code is Reply\'s code for the failure, the one to\n'
     + 'branch on. A failed send may carry no failure_code: it is then null, and failure_reason is all Reply says of it.\n'
     + 'missing_variables lists the template variables Reply could not fill, and rendered_subject and rendered_body are the\n'
-    + 'text as Reply filled it in. estimated_send_at is added only when Reply gives it: when Reply expects a send waiting for\n'
-    + 'its schedule\'s next opening to go out, or null when the schedule does not open within 30 days of the moment the send\n'
-    + 'waits from: its --send-after, or now once that has passed. estimated_send_at means something only with state\n'
-    + 'waitingForSchedule, where null says the schedule does not open within those 30 days; Reply gives it null on any other\n'
-    + 'state, and that null says nothing. A Reply without this route answers reply.refused with status 404 and no reply_code;\n'
-    + 'a reference of any other form never leaves the CLI, so that 404 means this Reply has no such route.\n'
+    + 'text as Reply filled it in. estimated_send_at is added only when Reply gives it, and is when Reply expects a send\n'
+    + 'waiting for its schedule\'s next opening to go out. Reply sets estimated_send_at in waitingForSchedule only and gives\n'
+    + 'it null in every other state; it is null in waitingForSchedule too when the schedule does not open within 30 days of\n'
+    + 'the moment the send waits from: its --send-after, or now once that has passed. A Reply without this route answers\n'
+    + 'reply.refused with status 404 and no reply_code; a reference of any other form never leaves the CLI, so that 404 means\n'
+    + 'this Reply has no such route.\n'
     + 'direct_send.not_found is a reference that Reply has no send for, a send of another team included.\n'
     + 'direct_send.not_owned is an email send made by a teammate this user may not act for.\n';
 

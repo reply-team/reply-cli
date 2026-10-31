@@ -337,11 +337,10 @@ before any call (`usage.reference`, exit 2), and nothing else is read from it. A
 
 A send timed by `--schedule-id` may answer `state` `waitingForSchedule`: Reply holds it for the
 schedule's next opening, so `send_after` is left out, and `estimated_send_at` is when Reply expects
-to send it, an ISO-8601 UTC moment, or null when the schedule does not open within 30 days of the
-moment the send waits from: its `--send-after`, or when Reply took it. Reply sends it within about
-10 minutes of that moment. `estimated_send_at` means something only with `state`
-`waitingForSchedule`, where null says the schedule does not open within those 30 days; Reply gives
-it null on any other state, and that null says nothing. It is added only when Reply gives it.
+to send it, an ISO-8601 UTC moment; Reply sends it within about 10 minutes of that moment. Reply
+sets `estimated_send_at` in `waitingForSchedule` only and gives it null in every other state; it is
+null in `waitingForSchedule` too when the schedule does not open within 30 days of the moment the
+send waits from: its `--send-after`, or when Reply took it. It is added only when Reply gives it.
 
 Every direct send also takes `--use-contact-time-zone` / `--no-use-contact-time-zone`, and the four
 LinkedIn sends take `--retry-window-minutes <n>` as well; `contact send-email` does not take the
@@ -387,17 +386,17 @@ Both answer the send under the CLI's names, each null when Reply gives none: `re
 `contact_id`, `state`, `send_after`, `sent_at`, `message_id`, `failure_reason` and `cancelled_at`.
 `failure_code`, `missing_variables`, `rendered_subject` and `rendered_body` are added only when
 Reply gives them, and so is `estimated_send_at`, read the same way as on the send but as of the
-read: its 30 days then count from `--send-after`, or from now once that has passed, and it means
-something only while `state` is `waitingForSchedule`. `failure_reason` is a sentence for a person
-and never parsed; `failure_code` is Reply's code for the failure, the one to branch on. A failed
-send may carry no `failure_code`: it is then null, and `failure_reason` is all Reply says of it.
-`direct-send cancel` of a send already cancelled answers it again. A send already gone out, failed
-or going out is `direct_send.already_sent`, `direct_send.already_failed` or
-`direct_send.already_sending`; the last is a LinkedIn send made for later that Reply is handing to
-the account's queue or that waits or runs there, even while `direct-send get` still reads it
-`queued`. A reference Reply has no send for, a send of another team included, is
-`direct_send.not_found`, and an email send made by a teammate this user may not act for is
-`direct_send.not_owned`, to a read and a cancel alike. A `503` that Reply answers with
+read: set in `waitingForSchedule` only and null in every other state, and null there too when the
+schedule does not open within 30 days counted from `--send-after`, or from now once that has passed.
+`failure_reason` is a sentence for a person and never parsed; `failure_code` is Reply's code for the
+failure, the one to branch on. A failed send may carry no `failure_code`: it is then null, and
+`failure_reason` is all Reply says of it. `direct-send cancel` of a send already cancelled answers
+it again. A send already gone out, failed or going out is `direct_send.already_sent`,
+`direct_send.already_failed` or `direct_send.already_sending`; the last is a LinkedIn send made for
+later that Reply is handing to the account's queue or that waits or runs there, even while
+`direct-send get` still reads it `queued`. A reference Reply has no send for, a send of another team
+included, is `direct_send.not_found`, and an email send made by a teammate this user may not act for
+is `direct_send.not_owned`, to a read and a cancel alike. A `503` that Reply answers with
 `directSend.cancelNotConfirmed` is `direct_send.cancel_not_confirmed` (exit 1): Reply could not
 confirm the cancel, and says the send is still queued or waiting for its schedule, so run the cancel
 again, as Reply asks; `retry_after` carries Reply's `Retry-After` when it sends one. Any other `5xx`
