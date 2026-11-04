@@ -2,7 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import {forget_pack, journal_entry, read_journal, record_pack} from './journal';
-import {pack_dir} from './packs';
+import {RETIRED_PACKS, pack_dir} from './packs';
 import type {Env} from '../config';
 import type {Detected_host} from './detect';
 import type {Journal_entry} from './journal';
@@ -398,6 +398,10 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
 
     // install and update both copy. update only touches packs the host
     // already has: a journal entry, or the old plugin this copy replaces.
+    // The retired packs an earlier version copied here at this scope stay,
+    // and the outcome names them so the report can say so.
+    const left = RETIRED_PACKS.filter(name=>entry_for(name) !== undefined);
+    const copy_base: Host_outcome = left.length ? {...base, retired_packs: left} : base;
     const targets = operation === 'update'
         ? packs.filter(p=>entry_for(p.name) || adopt[p.name] !== undefined)
         : packs;
@@ -423,7 +427,7 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
     };
     if (!pending.length)
     {
-        return {...base, packs: outcomes};
+        return {...copy_base, packs: outcomes};
     }
     if (dry_run)
     {
@@ -431,7 +435,7 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
         {
             outcomes.push(copied_outcome(pack.name, pack.version, from_for(pack.name).from));
         }
-        return {...base, packs: outcomes};
+        return {...copy_base, packs: outcomes};
     }
 
     // A per-host filesystem failure here (a read-only destination, a package
@@ -501,7 +505,7 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
         // far could itself be a collision failure, so check the actions.
         const landed = outcomes.some(p=>p.action !== 'failed');
         return {
-            ...base,
+            ...copy_base,
             status: landed ? 'partial' : 'failed',
             packs: outcomes,
             reason: 'copy-failed',
@@ -509,7 +513,7 @@ const run_flat = async(opts: Flat_opts): Promise<Host_outcome>=>{
             hint: 'check filesystem permissions for the skills directory, then re-run',
         };
     }
-    return {...base, packs: outcomes, status: status_of(outcomes)};
+    return {...copy_base, packs: outcomes, status: status_of(outcomes)};
 };
 
 export {canonical, copy_dir, skills_target, status_of, run_flat};

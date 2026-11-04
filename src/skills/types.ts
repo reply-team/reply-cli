@@ -92,6 +92,10 @@ type Host_outcome = {
     // The other plugins of that marketplace still installed, by id. This CLI
     // leaves them, and the report says it no longer offers them.
     retired_plugins?: string[];
+    // The retired packs an earlier version copied into this host at the
+    // run's scope, by pack name. Left in place like the plugins, and named
+    // beside them.
+    retired_packs?: string[];
     // Mirrors Host_def.verified: false means this assistant's paths come from
     // its documentation and have not been confirmed by a verification run of
     // our own. Stamped by the orchestrator for every host it

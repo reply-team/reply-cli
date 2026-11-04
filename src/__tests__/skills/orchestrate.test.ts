@@ -6,7 +6,7 @@ import {cli_version} from '../../config';
 import {HOSTS} from '../../skills/hosts';
 import {record_pack} from '../../skills/journal';
 import {run_skills} from '../../skills/orchestrate';
-import {human_lines} from '../../skills/report';
+import {exit_code_for, human_lines} from '../../skills/report';
 import type {Detect_deps} from '../../skills/detect';
 import type {Runner} from '../../skills/types';
 import {UsageError} from '../../utils/errors';
@@ -195,6 +195,14 @@ describe('run_skills', ()=>{
         }));
         expect(report.hosts[1].status).toBe('ok');
         expect(fs.existsSync(skill_file(home, '.cursor', 'skills'))).toBe(true);
+    });
+
+    it('does nothing on update for a host with neither a copy nor the old plugin, and exits 0', async()=>{
+        const report = await run_skills(opts({operation: 'update', agents: ['cursor']}));
+        expect(report.hosts[0]).toMatchObject({host: 'cursor', status: 'ok', packs: []});
+        expect(human_lines(report).join('\n')).toMatch(/Cursor +· nothing to do/);
+        expect(exit_code_for(report)).toBe(0);
+        expect(fs.existsSync(path.join(home, '.cursor', 'skills'))).toBe(false);
     });
 
     it('reports current on every host when update finds the copy already at this version', async()=>{

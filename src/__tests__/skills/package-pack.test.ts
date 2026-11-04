@@ -215,6 +215,32 @@ describe('install from the package', ()=>{
         expect(lines[0]).toContain('agentic-runtime@reply-skills');
     });
 
+    it('names in that line the retired packs an earlier version copied into a host, on install and on update', async()=>{
+        fs.mkdirSync(path.join(home, '.cursor'), {recursive: true});
+        for (const [pack, skill] of [['ai-sdr-core', 'sdr-operations'], ['agentic-runtime', 'durable-work']])
+        {
+            const file = path.join(home, '.cursor', 'skills', skill, 'SKILL.md');
+            fs.mkdirSync(path.dirname(file), {recursive: true});
+            fs.writeFileSync(file, `${skill}\n`);
+            record_pack('cursor', 'user', pack, {
+                version: '0.1.0', ref: 'main', commit: 'cafe123', scope: 'user',
+                files: [file], complete: true, installed_at: '2026-10-01T00:00:00.000Z',
+            }, env);
+        }
+        for (const operation of ['install', 'update'] as const)
+        {
+            const report = await run_skills(opts({operation, agents: ['cursor']}));
+            expect(report.hosts[0].retired_packs, operation).toEqual(['ai-sdr-core', 'agentic-runtime']);
+            const lines = human_lines(report).filter(l=>l.includes('no longer offers'));
+            expect(lines, operation).toHaveLength(1);
+            expect(lines[0], operation).toContain(
+                'ai-sdr-core, agentic-runtime stay installed in Cursor; this CLI no longer offers them.');
+        }
+        // Only what this run's scope recorded: the user-scope copies are not a project's.
+        const project = await run_skills(opts({agents: ['cursor'], project: true}));
+        expect(project.hosts[0].retired_packs).toBeUndefined();
+    });
+
     it('proceeds when the old plugin cannot be removed, and says it is still there beside the copy', async()=>{
         const {run} = plugin_runner({listed: ['reply-adapter@reply-skills'], uninstall_fails: true});
         const report = await run_skills(opts({}, run));

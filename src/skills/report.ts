@@ -82,18 +82,32 @@ const old_plugin_lines = (host: Host_outcome): string[]=>{
     ];
 };
 
-// One line for the run: the other plugins of the old marketplace stay where
-// they are, and this CLI no longer offers them.
+// One line for the run: what an earlier version installed and this CLI no
+// longer offers stays where it is — the other plugins of the old marketplace,
+// and copies of the retired packs. Hosts that keep the same names share a
+// clause, so each host is named with its own.
 const retired_plugins_line = (report: Report): string | undefined=>{
-    const hosts = report.hosts.filter(h=>h.retired_plugins?.length);
-    if (!hosts.length)
+    const groups = new Map<string, {names: string[]; labels: string[]}>();
+    for (const host of report.hosts)
+    {
+        const names = [...host.retired_plugins ?? [], ...host.retired_packs ?? []];
+        if (!names.length)
+        {
+            continue;
+        }
+        const key = names.join(', ');
+        const group = groups.get(key) ?? {names, labels: []};
+        group.labels.push(host.label);
+        groups.set(key, group);
+    }
+    if (!groups.size)
     {
         return undefined;
     }
-    const ids = [...new Set(hosts.flatMap(h=>h.retired_plugins ?? []))];
-    const one = ids.length === 1;
-    return pc.dim(`${ids.join(', ')} ${one ? 'stays' : 'stay'} installed in ${joined(hosts.map(h=>h.label), 'and')};`
-        + ` this CLI no longer offers ${one ? 'it' : 'them'}.`);
+    const clauses = [...groups.values()].map(({names, labels})=>
+        `${names.join(', ')} ${names.length === 1 ? 'stays' : 'stay'} installed in ${joined(labels, 'and')}`);
+    const all = new Set([...groups.values()].flatMap(g=>g.names));
+    return pc.dim(`${clauses.join('; ')}; this CLI no longer offers ${all.size === 1 ? 'it' : 'them'}.`);
 };
 
 // Groups a host's packs by what happened, so one host is one line.

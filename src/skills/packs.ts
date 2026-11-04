@@ -23,6 +23,11 @@ const RETIRED: Record<string, string> = {
 };
 const RETIRED_PACKS = ['ai-sdr-core', 'agentic-runtime'];
 
+// A name's own entry only: a plain object also answers `constructor`,
+// `toString` and `__proto__` from its prototype.
+const own = (table: Record<string, string>, key: string): string | undefined=>
+    Object.hasOwn(table, key) ? table[key] : undefined;
+
 // The plugin marketplace an earlier version registered in Claude Code and
 // Codex. Its plugins are named `<pack>@<marketplace>`; this CLI only finds
 // and removes them, and never registers the marketplace again.
@@ -55,12 +60,12 @@ const resolve_packs = (requested: string[], operation: Operation): Pack[]=>{
     const wanted: Pack[] = [];
     for (const raw of requested)
     {
-        const retired = RETIRED[raw];
+        const retired = own(RETIRED, raw);
         if (retired !== undefined && !reaches_retired)
         {
             throw new UsageError(MOVED, {code: 'usage.skills_pack_moved'});
         }
-        const name = retired ?? ALIASES[raw] ?? raw;
+        const name = retired ?? own(ALIASES, raw) ?? raw;
         if (name !== PACK_NAME && retired === undefined)
         {
             throw new UsageError(`Unknown skills pack '${raw}'.`, {

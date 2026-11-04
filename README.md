@@ -566,7 +566,8 @@ An earlier version of this CLI installed three packs, and installed them on
 Claude Code and Codex through the assistant's own plugin CLI. `install` and
 `update` now replace the old `reply-adapter` plugin with the copied
 files, removing that plugin through the assistant's own CLI, and say so; the
-two other plugins stay installed, and the report names them. `list` and
+two other plugins, and copies of the two other packs, stay installed, and the
+report names them. `list` and
 `remove` still find what an earlier version installed, under the old pack
 names too.
 

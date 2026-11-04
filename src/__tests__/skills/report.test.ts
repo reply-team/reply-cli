@@ -186,7 +186,20 @@ describe('human_lines', ()=>{
             host({host: 'codex', label: 'Codex', retired_plugins: ['ai-sdr-core@reply-skills']}),
         ])).map(strip).filter(l=>l.includes('no longer offers'));
         expect(lines).toEqual([
-            'ai-sdr-core@reply-skills, agentic-runtime@reply-skills stay installed in Claude Code and Codex;'
+            'ai-sdr-core@reply-skills, agentic-runtime@reply-skills stay installed in Claude Code;'
+            + ' ai-sdr-core@reply-skills stays installed in Codex; this CLI no longer offers them.',
+        ]);
+    });
+
+    it('names retired packs a host copied beside its plugins, hosts with the same names together', ()=>{
+        const lines = human_lines(report([
+            host({retired_plugins: ['ai-sdr-core@reply-skills'], retired_packs: ['agentic-runtime']}),
+            host({host: 'cursor', label: 'Cursor', retired_packs: ['ai-sdr-core', 'agentic-runtime']}),
+            host({host: 'github-copilot', label: 'GitHub Copilot', retired_packs: ['ai-sdr-core', 'agentic-runtime']}),
+        ])).map(strip).filter(l=>l.includes('no longer offers'));
+        expect(lines).toEqual([
+            'ai-sdr-core@reply-skills, agentic-runtime stay installed in Claude Code;'
+            + ' ai-sdr-core, agentic-runtime stay installed in Cursor and GitHub Copilot;'
             + ' this CLI no longer offers them.',
         ]);
     });

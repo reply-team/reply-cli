@@ -58,6 +58,23 @@ describe('resolve_packs', ()=>{
         expect((caught as UsageError).hint).toContain('reply-adapter');
         expect((caught as UsageError).hint).toContain('adapter');
     });
+
+    it('takes nothing from the object prototype for a pack name', ()=>{
+        for (const raw of ['constructor', 'toString', '__proto__'])
+        {
+            for (const operation of ['install', 'list'] as const)
+            {
+                let caught: unknown;
+                try {
+                    resolve_packs([raw], operation);
+                } catch (error) {
+                    caught = error;
+                }
+                expect(caught, `${raw} on ${operation}`).toBeInstanceOf(UsageError);
+                expect((caught as UsageError).code, `${raw} on ${operation}`).toBe('usage.skills_pack');
+            }
+        }
+    });
 });
 
 describe('plugin_id', ()=>{
