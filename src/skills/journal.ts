@@ -5,14 +5,15 @@ import {RuntimeError} from '../utils/errors';
 import type {Env} from '../config';
 import type {Scope} from './types';
 
-// Installer-side state, and only for flat-directory hosts: native hosts are
-// asked directly (`plugin list --json`), so there is no second copy of the
-// truth to drift. This records what we wrote so `update` is idempotent and
-// `remove` deletes our files and nothing else.
+// Installer-side state: what we wrote into each host's skills directory, so
+// `update` is idempotent and `remove` deletes our files and nothing else.
 
 type Journal_entry = {
     version: string;
-    ref: string;
+    // Written by earlier versions, which copied the packs from a repository:
+    // the ref and commit they copied. Read and tolerated, never written now;
+    // the version alone says what a copy from the package is.
+    ref?: string;
     commit?: string;
     scope: Scope;
     // The resolved project root a project-scope entry belongs to. The key

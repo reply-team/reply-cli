@@ -1,17 +1,17 @@
 // Verifies `reply skills install` end to end, against real and simulated assistants.
 //
-// Not part of `npm test`: it clones from GitHub, and exercising a native host for
-// real needs that assistant installed on the machine. It is safe to run on a
-// working machine because:
-// - Native hosts (Claude Code, Codex) are pointed at throwaway config directories
-//   via CLAUDE_CONFIG_DIR and CODEX_HOME. They are only *genuinely* exercised
-//   (real binary resolved from the real PATH) when really installed — otherwise
-//   they still appear in the report with status 'skipped'.
-// - Flat-directory hosts (Cursor, Gemini CLI, GitHub Copilot) are always
+// Not part of `npm test`: reaching the plugin CLI of Claude Code or Codex for
+// real needs that assistant installed on the machine. Every host receives the
+// skills as files copied from this package. It is safe to run on a working
+// machine because:
+// - Claude Code and Codex are pointed at throwaway config directories via
+//   CLAUDE_CONFIG_DIR and CODEX_HOME. Their plugin CLI, asked only about the
+//   plugins an earlier version installed, is reached only when the real binary
+//   resolves from the real PATH; without it they are reported 'skipped'.
+// - The other hosts (Cursor, Antigravity, GitHub Copilot, Windsurf) are always
 //   *simulated* inside the sandbox below, regardless of what is really on this
-//   machine. That is deliberate: it is the only way the flat-directory install
-//   path gets exercised at all, on any machine. Do not read a flat host's 'ok'
-//   status here as evidence that assistant is really installed.
+//   machine. Do not read their 'ok' status here as evidence that assistant is
+//   really installed.
 // - Both rely on HOME/USERPROFILE being redirected to the sandbox. That is not
 //   assumed: before anything mutating runs, a child process given the exact same
 //   env is asked what os.homedir() resolves to, and the run aborts without
@@ -98,6 +98,7 @@ const real_reply_config_dir = ()=>{
 const snapshot_state = ()=>{
     const real_home = os.homedir();
     const paths_to_check = [
+        path.join(real_home, '.claude', 'skills'),
         path.join(real_home, '.copilot'),
         path.join(real_home, '.copilot', 'skills'),
         path.join(real_home, '.cursor'),
@@ -241,19 +242,17 @@ try {
             const installed = JSON.parse(cli('skills', 'install', '--json'));
             console.log(`hosts: ${installed.hosts.map(h=>`${h.host}=${h.status}`).join(' ') || '(none detected)'}`);
 
-            // Flat hosts are always simulated (see header), so `installed.hosts`
-            // is never actually empty on any machine with git on PATH — the
-            // brief's original "no assistant at all" exit is dead code below.
-            // What is real and worth reporting is whether a *native* host (the
-            // only kind that is only exercised when genuinely installed) was
-            // actually present: status 'skipped' means its config directory
-            // marker existed but the real binary could not be resolved from
-            // the real PATH, i.e. it is not really installed here.
-            const native_ids = new Set(['claude-code', 'codex']);
-            const native_present = installed.hosts.some(h=>native_ids.has(h.host) && h.status !== 'skipped');
-            console.log(native_present
-                ? '✓ at least one native assistant (Claude Code/Codex) is really installed and was exercised for real'
-                : 'ℹ no native assistant (Claude Code, Codex) is really installed on this machine — only the always-simulated flat hosts were exercised');
+            // The simulated hosts (see header) mean `installed.hosts` is never
+            // empty in practice. What is real and worth reporting is whether
+            // Claude Code or Codex, detected only when the real binary resolves,
+            // was actually present: status 'skipped' means its config directory
+            // marker existed but the binary could not be resolved from the real
+            // PATH, i.e. it is not really installed here.
+            const cli_hosts = new Set(['claude-code', 'codex']);
+            const cli_present = installed.hosts.some(h=>cli_hosts.has(h.host) && h.status !== 'skipped');
+            console.log(cli_present
+                ? '✓ Claude Code or Codex is really installed and was exercised for real'
+                : 'ℹ neither Claude Code nor Codex is really installed on this machine — only the simulated hosts were exercised');
 
             if (!installed.hosts.length)
             {
@@ -267,9 +266,9 @@ try {
                 {
                     fail('no host reported ok');
                 }
-                if (installed.resolved.join(',') !== 'ai-sdr-core,reply-adapter,agentic-runtime')
+                if (installed.resolved.join(',') !== 'reply-adapter')
                 {
-                    fail(`unexpected resolve order: ${installed.resolved.join(',')}`);
+                    fail(`unexpected packs: ${installed.resolved.join(',')}`);
                 }
 
                 // Idempotency: the second run must change nothing.
@@ -280,20 +279,27 @@ try {
                     fail(`re-install was not idempotent: ${actions.join(',')}`);
                 }
 
-                // Selective install pulls the core.
-                cli('skills', 'remove', '--json');
-                const selective = JSON.parse(cli('skills', 'install', 'adapter', '--json'));
-                if (selective.resolved.join(',') !== 'ai-sdr-core,reply-adapter')
-                {
-                    fail(`selective install did not pull the core: ${selective.resolved.join(',')}`);
+                // A pack this CLI no longer ships is refused as a usage error.
+                try {
+                    cli('skills', 'install', 'core', '--json');
+                    fail('installing a pack this CLI no longer ships was allowed');
+                } catch (e) {
+                    if (e.status === 2)
+                    {
+                        console.log('✓ a pack this CLI no longer ships is refused with exit 2');
+                    }
+                    else
+                    {
+                        fail(`installing a pack this CLI no longer ships exited ${e.status}, not 2`);
+                    }
                 }
 
-                // Removing the core alone must be refused.
-                try {
-                    cli('skills', 'remove', 'core', '--json');
-                    fail('removing the core while the adapter is installed was allowed');
-                } catch {
-                    console.log('✓ removing a needed dependency is refused');
+                // Remove with no pack takes everything away again.
+                const removed = JSON.parse(cli('skills', 'remove', '--json'));
+                const left = removed.hosts.flatMap(h=>(h.packs ?? []).filter(p=>p.action !== 'removed'));
+                if (left.length)
+                {
+                    fail(`remove left packs behind: ${left.map(p=>`${p.name}=${p.action}`).join(',')}`);
                 }
             }
         }

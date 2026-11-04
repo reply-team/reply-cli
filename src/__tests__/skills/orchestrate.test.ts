@@ -1,7 +1,8 @@
-import {describe, it, expect, beforeEach, afterEach, vi} from 'vitest';
+import {describe, it, expect, beforeEach, afterEach} from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import {cli_version} from '../../config';
 import {HOSTS} from '../../skills/hosts';
 import {record_pack} from '../../skills/journal';
 import {run_skills} from '../../skills/orchestrate';
@@ -13,7 +14,7 @@ import {UsageError} from '../../utils/errors';
 let root: string;
 let home: string;
 
-// A machine with Claude Code (native, on PATH) and Cursor (flat).
+// A machine with Claude Code (its CLI on PATH) and Cursor.
 const detect_deps = (): Detect_deps=>({
     home,
     platform: 'linux',
@@ -22,26 +23,19 @@ const detect_deps = (): Detect_deps=>({
     glob_first: ()=>undefined,
 });
 
+// Plugin rows for `claude plugin list --json`, in its direct-array shape.
+let listed: {id: string; version: string; scope: string}[] = [];
 const calls: string[][] = [];
 const run: Runner = async(bin, args)=>{
     calls.push([bin, ...args]);
     if (args.includes('list'))
     {
-        return {code: 0, stdout: JSON.stringify({plugins: []}), stderr: ''};
+        return {code: 0, stdout: JSON.stringify(listed), stderr: ''};
     }
     return {code: 0, stdout: '', stderr: ''};
 };
 
-const fake_clone = async()=>{
-    const dir = fs.mkdtempSync(path.join(root, 'clone-'));
-    for (const name of ['ai-sdr-core', 'reply-adapter', 'agentic-runtime'])
-    {
-        const skills = path.join(dir, 'plugins', name, 'skills', `${name}-skill`);
-        fs.mkdirSync(skills, {recursive: true});
-        fs.writeFileSync(path.join(skills, 'SKILL.md'), `---\nname: ${name}-skill\ndescription: d\n---\n`);
-    }
-    return {dir, commit: 'cafe123'};
-};
+const env = ()=>({REPLY_CONFIG_DIR: path.join(root, 'config')});
 
 const opts = (over: Record<string, unknown> = {})=>({
     operation: 'install' as const,
@@ -51,18 +45,18 @@ const opts = (over: Record<string, unknown> = {})=>({
     deps: {
         detect: detect_deps(),
         run,
-        clone: fake_clone,
         home,
         cwd: path.join(root, 'project'),
-        tmp_root: root,
-        env: {REPLY_CONFIG_DIR: path.join(root, 'config')},
-        fetch_impl: vi.fn().mockRejectedValue(new TypeError('offline')) as unknown as typeof fetch,
+        env: env(),
     },
     ...over,
 });
 
+const skill_file = (...dir: string[])=>path.join(...dir, 'reply-api', 'SKILL.md');
+
 beforeEach(()=>{
     calls.length = 0;
+    listed = [];
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'reply-orch-'));
     home = path.join(root, 'home');
     fs.mkdirSync(path.join(home, '.claude'), {recursive: true});
@@ -73,22 +67,21 @@ afterEach(()=>{
 });
 
 describe('run_skills', ()=>{
-    it('installs all three packs into both host classes', async()=>{
+    it('copies the pack into every detected host and asks Claude Code only for its plugin list', async()=>{
         const report = await run_skills(opts());
         expect(report.hosts.map(h=>h.host)).toEqual(['claude-code', 'cursor']);
-        expect(report.resolved).toEqual(['ai-sdr-core', 'reply-adapter', 'agentic-runtime']);
+        expect(report.resolved).toEqual(['reply-adapter']);
         expect(report.hosts.every(h=>h.status === 'ok')).toBe(true);
         expect(report.summary).toEqual({installed: 2, skipped: 0, failed: 0});
-        // Native host went through its own CLI…
-        expect(calls[0]).toEqual(['/usr/bin/claude', 'plugin', 'marketplace', 'add', 'reply-team/reply-skills']);
-        // …and the flat host got real files.
-        expect(fs.existsSync(path.join(home, '.cursor', 'skills', 'ai-sdr-core-skill', 'SKILL.md'))).toBe(true);
+        expect(calls).toEqual([['/usr/bin/claude', 'plugin', 'list', '--json']]);
+        expect(fs.existsSync(skill_file(home, '.claude', 'skills'))).toBe(true);
+        expect(fs.existsSync(skill_file(home, '.cursor', 'skills'))).toBe(true);
     });
 
-    it('records requested separately from resolved on a selective install', async()=>{
+    it('reports the pack under its canonical name when asked for by its alias', async()=>{
         const report = await run_skills(opts({requested: ['adapter']}));
         expect(report.requested).toEqual(['reply-adapter']);
-        expect(report.resolved).toEqual(['ai-sdr-core', 'reply-adapter']);
+        expect(report.resolved).toEqual(['reply-adapter']);
     });
 
     it('narrows to one host with --agent', async()=>{
@@ -112,18 +105,20 @@ describe('run_skills', ()=>{
         await expect(run_skills(opts({requested: ['ghost']}))).rejects.toThrow(UsageError);
     });
 
-    it('keeps a native host on its own CLI under --project when it can express project scope', async()=>{
+    it('copies into the repository under --project, and removes an old project-scope plugin in that scope', async()=>{
+        listed = [
+            {id: 'reply-adapter@reply-skills', version: '0.3.0', scope: 'project'},
+            {id: 'reply-adapter@reply-skills', version: '0.3.0', scope: 'user'},
+        ];
         const report = await run_skills(opts({agents: ['claude-code'], project: true}));
         expect(report.hosts[0].scope).toBe('project');
-        // Claude Code expresses project scope natively, so it stays native.
-        expect(calls.some(c=>c.includes('--scope') && c.includes('project'))).toBe(true);
+        expect(fs.existsSync(skill_file(root, 'project', '.claude', 'skills'))).toBe(true);
+        expect(calls.filter(c=>c[2] === 'uninstall')).toEqual([
+            ['/usr/bin/claude', 'plugin', 'uninstall', 'reply-adapter@reply-skills', '--scope', 'project'],
+        ]);
     });
 
-    it('routes Codex through the flat adapter under --project, and reports scope honestly', async()=>{
-        // Codex's plugin mechanism is user-scoped only, so a project-scoped run
-        // must fall back to the flat adapter (.agents/skills), never run_native,
-        // and the outcome must still say 'project' rather than silently
-        // dropping the request back to 'user'.
+    it('copies Codex into .agents/skills under --project and never asks its user-scoped plugin CLI', async()=>{
         fs.mkdirSync(path.join(home, '.codex'), {recursive: true});
         const base_deps = opts().deps;
         const report = await run_skills(opts({
@@ -141,51 +136,48 @@ describe('run_skills', ()=>{
             },
         }));
         expect(report.hosts.map(h=>h.host)).toEqual(['codex']);
-        expect(report.hosts[0].kind).toBe('flat-skills-dir');
         expect(report.hosts[0].scope).toBe('project');
-        // No native CLI call ever reached the Codex binary.
         expect(calls.some(c=>c[0] === '/usr/bin/codex')).toBe(false);
-        expect(fs.existsSync(
-            path.join(root, 'project', '.agents', 'skills', 'ai-sdr-core-skill', 'SKILL.md'),
-        )).toBe(true);
+        expect(fs.existsSync(skill_file(root, 'project', '.agents', 'skills'))).toBe(true);
     });
 
-    it('reports the source ref and the resolved commit for flat installs', async()=>{
+    it('reports the version it copied as the source', async()=>{
         const report = await run_skills(opts({agents: ['cursor']}));
-        expect(report.source).toEqual({repo: 'reply-team/reply-skills', ref: 'main', commit: 'cafe123'});
+        expect(report.source).toEqual({version: cli_version()});
     });
 
-    it('changes nothing on --dry-run', async()=>{
+    it('changes nothing on --dry-run, the old plugin included', async()=>{
+        listed = [{id: 'reply-adapter@reply-skills', version: '0.3.0', scope: 'user'}];
         const report = await run_skills(opts({dry_run: true}));
-        expect(fs.existsSync(path.join(home, '.cursor', 'skills', 'ai-sdr-core-skill'))).toBe(false);
-        expect(calls.some(c=>c.includes('install'))).toBe(false);
+        expect(fs.existsSync(path.join(home, '.cursor', 'skills', 'reply-api'))).toBe(false);
+        expect(fs.existsSync(path.join(home, '.claude', 'skills', 'reply-api'))).toBe(false);
+        expect(calls.some(c=>c.includes('uninstall'))).toBe(false);
         expect(report.hosts.every(h=>h.status === 'ok')).toBe(true);
+        expect(report.hosts[0].old_plugin).toEqual({id: 'reply-adapter@reply-skills', action: 'removed'});
     });
 
-    it('refuses to remove a pack that another pack depends on', async()=>{
-        await run_skills(opts({agents: ['cursor']}));
-        await expect(run_skills(opts({operation: 'remove', requested: ['core'], agents: ['cursor']})))
-            .rejects.toThrow(UsageError);
-    });
-
-    it('allows removing a pack nothing depends on', async()=>{
-        await run_skills(opts({agents: ['cursor']}));
-        const report = await run_skills(opts({operation: 'remove', requested: ['runtime'], agents: ['cursor']}));
-        expect(report.hosts[0].packs?.map(p=>p.name)).toEqual(['agentic-runtime']);
-    });
-
-    it('removes everything when remove is given no pack', async()=>{
+    it('removes the copy when remove is given no pack', async()=>{
         await run_skills(opts({agents: ['cursor']}));
         const report = await run_skills(opts({operation: 'remove', agents: ['cursor']}));
-        expect(report.hosts[0].packs?.map(p=>p.action)).toEqual(['removed', 'removed', 'removed']);
-        expect(fs.existsSync(path.join(home, '.cursor', 'skills', 'ai-sdr-core-skill'))).toBe(false);
+        expect(report.hosts[0].packs).toEqual([{name: 'reply-adapter', action: 'removed', version: cli_version()}]);
+        expect(fs.existsSync(path.join(home, '.cursor', 'skills', 'reply-api'))).toBe(false);
+    });
+
+    it('copies anyway, and says so, when the host cannot list its plugins', async()=>{
+        const failing_list: Runner = async(bin, args)=>{
+            calls.push([bin, ...args]);
+            return {code: 1, stdout: '', stderr: 'not signed in'};
+        };
+        const report = await run_skills(opts({agents: ['claude-code'], deps: {...opts().deps, run: failing_list}}));
+        expect(report.hosts[0].status).toBe('ok');
+        expect(fs.existsSync(skill_file(home, '.claude', 'skills'))).toBe(true);
+        expect(report.hosts[0].hint).toContain('not signed in');
+        expect(calls.some(c=>c.includes('uninstall'))).toBe(false);
     });
 
     it('keeps other hosts working when one host throws unexpectedly', async()=>{
-        // run_native has no try/catch of its own around its process calls, so
-        // an injected Runner that rejects escapes it — exactly the kind of
-        // surprise (a journal write racing an antivirus scanner, a flaky
-        // network call) the orchestrator itself must contain per host.
+        // An injected Runner that rejects escapes the plugin listing — the kind
+        // of surprise run_skills itself must contain per host.
         const flaky_run: Runner = async(bin, args)=>{
             if (bin === '/usr/bin/claude')
             {
@@ -201,69 +193,35 @@ describe('run_skills', ()=>{
         expect(report.hosts[0]).toEqual(expect.objectContaining({
             host: 'claude-code', status: 'failed', reason: 'host-error', detail: 'ECONNRESET',
         }));
-        // The second host was never touched by the first host's failure.
         expect(report.hosts[1].status).toBe('ok');
-        expect(fs.existsSync(path.join(home, '.cursor', 'skills', 'ai-sdr-core-skill', 'SKILL.md'))).toBe(true);
+        expect(fs.existsSync(skill_file(home, '.cursor', 'skills'))).toBe(true);
     });
 
-    it('reports no commit when nothing was cloned this run (native-only)', async()=>{
-        const report = await run_skills(opts({agents: ['claude-code']}));
-        expect(report.source).toEqual({repo: 'reply-team/reply-skills', ref: 'main'});
-    });
-
-    // I3 (final review): `update` was never exercised through run_skills at
-    // all, which is exactly where the disagreement showed — one native host
-    // and one flat host answering "already at the target version" two
-    // different ways in a single report.
-    it('reports current from both adapters when update finds every pack already at the target version', async()=>{
-        // The host reports all three packs installed at the registry version,
-        // so neither adapter has anything to move.
-        const installed_run: Runner = async(bin, args)=>{
-            calls.push([bin, ...args]);
-            if (args.includes('list'))
-            {
-                return {
-                    code: 0,
-                    stdout: JSON.stringify({plugins: ['ai-sdr-core', 'reply-adapter', 'agentic-runtime']
-                        .map(name=>({name, marketplace: 'reply-skills', version: '0.1.0'}))}),
-                    stderr: '',
-                };
-            }
-            return {code: 0, stdout: '', stderr: ''};
-        };
-        const with_run = (): Record<string, unknown>=>({...opts().deps, run: installed_run});
-
-        await run_skills(opts({deps: with_run()}));
-        const report = await run_skills(opts({operation: 'update', deps: with_run()}));
+    it('reports current on every host when update finds the copy already at this version', async()=>{
+        await run_skills(opts());
+        const report = await run_skills(opts({operation: 'update'}));
 
         expect(report.hosts.map(h=>h.host)).toEqual(['claude-code', 'cursor']);
         for (const host of report.hosts)
         {
-            expect(host.packs?.map(p=>[p.name, p.action])).toEqual([
-                ['ai-sdr-core', 'current'],
-                ['reply-adapter', 'current'],
-                ['agentic-runtime', 'current'],
-            ]);
+            expect(host.packs?.map(p=>[p.name, p.action])).toEqual([['reply-adapter', 'current']]);
         }
         // Nothing changed, so the "start a new session" advice must not fire.
         expect(human_lines(report).join('\n')).not.toMatch(/new session/i);
     });
 
-    // The flat adapter clones a ref, so `update` can rewrite every file while
-    // the version stays 0.1.0. That still reports `current` — the version did
-    // not move — but the user must reload to pick the new files up.
-    it('still advises a new session when update rewrote files at an unchanged version', async()=>{
-        const clone_at = (commit: string)=>async()=>{
-            const {dir} = await fake_clone();
-            return {dir, commit};
-        };
-        await run_skills(opts({agents: ['cursor'], deps: {...opts().deps, clone: clone_at('aaaaaaa')}}));
-        const report = await run_skills(opts({
-            operation: 'update', agents: ['cursor'],
-            deps: {...opts().deps, clone: clone_at('bbbbbbb')},
-        }));
+    // A copy that never finished is repaired at an unchanged version: still
+    // `current`, but the files moved and the user must reload.
+    it('still advises a new session when update repaired a copy at an unchanged version', async()=>{
+        record_pack('cursor', 'user', 'reply-adapter', {
+            version: cli_version(), scope: 'user', files: [], complete: false,
+            installed_at: '2026-07-30T00:00:00.000Z',
+        }, env());
+        const report = await run_skills(opts({operation: 'update', agents: ['cursor']}));
 
-        expect(report.hosts[0].packs?.map(p=>p.action)).toEqual(['current', 'current', 'current']);
+        expect(report.hosts[0].packs).toEqual([
+            {name: 'reply-adapter', action: 'current', version: cli_version(), refreshed: true},
+        ]);
         expect(human_lines(report).join('\n')).toMatch(/new session/i);
     });
 
@@ -306,7 +264,7 @@ describe('run_skills', ()=>{
     it('reports packs recorded for a host the registry no longer has', async()=>{
         const orphan_file = path.join(home, '.gemini', 'skills', 'ai-sdr-core-skill', 'SKILL.md');
         record_pack('gemini-cli', 'user', 'ai-sdr-core', {
-            version: '0.3.0', ref: 'main', commit: 'deadbee', scope: 'user',
+            version: '0.3.0', scope: 'user',
             files: [orphan_file], complete: true, installed_at: '2026-07-30T00:00:00.000Z',
         }, {REPLY_CONFIG_DIR: path.join(root, 'config')});
 
@@ -325,17 +283,5 @@ describe('run_skills', ()=>{
         const report = await run_skills(opts({operation: 'list'}));
         expect(report.orphans).toBeUndefined();
         expect(human_lines(report).join('\n')).not.toContain('no longer supports');
-    });
-
-    it('reports no commit when the clone failed', async()=>{
-        const failing_clone = async()=>{
-            throw new Error('git not found');
-        };
-        const report = await run_skills(opts({
-            agents: ['cursor'],
-            deps: {...opts().deps, clone: failing_clone},
-        }));
-        expect(report.hosts[0]).toEqual(expect.objectContaining({status: 'failed', reason: 'clone-failed'}));
-        expect(report.source).toEqual({repo: 'reply-team/reply-skills', ref: 'main'});
     });
 });

@@ -23,24 +23,26 @@ describe('host registry', ()=>{
         expect(HOSTS.filter(h=>!h.needs_new_session).map(h=>h.id)).toEqual(['antigravity']);
     });
 
-    it('gives every native host a CLI and every flat host a skills directory', ()=>{
+    it('gives every host a user and a project skills directory, and a binary to any host with a plugin CLI', ()=>{
         for (const host of HOSTS)
         {
-            if (host.kind === 'native-plugin')
+            expect(host.kind, host.id).toBe('flat-skills-dir');
+            expect(host.user_skills_dir, host.id).toBeTruthy();
+            expect(host.project_skills_dir, host.id).toBeTruthy();
+            if (host.plugin_cli)
             {
-                expect(host.cli, host.id).toBeDefined();
                 expect(host.binaries.length, host.id).toBeGreaterThan(0);
             }
-            else
-            {
-                expect(host.user_skills_dir, host.id).toBeDefined();
-            }
-            // Every host needs a project target: flat hosts use theirs directly,
-            // native hosts fall back to it when --project cannot be expressed.
-            expect(host.project_skills_dir, host.id).toBeDefined();
         }
     });
-    
+
+    it('copies into the directories Claude Code and Codex read skills from', ()=>{
+        expect(host_by_id('claude-code').user_skills_dir).toBe(path.join('.claude', 'skills'));
+        expect(host_by_id('claude-code').project_skills_dir).toBe(path.join('.claude', 'skills'));
+        expect(host_by_id('codex').user_skills_dir).toBe(path.join('.agents', 'skills'));
+        expect(host_by_id('codex').project_skills_dir).toBe(path.join('.agents', 'skills'));
+    });
+
     it('never lets one host\'s config directory contain another\'s', ()=>{
         const dirs = HOSTS.flatMap(h=>h.config_dirs.map(dir=>({id: h.id, dir})));
         for (const a of dirs)
@@ -53,23 +55,24 @@ describe('host registry', ()=>{
         }
     });
 
-    it('builds Claude Code argument vectors', ()=>{
-        const cli = host_by_id('claude-code').cli!;
-        expect(cli.marketplace_add('reply-team/reply-skills'))
-            .toEqual(['plugin', 'marketplace', 'add', 'reply-team/reply-skills']);
-        expect(cli.install('ai-sdr-core', 'reply-skills', 'user'))
-            .toEqual(['plugin', 'install', 'ai-sdr-core@reply-skills', '--scope', 'user']);
-        expect(cli.remove('ai-sdr-core', 'reply-skills')).toEqual(['plugin', 'uninstall', 'ai-sdr-core@reply-skills']);
+    it('builds Claude Code argument vectors, user scope being its default', ()=>{
+        const cli = host_by_id('claude-code').plugin_cli!;
         expect(cli.list_json()).toEqual(['plugin', 'list', '--json']);
+        expect(cli.remove('reply-adapter@reply-skills', 'user'))
+            .toEqual(['plugin', 'uninstall', 'reply-adapter@reply-skills']);
+        expect(cli.remove('reply-adapter@reply-skills', 'project'))
+            .toEqual(['plugin', 'uninstall', 'reply-adapter@reply-skills', '--scope', 'project']);
     });
 
     it('builds Codex argument vectors, which spell the verbs differently', ()=>{
-        const cli = host_by_id('codex').cli!;
-        expect(cli.marketplace_add('reply-team/reply-skills'))
-            .toEqual(['plugin', 'marketplace', 'add', 'reply-team/reply-skills', '--json']);
-        expect(cli.install('ai-sdr-core', 'reply-skills', 'user'))
-            .toEqual(['plugin', 'add', 'ai-sdr-core@reply-skills', '--json']);
-        expect(cli.remove('ai-sdr-core', 'reply-skills')).toEqual(['plugin', 'remove', 'ai-sdr-core@reply-skills', '--json']);
+        const cli = host_by_id('codex').plugin_cli!;
+        expect(cli.list_json()).toEqual(['plugin', 'list', '--json']);
+        expect(cli.remove('reply-adapter@reply-skills', 'user'))
+            .toEqual(['plugin', 'remove', 'reply-adapter@reply-skills', '--json']);
+    });
+
+    it('asks no other host for plugins', ()=>{
+        expect(HOSTS.filter(h=>h.plugin_cli).map(h=>h.id)).toEqual(['claude-code', 'codex']);
     });
 
     it('knows Codex ships off PATH on Windows', ()=>{

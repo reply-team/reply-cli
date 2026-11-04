@@ -1,0 +1,38 @@
+<!-- Generated. Do not edit by hand. -->
+
+# Family 21 — Introspection and runtime · mapping
+
+Generated from `fulfilment.yaml` in this skill. Edit that file, not this one.
+
+*The organisation around the work* · 15 operations, 15 with an entry · contract 2.0.0 · adapter `reply`
+
+**Reading the table.** † marks a core operation. *Reach* and *approval* are the
+contract's own classification, reproduced here unchanged: knowing which endpoint performs an
+operation alters neither what it is nor what it needs approved, and the two columns are present so
+a reader can see for themselves that the mapping changed nothing. *Fulfilment* is this adapter's
+claim — `direct` (one surface performs it), `composed` (several calls in the stated order),
+`partial` (performed, but not to the contract's full promise, with the unkept part named) or
+`absent` (not performable here today, with the evidence). *Surface* names an endpoint group and a
+documentation page, never a path: the path, its parameters and its body come from that page at call
+time. An operation shown as *not assessed* has no entry at all — nobody has answered for it yet,
+which is a different statement from `absent`.
+
+| Operation | Reach | Approval | Fulfilment | Surface | Scopes | Notes |
+|---|---|---|---|---|---|---|
+| `operation.search` † | `read` | `auto` | `absent` | — | — | *because:* Nothing in this product answers it, and nothing should — the thing being searched is the contract, which the core pack carries. Recorded absent because this register answers only for what this adapter performs. |
+| `operation.describe` | `read` | `auto` | `absent` | — | — | *because:* As above: an operation's meaning, its refusals and its five properties come from the contract in the core pack, not from any API surface here. |
+| `operation.preview` | `read` | `auto` | `partial`<br>*documented Beta or Coming soon* | sequence-contacts -> Get sequence preview for a contact; ai-sdr-sequences -> Preview autopilot results; live-data -> Preview a Live Data search | — | *missing:* There is no general dry run. Three specific acts can be previewed, all of them beta, and every other write is knowable only by performing it — which means that for most operations the preview an approval gate wants has to be assembled from reads before the write, not requested from the product.<br>Preview before Start on a Live Data search is a hard rule, not a courtesy: Start spends the user's allowance and Preview does not. |
+| `plan.validate` | `read` | `auto` | `absent` | — | — | *because:* not evidenced — no surface takes a plan. Authority, ordering, preconditions and headroom are checked step by step against the reads each step needs, by the agent, before anything runs. |
+| `contract.describe` | `read` | `auto` | `absent` | — | — | *because:* Nothing here describes the contract — which version is in force, what was renamed from what, and what it binds an agent to is the core pack's own answer, not this API's. |
+| `capability.list` † | `read` | `auto` | `partial` | user-account -> Get current user, List team users | — | *missing:* The granted scope set is not returned by anything. Identity and the teams a credential may act in are readable; what it may actually do is discovered only by making a call and reading an insufficient_scope refusal back. For an unattended run that means the honest per-capability answer is unknown until something is attempted, and unknown is not permission.<br>Neither read needs a scope, so both work with any working credential. When a capability has to be known in advance, the key's scopes are visible in the product settings rather than through the API. |
+| `vocabulary.list` † | `read` | `auto` | `partial` | inbox -> List inbox categories | `inbox:read` | *missing:* Only the reply categories this account has declared. Enrolment statuses, meeting outcomes, step intents, exit reasons, content-policy rule classes and the properties a branch condition may be written over have no listing at all — checked against the endpoint index, there is no enumeration surface. For those kinds the answer is unknown, which the contract allows and which is not the same as an empty list. |
+| `schema.describe` | `read` | `auto` | `partial` | custom-fields -> List all custom fields, Get a custom field | `contacts:read` | *missing:* Custom fields only, and only on people. No surface describes the standard fields of a record kind or says which of them may be written; that is prose on the record's own doc pages, read at call time, and it cannot be enumerated. |
+| `channel.describe` | `read` | `auto` | `absent` | — | — | *because:* not evidenced — no documented surface states a channel's own rules: whether automation is sanctioned there, how its allowance works, how long a reply window stays open or what recording consent it expects. A sending account's configured limits are a different thing and belong to the sender operations; using them as an answer here would confuse one mailbox's ceiling with the channel's rules. |
+| `adapter.describe` | `read` | `auto` | `partial` | the Rate limits guide page; background-jobs -> Get a background job | `other:read` | *missing:* Nothing returns any of this. The request ceilings and the queued-versus-inline rule are documented in prose — reporting and stats endpoints are limited harder than the rest, and a long write answers with a background job to poll — but batch ceilings, page sizes and the scope and lifetime of an idempotency key are not stated, and none of it can be read per installation. |
+| `adapter.verify` | `read` | `auto` | `absent` | — | — | *because:* not evidenced — nothing here tests fulfilment. This register is the claim, made from documentation rather than from a run, and it is the thing a verification would check rather than a substitute for one. |
+| `job.get` | `read` | `auto` | `partial` | background-jobs -> Get a background job, List background jobs | `other:read` | *missing:* Status, progress and the terminal timestamps are documented, but the result payload is opaque and its shape varies by job kind, so the per-item ledger the contract requires is not guaranteed to be there. Where one outcome per item is needed, reconcile against the entities themselves rather than trusting the job to carry it.<br>A long write completes when the job reaches a terminal state, not when the call returns. Never blind-retry a bulk write that failed — the first attempt may have partly succeeded. |
+| `job.cancel` | `control` | `confirm_once` | `direct` | background-jobs -> Cancel a background job | `other:operate` | Items already processed stay processed, exactly as the contract has it. Cancelling is not an undo: it leaves a partial result, and that result has to be reconciled and reported. |
+| `invocation.get` | `read` | `auto` | `absent` | — | — | *because:* not evidenced — checked against the endpoint index, nothing looks a call up by the idempotency key it was sent with. After a lost response the only recovery is the operation's own check-first read, which is why every write in the contract names one. |
+| `term.resolve` | `read` | `auto` | `absent` | — | — | *because:* Nothing here resolves a word onto a concept. The vocabularies this account declares can be listed, but mapping a colleague's shorthand or another system's label onto the right concept is the contract's own answer in the core pack. |
+
+The contract's own classification of these operations — the full five properties, the check before repeating, the invariants they enforce — is in `catalog-21-introspection.md`, in the `sdr-operations` skill. What this adapter does not reach, and why, is collected in [fulfilment.md](fulfilment.md).

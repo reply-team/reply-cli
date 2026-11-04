@@ -3,32 +3,24 @@
 
 type Pack = {
     name: string;
-    display_name: string;
+    // The CLI's own version for the pack it ships; empty for a retired pack,
+    // whose version is whatever an earlier version recorded.
     version: string;
-    description: string;
-    dependencies: string[];
-};
-
-type Pack_registry = {
-    marketplace: string;
-    packs: Pack[];
+    // A pack this CLI no longer offers: `list` and `remove` still reach it.
+    retired?: boolean;
 };
 
 type Scope = 'user' | 'project';
 
-type Host_kind = 'native-plugin' | 'flat-skills-dir';
+// Every host receives the pack as files in its skills directory.
+type Host_kind = 'flat-skills-dir';
 
-// Argument vectors for a host's own plugin CLI, minus the resolved binary.
-// Kept as data so a new host is a registry entry, not a branch in the adapter.
-type Host_cli = {
-    marketplace_add: (repo: string)=>string[];
+// Argument vectors for a host's own plugin CLI, minus the resolved binary,
+// used only to find and remove plugins an earlier version of this CLI
+// installed there. Kept as data so the spelling is a registry entry.
+type Plugin_cli = {
     list_json: ()=>string[];
-    install: (pack: string, marketplace: string, scope: Scope)=>string[];
-    update: (pack: string, marketplace: string)=>string[];
-    remove: (pack: string, marketplace: string)=>string[];
-    // Scope of the update operation: 'pack' for per-pack updates (Claude Code),
-    // 'marketplace' for whole-marketplace updates (Codex).
-    update_scope: 'pack' | 'marketplace';
+    remove: (id: string, scope: Scope)=>string[];
 };
 
 type Host_def = {
@@ -37,16 +29,15 @@ type Host_def = {
     kind: Host_kind;
     // Paths relative to the home directory; the first that exists proves presence.
     config_dirs: string[];
-    // Command names to look for on PATH (native hosts).
+    // Command names to look for on PATH, for a host with a plugin CLI.
     binaries: string[];
     // Absolute-path candidates for hosts that ship off PATH, with {home} expanded.
     binary_paths: string[];
-    cli?: Host_cli;
-    // Skills directory relative to the home directory (flat hosts).
-    user_skills_dir?: string;
-    // Skills directory relative to the project root (flat hosts, and native
-    // hosts whose plugin mechanism cannot express a project install).
-    project_skills_dir?: string;
+    plugin_cli?: Plugin_cli;
+    // Skills directory relative to the home directory.
+    user_skills_dir: string;
+    // Skills directory relative to the project root.
+    project_skills_dir: string;
     // Whether the user must start a new session before the assistant sees newly
     // installed skills. Required, so a new host decides it rather than omits it.
     needs_new_session: boolean;
@@ -56,19 +47,29 @@ type Host_def = {
 type Pack_action = 'installed' | 'upgraded' | 'current' | 'removed' | 'failed';
 
 type Pack_outcome = {
+    // The pack's name, or a plugin's `<pack>@<marketplace>` id for a plugin
+    // an earlier version installed through the host's own CLI.
     name: string;
     action: Pack_action;
     version?: string;
     from?: string;
     detail?: string;
-    // Set by the flat adapter on a `current` pack whose files this run
-    // rewrote anyway: a newer commit on the same ref, or a repair of an
-    // install that never finished. The version did not move — so the action
-    // is `current`, never `upgraded` — but the bytes on disk did, and that is
-    // what decides whether the user has to start a new assistant session.
-    // Never set by a native host, which cannot see below its own plugin CLI,
-    // and never by a dry run, which does not clone and so cannot know.
+    // Set on a `current` pack whose files this run rewrote anyway: the repair
+    // of an install that never finished. The version did not move — so the
+    // action is `current`, never `upgraded` — but the bytes on disk did, and
+    // that is what decides whether the user has to start a new assistant
+    // session. Never set by a dry run.
     refreshed?: boolean;
+    // A pack this CLI no longer offers, found by `list` or `remove`.
+    retired?: boolean;
+};
+
+// The reply-adapter plugin an earlier version installed through the host's
+// own CLI, which an install or update of the copy takes away.
+type Old_plugin = {
+    id: string;
+    action: 'removed' | 'failed';
+    detail?: string;
 };
 
 type Host_status = 'ok' | 'partial' | 'failed' | 'skipped';
@@ -83,13 +84,14 @@ type Host_outcome = {
     reason?: string;
     detail?: string;
     hint?: string;
-    // The commit a flat host actually cloned in this run — set only when this
-    // run cloned the skills repository (never on a native host, and never
-    // when nothing was pending, a dry run skipped the clone, or the clone
-    // itself failed). This is what lets the orchestrator report the source
-    // commit without ever attributing a stale or foreign one to a run that
-    // did not produce it.
-    commit?: string;
+    // Set by install and update when the host still had the old reply-adapter
+    // plugin: whether it was removed once the copy landed. A failure leaves
+    // the status alone — the copy is there — and the report says the plugin
+    // still loads beside it.
+    old_plugin?: Old_plugin;
+    // The other plugins of that marketplace still installed, by id. This CLI
+    // leaves them, and the report says it no longer offers them.
+    retired_plugins?: string[];
     // Mirrors Host_def.verified: false means this assistant's paths come from
     // its documentation and have not been confirmed by a verification run of
     // our own. Stamped by the orchestrator for every host it
@@ -117,7 +119,8 @@ type Orphaned_packs = {
 
 type Report = {
     action: Operation;
-    source: {repo: string; ref: string; commit?: string};
+    // What the pack was copied from: this CLI's own package, at its version.
+    source: {version: string};
     requested: string[];
     resolved: string[];
     hosts: Host_outcome[];
@@ -127,12 +130,12 @@ type Report = {
 
 type Run_result = {code: number; stdout: string; stderr: string};
 
-// Injected process runner: the single seam that lets every adapter test run
-// without an assistant installed.
+// Injected process runner: the single seam that lets every plugin-CLI test
+// run without an assistant installed.
 type Runner = (bin: string, args: string[])=>Promise<Run_result>;
 
 export type {
-    Pack, Pack_registry, Scope, Host_kind, Host_cli, Host_def, Orphaned_packs,
+    Pack, Scope, Host_kind, Plugin_cli, Host_def, Orphaned_packs, Old_plugin,
     Pack_action, Pack_outcome, Host_status, Host_outcome,
     Operation, Report, Run_result, Runner,
 };

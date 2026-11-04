@@ -1,13 +1,13 @@
 import {describe, it, expect} from 'vitest';
 import {HOSTS} from '../../skills/hosts';
-import {human_lines, exit_code_for, summarize, dependency_note} from '../../skills/report';
+import {human_lines, exit_code_for, summarize} from '../../skills/report';
 import type {Host_outcome, Report} from '../../skills/types';
 
 const strip = (s: string): string=>s.replace(/\x1b\[[0-9;]*m/g, '');
 const text = (report: Report): string=>human_lines(report).map(strip).join('\n');
 
 const host = (over: Partial<Host_outcome> = {}): Host_outcome=>({
-    host: 'claude-code', label: 'Claude Code', kind: 'native-plugin', scope: 'user', status: 'ok',
+    host: 'claude-code', label: 'Claude Code', kind: 'flat-skills-dir', scope: 'user', status: 'ok',
     packs: [
         {name: 'ai-sdr-core', action: 'installed', version: '0.1.0'},
         {name: 'reply-adapter', action: 'installed', version: '0.1.0'},
@@ -19,7 +19,7 @@ const report = (hosts: Host_outcome[], over: Partial<Report> = {}): Report=>{
     const action = over.action ?? 'install';
     return {
         action,
-        source: {repo: 'reply-team/reply-skills', ref: 'main'},
+        source: {version: '0.1.0'},
         requested: ['ai-sdr-core', 'reply-adapter'],
         resolved: ['ai-sdr-core', 'reply-adapter'],
         hosts,
@@ -152,10 +152,37 @@ describe('human_lines', ()=>{
         expect(out).not.toContain('paths not yet verified');
     });
 
-    it('reports a pulled dependency once', ()=>{
-        expect(dependency_note(['reply-adapter'], ['ai-sdr-core', 'reply-adapter']))
-            .toBe('ai-sdr-core added — required by reply-adapter');
-        expect(dependency_note(['ai-sdr-core'], ['ai-sdr-core'])).toBeUndefined();
+    it('says a retired pack found by list is installed and no longer offered', ()=>{
+        const out = text(report([host({packs: [
+            {name: 'reply-adapter', action: 'current', version: '0.1.0'},
+            {name: 'ai-sdr-core', action: 'current', version: '0.0.9', retired: true},
+        ]})], {action: 'list'}));
+        expect(out).toMatch(/Claude Code +· reply-adapter already current; ai-sdr-core installed, no longer offered/);
+    });
+
+    it('says the old plugin was replaced by the copy', ()=>{
+        const out = text(report([host({old_plugin: {id: 'reply-adapter@reply-skills', action: 'removed'}})]));
+        expect(out).toContain('replaced the reply-adapter@reply-skills plugin with this copy');
+    });
+
+    it('says the old plugin still loads beside the copy, and how to remove it, when it could not be removed', ()=>{
+        const out = text(report([host({
+            scope: 'project',
+            old_plugin: {id: 'reply-adapter@reply-skills', action: 'failed', detail: 'locked'},
+        })]));
+        expect(out).toContain('the reply-adapter@reply-skills plugin is still installed and loads beside this copy: locked');
+        expect(out).toContain('fix: claude plugin uninstall reply-adapter@reply-skills --scope project');
+    });
+
+    it('names the old plugins it leaves in one line for the whole run', ()=>{
+        const lines = human_lines(report([
+            host({retired_plugins: ['ai-sdr-core@reply-skills', 'agentic-runtime@reply-skills']}),
+            host({host: 'codex', label: 'Codex', retired_plugins: ['ai-sdr-core@reply-skills']}),
+        ])).map(strip).filter(l=>l.includes('no longer offers'));
+        expect(lines).toEqual([
+            'ai-sdr-core@reply-skills, agentic-runtime@reply-skills stay installed in Claude Code and Codex;'
+            + ' this CLI no longer offers them.',
+        ]);
     });
 
     it('tells the user a new session is needed after a successful install', ()=>{
@@ -167,9 +194,9 @@ describe('human_lines', ()=>{
         expect(out).not.toMatch(/new session/i);
     });
 
-    // An unchanged version reports `current` in every adapter, which is right —
-    // but a flat host that re-copied a newer commit at that same version did
-    // rewrite the files, and the user has to reload to pick them up.
+    // An unchanged version reports `current`, which is right — but a host
+    // whose unfinished copy was repaired at that same version did rewrite the
+    // files, and the user has to reload to pick them up.
     it('asks for a new session when files were rewritten at an unchanged version', ()=>{
         const out = text(report([host({
             packs: [{name: 'ai-sdr-core', action: 'current', version: '0.1.0', refreshed: true}],

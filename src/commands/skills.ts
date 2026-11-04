@@ -94,7 +94,7 @@ const handle_skills = async(
 };
 
 const skills_command = new Command('skills')
-    .description('Install and manage Reply skill packs in your AI assistants');
+    .description('Install and manage the Reply skills in your AI assistants');
 
 const with_flags = (cmd: Command): Command=>cmd
     .option('-a, --agent <id...>', 'Target these assistants instead of auto-detecting')
@@ -102,19 +102,18 @@ const with_flags = (cmd: Command): Command=>cmd
     .option('--dry-run', 'Show what would happen and change nothing');
 
 const packs_help = `
-Packs: ai-sdr-core (alias core) · reply-adapter (adapter) · agentic-runtime (runtime).
-No pack means all three; dependencies are resolved for you.`;
+Pack: reply-adapter (alias adapter), the skills this CLI ships, at its own version.
+No pack means it.`;
 
 with_flags(skills_command
     .command('install')
-    .argument('[packs...]', 'Packs to install (default: all three)')
-    .description('Install Reply skill packs into every detected assistant'))
+    .argument('[packs...]', 'Pack to install (default: reply-adapter)')
+    .description('Copy the Reply skills from this package into every detected assistant'))
     .addHelpText('after', `${packs_help}
 
 Examples:
   ${PROGRAM_NAME} skills install
-  ${PROGRAM_NAME} skills install core
-  ${PROGRAM_NAME} skills install adapter runtime
+  ${PROGRAM_NAME} skills install --project
   ${PROGRAM_NAME} skills install --agent codex --json`)
     .action(async function(this: Command, packs: string[]) {
         await handle_skills('install', packs, read_globals(this));
@@ -135,8 +134,8 @@ Examples:
 
 with_flags(skills_command
     .command('update')
-    .argument('[packs...]', 'Packs to update (default: all installed)')
-    .description('Update installed packs to the latest published version'))
+    .argument('[packs...]', 'Pack to update (default: reply-adapter, where installed)')
+    .description('Bring the installed skills to the version of this CLI'))
     .addHelpText('after', `${packs_help}
 
 Examples:
@@ -148,15 +147,15 @@ Examples:
 
 with_flags(skills_command
     .command('remove')
-    .argument('[packs...]', 'Packs to remove (default: all of them)')
-    .description('Remove Reply skill packs from your assistants'))
+    .argument('[packs...]', 'Packs to remove (default: everything this CLI installed)')
+    .description('Remove the Reply skills from your assistants'))
     .addHelpText('after', `${packs_help}
-Removing a pack that another installed pack depends on is refused — remove both,
-or run \`${PROGRAM_NAME} skills remove\` with no pack to remove everything.
+Remove also takes the names of packs an earlier version installed, and with no
+pack removes everything this CLI ever installed.
 
 Examples:
   ${PROGRAM_NAME} skills remove
-  ${PROGRAM_NAME} skills remove runtime`)
+  ${PROGRAM_NAME} skills remove adapter --project`)
     .action(async function(this: Command, packs: string[]) {
         await handle_skills('remove', packs, read_globals(this));
     });

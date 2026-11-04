@@ -1,6 +1,6 @@
 import {HOSTS} from './hosts';
 import {pc} from '../utils/output';
-import type {Host_outcome, Operation, Pack_action, Report} from './types';
+import type {Host_outcome, Operation, Pack_outcome, Report} from './types';
 
 // Turns per-host outcomes into what the user reads and what the process
 // returns. The report names only what was found: an assistant that is not on
@@ -12,9 +12,10 @@ import type {Host_outcome, Operation, Pack_action, Report} from './types';
 // 'Windsurf (Devin)' both overrun it and ran their text into the separator.
 const LABEL_WIDTH = Math.max(...HOSTS.map(h=>h.label.length)) + 1;
 
-// "a, b or c" — no trailing comma, and safe at one or zero items.
-const or_list = (items: string[]): string=>
-    items.length < 2 ? items[0] ?? '' : `${items.slice(0, -1).join(', ')} or ${items[items.length - 1]}`;
+// "a, b or c" (or "and") — no trailing comma, and safe at one or zero items.
+const joined = (items: string[], word: string): string=>
+    items.length < 2 ? items[0] ?? '' : `${items.slice(0, -1).join(', ')} ${word} ${items[items.length - 1]}`;
+const or_list = (items: string[]): string=>joined(items, 'or');
 
 // `list` is a query: a host answering "ok" says nothing about whether any pack
 // is actually there. For every other operation, "installed" is the outcome
@@ -28,24 +29,64 @@ const summarize = (hosts: Host_outcome[], action: Operation): Report['summary']=
     failed: hosts.filter(h=>h.status === 'failed').length,
 });
 
-const dependency_note = (requested: string[], resolved: string[]): string | undefined=>{
-    const added = resolved.filter(name=>!requested.includes(name));
-    if (!added.length || !requested.length)
-    {
-        return undefined;
-    }
-    return `${added.join(', ')} added — required by ${requested.join(', ')}`;
-};
-
 const verb = {
     installed: 'installed', upgraded: 'updated', removed: 'removed',
     current: 'already current', failed: 'failed',
 } as const;
 
 // `list` never changes anything: an 'upgraded' pack there means a newer
-// version is available, not that an update already happened underfoot.
-const pack_verb = (report_action: Operation, pack_action: Pack_action): string=>
-    report_action === 'list' && pack_action === 'upgraded' ? 'update available' : verb[pack_action];
+// version is available, not that an update already happened underfoot, and a
+// retired pack is one an earlier version installed and this one no longer
+// offers.
+const pack_verb = (report_action: Operation, pack: Pack_outcome): string=>{
+    if (report_action === 'list' && pack.retired && pack.action === 'current')
+    {
+        return 'installed, no longer offered';
+    }
+    return report_action === 'list' && pack.action === 'upgraded' ? 'update available' : verb[pack.action];
+};
+
+// The command that removes a plugin by hand, spelled from the host's own
+// registry entry.
+const remove_command = (host: Host_outcome, id: string): string | undefined=>{
+    const def = HOSTS.find(h=>h.id === host.host);
+    const bin = def?.binaries[0];
+    return def?.plugin_cli && bin
+        ? [bin, ...def.plugin_cli.remove(id, host.scope ?? 'user')].join(' ')
+        : undefined;
+};
+
+// What happened to the old reply-adapter plugin the copy replaces.
+const old_plugin_lines = (host: Host_outcome): string[]=>{
+    const old = host.old_plugin;
+    if (!old)
+    {
+        return [];
+    }
+    if (old.action === 'removed')
+    {
+        return [pc.dim(`  replaced the ${old.id} plugin with this copy`)];
+    }
+    const fix = remove_command(host, old.id);
+    return [
+        pc.yellow(`  ⚠ the ${old.id} plugin is still installed and loads beside this copy`
+            + `${old.detail ? `: ${old.detail}` : ''}`),
+        ...(fix ? [pc.dim(`  fix: ${fix}`)] : []),
+    ];
+};
+
+// One line for the run: the other plugins of the old marketplace stay where
+// they are, and this CLI no longer offers them.
+const retired_plugins_line = (report: Report): string | undefined=>{
+    const hosts = report.hosts.filter(h=>h.retired_plugins?.length);
+    if (!hosts.length)
+    {
+        return undefined;
+    }
+    const ids = [...new Set(hosts.flatMap(h=>h.retired_plugins ?? []))];
+    return pc.dim(`${ids.join(', ')} stay installed in ${joined(hosts.map(h=>h.label), 'and')};`
+        + ' this CLI no longer offers them.');
+};
 
 // Groups a host's packs by what happened, so one host is one line.
 const host_line = (host: Host_outcome, report_action: Operation): string=>{
@@ -61,7 +102,7 @@ const host_line = (host: Host_outcome, report_action: Operation): string=>{
     const groups = new Map<string, string[]>();
     for (const pack of host.packs ?? [])
     {
-        const key = pack_verb(report_action, pack.action);
+        const key = pack_verb(report_action, pack);
         groups.set(key, [...(groups.get(key) ?? []), pack.name]);
     }
     if (!groups.size)
@@ -79,7 +120,7 @@ const host_line = (host: Host_outcome, report_action: Operation): string=>{
 
 // Hosts this run put something new in front of. The action labels alone cannot
 // answer it: an unchanged version reports `current` in every adapter, which is
-// right, but a flat host re-copying a newer commit at that same version did
+// right, but repairing a copy that never finished at that same version did
 // rewrite the files. `refreshed` carries exactly that, so both facts are
 // consulted.
 const changed_hosts = (report: Report): Host_outcome[]=>report.hosts.filter(h=>
@@ -100,11 +141,6 @@ const human_lines = (report: Report): string[]=>{
         return lines;
     }
     lines.push(pc.green(`✓ detected ${report.hosts.map(h=>h.label).join(', ')}`));
-    const note = dependency_note(report.requested, report.resolved);
-    if (note && report.action === 'install')
-    {
-        lines.push(pc.dim(`  ${note}`));
-    }
     for (const host of report.hosts)
     {
         lines.push(host_line(host, report.action));
@@ -112,12 +148,18 @@ const human_lines = (report: Report): string[]=>{
         {
             lines.push(pc.dim(`  fix: ${host.hint}`));
         }
+        lines.push(...old_plugin_lines(host));
         // Surface pack-level details for failed packs
         const failed_packs = (host.packs ?? []).filter(p=>p.action === 'failed' && p.detail);
         for (const pack of failed_packs)
         {
             lines.push(pc.dim(`  ${pack.name}: ${pack.detail}`));
         }
+    }
+    const retired = retired_plugins_line(report);
+    if (retired)
+    {
+        lines.push(retired);
     }
     // Only the hosts that need it — restarting one that re-reads its skills
     // every turn is work the host does not ask for. Named when a run touched
@@ -150,4 +192,4 @@ const exit_code_for = (report: Report): number=>{
     return report.summary.installed > 0 ? 0 : 1;
 };
 
-export {summarize, dependency_note, host_line, human_lines, exit_code_for};
+export {summarize, host_line, human_lines, exit_code_for};
