@@ -157,7 +157,7 @@ describe('human_lines', ()=>{
             {name: 'reply-adapter', action: 'current', version: '0.1.0'},
             {name: 'ai-sdr-core', action: 'current', version: '0.0.9', retired: true},
         ]})], {action: 'list'}));
-        expect(out).toMatch(/Claude Code +· reply-adapter already current; ai-sdr-core installed, no longer offered/);
+        expect(out).toMatch(/Claude Code +· reply-adapter 0.1.0 already current; ai-sdr-core 0.0.9 installed, no longer offered/);
     });
 
     it('says the old plugin was replaced by the copy', ()=>{
@@ -172,6 +172,12 @@ describe('human_lines', ()=>{
         })]));
         expect(out).toContain('the reply-adapter@reply-skills plugin is still installed and loads beside this copy: locked');
         expect(out).toContain('fix: claude plugin uninstall reply-adapter@reply-skills --scope project');
+    });
+
+    it('says the one old plugin it leaves stays, in the singular', ()=>{
+        const lines = human_lines(report([host({retired_plugins: ['ai-sdr-core@reply-skills']})]))
+            .map(strip).filter(l=>l.includes('no longer offers'));
+        expect(lines).toEqual(['ai-sdr-core@reply-skills stays installed in Claude Code; this CLI no longer offers it.']);
     });
 
     it('names the old plugins it leaves in one line for the whole run', ()=>{
@@ -247,7 +253,7 @@ describe('human_lines', ()=>{
         const out = text(report([host({
             packs: [{name: 'ai-sdr-core', action: 'upgraded', version: '0.2.0', from: '0.1.0'}],
         })], {action: 'list'}));
-        expect(out).toContain('update available');
+        expect(out).toContain('ai-sdr-core 0.1.0 update available');
         expect(out).not.toContain('updated');
     });
 

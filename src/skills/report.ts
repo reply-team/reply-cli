@@ -46,6 +46,13 @@ const pack_verb = (report_action: Operation, pack: Pack_outcome): string=>{
     return report_action === 'list' && pack.action === 'upgraded' ? 'update available' : verb[pack.action];
 };
 
+// `list` answers what is installed, so each pack carries the version on disk:
+// the one an available update would replace, not the one it would bring.
+const listed_name = (report_action: Operation, pack: Pack_outcome): string=>{
+    const installed = pack.from ?? pack.version;
+    return report_action === 'list' && installed ? `${pack.name} ${installed}` : pack.name;
+};
+
 // The command that removes a plugin by hand, spelled from the host's own
 // registry entry.
 const remove_command = (host: Host_outcome, id: string): string | undefined=>{
@@ -84,8 +91,9 @@ const retired_plugins_line = (report: Report): string | undefined=>{
         return undefined;
     }
     const ids = [...new Set(hosts.flatMap(h=>h.retired_plugins ?? []))];
-    return pc.dim(`${ids.join(', ')} stay installed in ${joined(hosts.map(h=>h.label), 'and')};`
-        + ' this CLI no longer offers them.');
+    const one = ids.length === 1;
+    return pc.dim(`${ids.join(', ')} ${one ? 'stays' : 'stay'} installed in ${joined(hosts.map(h=>h.label), 'and')};`
+        + ` this CLI no longer offers ${one ? 'it' : 'them'}.`);
 };
 
 // Groups a host's packs by what happened, so one host is one line.
@@ -103,7 +111,7 @@ const host_line = (host: Host_outcome, report_action: Operation): string=>{
     for (const pack of host.packs ?? [])
     {
         const key = pack_verb(report_action, pack);
-        groups.set(key, [...(groups.get(key) ?? []), pack.name]);
+        groups.set(key, [...(groups.get(key) ?? []), listed_name(report_action, pack)]);
     }
     if (!groups.size)
     {

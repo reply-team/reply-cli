@@ -301,7 +301,7 @@ describe('list and remove over what an earlier version installed', ()=>{
             {name: 'ai-sdr-core', action: 'current', version: '0.1.0', retired: true},
             {name: 'agentic-runtime', action: 'current', version: '0.1.0', retired: true},
         ]);
-        expect(human_lines(report).join('\n')).toContain('ai-sdr-core, agentic-runtime installed, no longer offered');
+        expect(human_lines(report).join('\n')).toContain('reply-adapter 0.1.0 update available; ai-sdr-core 0.1.0, agentic-runtime 0.1.0 installed, no longer offered');
     });
 
     it('removes a journal entry of the earlier shape under its old name, and everything with no name', async()=>{

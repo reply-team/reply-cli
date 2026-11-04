@@ -11,12 +11,12 @@ import type {Report} from '../../skills/types';
 
 const report = (over: Partial<Report> = {}): Report=>({
     action: 'install',
-    source: {repo: 'reply-team/reply-skills', ref: 'main'},
-    requested: ['ai-sdr-core'],
-    resolved: ['ai-sdr-core'],
+    source: {version: '0.1.0'},
+    requested: ['reply-adapter'],
+    resolved: ['reply-adapter'],
     hosts: [{
-        host: 'claude-code', label: 'Claude Code', kind: 'native-plugin', scope: 'user', status: 'ok',
-        packs: [{name: 'ai-sdr-core', action: 'installed', version: '0.1.0'}],
+        host: 'claude-code', label: 'Claude Code', kind: 'flat-skills-dir', scope: 'user', status: 'ok',
+        packs: [{name: 'reply-adapter', action: 'installed', version: '0.1.0'}],
     }],
     summary: {installed: 1, skipped: 0, failed: 0},
     ...over,
@@ -39,7 +39,7 @@ const capture = async(fn: ()=>unknown | Promise<unknown>): Promise<{out: string;
 let dir: string;
 beforeEach(()=>{
     vi.clearAllMocks();
-    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'reply-skills-cmd-'));
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'reply-cli-skills-cmd-'));
     process.env.REPLY_CONFIG_DIR = dir;
 });
 afterEach(()=>{
@@ -55,7 +55,7 @@ describe('handle_skills', ()=>{
         mock_run_skills.mockResolvedValue(report());
         const {out, err} = await capture(()=>handle_skills('install', [], {}));
         expect(err).toContain('detected Claude Code');
-        expect(err).toContain('ai-sdr-core installed');
+        expect(err).toContain('reply-adapter installed');
         expect(out).toBe('');
     });
 
@@ -63,13 +63,13 @@ describe('handle_skills', ()=>{
         mock_run_skills.mockResolvedValue(report({
             action: 'list',
             hosts: [{
-                host: 'claude-code', label: 'Claude Code', kind: 'native-plugin', scope: 'user', status: 'ok',
-                packs: [{name: 'ai-sdr-core', action: 'current', version: '0.1.0'}],
+                host: 'claude-code', label: 'Claude Code', kind: 'flat-skills-dir', scope: 'user', status: 'ok',
+                packs: [{name: 'reply-adapter', action: 'current', version: '0.1.0'}],
             }],
         }));
         const {out, err} = await capture(()=>handle_skills('list', [], {}));
         expect(out).toContain('detected Claude Code');
-        expect(out).toContain('ai-sdr-core already current');
+        expect(out).toContain('reply-adapter 0.1.0 already current');
         expect(err).toBe('');
     });
 
@@ -85,7 +85,7 @@ describe('handle_skills', ()=>{
         const {out} = await capture(()=>handle_skills('install', [], {json: true}));
         const parsed = JSON.parse(out);
         expect(parsed.action).toBe('install');
-        expect(parsed.resolved).toEqual(['ai-sdr-core']);
+        expect(parsed.resolved).toEqual(['reply-adapter']);
         expect(parsed.hosts[0].host).toBe('claude-code');
     });
 
@@ -137,7 +137,7 @@ describe('handle_skills', ()=>{
     it('still prints the report before failing, so the reason is not lost', async()=>{
         mock_run_skills.mockResolvedValue(report({
             hosts: [{
-                host: 'codex', label: 'Codex', kind: 'native-plugin', status: 'failed',
+                host: 'codex', label: 'Codex', kind: 'flat-skills-dir', status: 'failed',
                 reason: 'marketplace-add-failed', detail: 'no network',
             }],
             summary: {installed: 0, skipped: 0, failed: 1},
