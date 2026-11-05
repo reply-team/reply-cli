@@ -10,7 +10,7 @@ let dir: string;
 const env = ()=>({REPLY_CONFIG_DIR: dir});
 
 const entry = (version = '0.1.0', files: string[] = ['a/SKILL.md']): Journal_entry=>({
-    version, ref: 'main', commit: 'abc1234', scope: 'user', files, complete: true, installed_at: '2026-07-30T00:00:00.000Z',
+    version, scope: 'user', files, complete: true, installed_at: '2026-07-30T00:00:00.000Z',
 });
 
 beforeEach(()=>{
@@ -29,6 +29,20 @@ describe('skills journal', ()=>{
     it('records and reads back an entry', ()=>{
         record_pack('cursor', 'user', 'ai-sdr-core', entry(), env());
         expect(journal_entry('cursor', 'user', 'ai-sdr-core', env())).toEqual(entry());
+    });
+
+    it('reads an entry an earlier version wrote, with the ref and commit it copied from', ()=>{
+        const earlier = {
+            version: 1,
+            hosts: {cursor: {user: {'reply-adapter': {
+                version: '0.1.0', ref: 'main', commit: 'abc1234', scope: 'user',
+                files: ['a/SKILL.md'], complete: true, installed_at: '2026-07-30T00:00:00.000Z',
+            }}}},
+        };
+        fs.writeFileSync(skills_file(env()), JSON.stringify(earlier));
+        expect(journal_entry('cursor', 'user', 'reply-adapter', env())).toMatchObject({
+            version: '0.1.0', commit: 'abc1234', files: ['a/SKILL.md'], complete: true,
+        });
     });
 
     it('writes the journal next to the other config files', ()=>{

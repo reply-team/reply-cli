@@ -1,174 +1,87 @@
-import {UsageError, RuntimeError} from '../utils/errors';
-import type {Pack, Pack_registry} from './types';
+import path from 'path';
+import {cli_version} from '../config';
+import {UsageError} from '../utils/errors';
+import type {Operation, Pack} from './types';
 
-// Identity of the knowledge repository. packs.json in that repo is the
-// host-neutral source of truth for pack identity and the dependency graph;
-// PACKS_FALLBACK is a build-time copy so `install` still works offline.
-const REPO = 'reply-team/reply-skills';
-const MARKETPLACE = 'reply-skills';
-const DEFAULT_REF = 'main';
+// The one pack this CLI ships: Reply's own skills, carried in the package
+// beside dist/ and installed at the CLI's own version, so a skill that
+// describes a release's commands is released with them.
+const PACK_NAME = 'reply-adapter';
 
 const ALIASES: Record<string, string> = {
-    core: 'ai-sdr-core',
-    adapter: 'reply-adapter',
-    runtime: 'agentic-runtime',
+    adapter: PACK_NAME,
 };
 
-const PACKS_FALLBACK: Pack_registry = {
-    marketplace: MARKETPLACE,
-    packs: [
-        {
-            name: 'ai-sdr-core',
-            display_name: 'AI SDR Core',
-            version: '0.1.0',
-            description: 'Vendor-neutral AI SDR expertise: the operation contract, playbooks and guardrails.',
-            dependencies: [],
-        },
-        {
-            name: 'reply-adapter',
-            display_name: 'Reply.io Adapter',
-            version: '0.1.0',
-            description: 'Executes the AI SDR Core contract against Reply.io: CLI, API v3, MCP, auth.',
-            dependencies: ['ai-sdr-core'],
-        },
-        {
-            name: 'agentic-runtime',
-            display_name: 'Agentic Runtime',
-            version: '0.1.0',
-            description: 'Durable multi-session work: plans, work items, checkpoints, reports, memory.',
-            dependencies: ['ai-sdr-core'],
-        },
-    ],
+// Packs an earlier version of this CLI installed and this one no longer
+// offers, under every name it accepted for them. `list` and `remove` still
+// reach what was installed under them; `install` and `update` refuse them.
+const RETIRED: Record<string, string> = {
+    'core': 'ai-sdr-core',
+    'ai-sdr-core': 'ai-sdr-core',
+    'runtime': 'agentic-runtime',
+    'agentic-runtime': 'agentic-runtime',
 };
+const RETIRED_PACKS = ['ai-sdr-core', 'agentic-runtime'];
 
-const packs_url = (ref: string = DEFAULT_REF): string=>
-    `https://raw.githubusercontent.com/${REPO}/${ref}/packs.json`;
+// A name's own entry only: a plain object also answers `constructor`,
+// `toString` and `__proto__` from its prototype.
+const own = (table: Record<string, string>, key: string): string | undefined=>
+    Object.hasOwn(table, key) ? table[key] : undefined;
 
-const bad_document = (detail: string): RuntimeError=>
-    new RuntimeError('The skills pack registry is malformed.', {code: 'skills.packs_malformed', detail});
+// The plugin marketplace an earlier version registered in Claude Code and
+// Codex. Its plugins are named `<pack>@<marketplace>`; this CLI only finds
+// and removes them, and never registers the marketplace again.
+const OLD_MARKETPLACE = 'reply-skills';
 
-const as_string = (value: unknown, field: string): string=>{
-    if (typeof value !== 'string' || !value.trim())
+const MOVED = 'The SDR expertise and the runtime skills ship with Jason (github.com/reply-team/jason-ai)'
+    + ' and are not installed by this CLI.';
+
+// The pack's directory in the installed package. This module sits one level
+// under the package root in both layouts — src/skills from a checkout,
+// dist/skills once built — so the same relative path finds it from either.
+const pack_dir = (from: string = __dirname): string=>
+    path.join(from, '..', '..', 'skills', PACK_NAME);
+
+const plugin_id = (pack: string): string=>`${pack}@${OLD_MARKETPLACE}`;
+
+const the_pack = (): Pack=>({name: PACK_NAME, version: cli_version()});
+
+// Requested names (aliases allowed) → the packs to act on. With no name,
+// `install` and `update` mean the one pack, and `list` and `remove` mean
+// everything this CLI ever installed, retired packs included.
+const resolve_packs = (requested: string[], operation: Operation): Pack[]=>{
+    const reaches_retired = operation === 'list' || operation === 'remove';
+    if (!requested.length)
     {
-        throw bad_document(`missing or non-string field: ${field}`);
+        return reaches_retired
+            ? [the_pack(), ...RETIRED_PACKS.map(name=>({name, version: '', retired: true}))]
+            : [the_pack()];
     }
-    return value;
-};
-
-// Parses reply-skills' packs.json. Rejects the document as a whole rather than
-// returning a half-parsed registry — a partially understood dependency graph is
-// worse than no graph.
-const parse_packs = (raw: unknown): Pack_registry=>{
-    const doc = (raw ?? {}) as Record<string, unknown>;
-    const marketplace = (doc.marketplace ?? {}) as Record<string, unknown>;
-    const entries = doc.packs;
-    if (!Array.isArray(entries) || !entries.length)
+    const wanted: Pack[] = [];
+    for (const raw of requested)
     {
-        throw bad_document('packs must be a non-empty array');
-    }
-    const packs: Pack[] = entries.map((entry, i)=>{
-        const e = (entry ?? {}) as Record<string, unknown>;
-        const name = as_string(e.name, `packs[${i}].name`);
-        const deps = e.dependencies === undefined ? [] : e.dependencies;
-        if (!Array.isArray(deps) || deps.some(d=>typeof d !== 'string'))
+        const retired = own(RETIRED, raw);
+        if (retired !== undefined && !reaches_retired)
         {
-            throw bad_document(`packs[${i}].dependencies must be an array of strings`);
+            throw new UsageError(MOVED, {code: 'usage.skills_pack_moved'});
         }
-        return {
-            name,
-            display_name: typeof e.displayName === 'string' ? e.displayName : name,
-            version: as_string(e.version, `packs[${i}].version`),
-            description: typeof e.description === 'string' ? e.description : '',
-            dependencies: deps as string[],
-        };
-    });
-    const known = new Set(packs.map(p=>p.name));
-    for (const pack of packs)
-    {
-        for (const dep of pack.dependencies)
+        const name = retired ?? own(ALIASES, raw) ?? raw;
+        if (name !== PACK_NAME && retired === undefined)
         {
-            if (!known.has(dep))
-            {
-                throw bad_document(`${pack.name} depends on unknown pack '${dep}'`);
-            }
+            throw new UsageError(`Unknown skills pack '${raw}'.`, {
+                code: 'usage.skills_pack',
+                hint: `The pack is ${PACK_NAME} (alias: ${Object.keys(ALIASES).join(', ')})`,
+            });
+        }
+        if (!wanted.some(p=>p.name === name))
+        {
+            wanted.push(retired === undefined ? the_pack() : {name, version: '', retired: true});
         }
     }
-    return {marketplace: as_string(marketplace.name ?? MARKETPLACE, 'marketplace.name'), packs};
-};
-
-// Fetches the registry, degrading to the embedded copy on any problem —
-// unreachable network, HTTP error, or a document we cannot trust. Installing a
-// known-good pack set beats failing because GitHub is having a bad day.
-const load_packs = async(opts: {ref?: string; fetch_impl?: typeof fetch} = {}): Promise<Pack_registry>=>{
-    const fetch_impl = opts.fetch_impl ?? fetch;
-    try {
-        const response = await fetch_impl(packs_url(opts.ref));
-        if (!response.ok)
-        {
-            return PACKS_FALLBACK;
-        }
-        return parse_packs(await response.json());
-    } catch {
-        return PACKS_FALLBACK;
-    }
-};
-
-// Requested names (aliases allowed, empty means everything) → the packs to act
-// on, dependencies always before their dependents.
-//
-// `dependencies: false` returns exactly the requested packs, still in registry
-// order. Removal uses it: `remove reply-adapter` must not drag `ai-sdr-core`
-// along, because other installed packs still need it.
-const resolve_packs = (
-    requested: string[],
-    registry: Pack_registry,
-    opts: {dependencies?: boolean} = {},
-): Pack[]=>{
-    const by_name = new Map(registry.packs.map(p=>[p.name, p]));
-    const valid = registry.packs.map(p=>p.name).join(', ');
-    const wanted = requested.length
-        ? requested.map(raw=>{
-            const name = ALIASES[raw] ?? raw;
-            if (!by_name.has(name))
-            {
-                throw new UsageError(`Unknown skills pack '${raw}'.`, {
-                    code: 'usage.skills_pack',
-                    hint: `Valid packs: ${valid} (aliases: ${Object.keys(ALIASES).join(', ')})`,
-                });
-            }
-            return name;
-        })
-        : registry.packs.map(p=>p.name);
-
-    if (opts.dependencies === false)
-    {
-        const chosen = new Set(wanted);
-        return registry.packs.filter(p=>chosen.has(p.name));
-    }
-
-    const ordered: Pack[] = [];
-    const seen = new Set<string>();
-    const visit = (name: string): void=>{
-        if (seen.has(name))
-        {
-            return;
-        }
-        seen.add(name);
-        const pack = by_name.get(name) as Pack;
-        for (const dep of pack.dependencies)
-        {
-            visit(dep);
-        }
-        ordered.push(pack);
-    };
-    for (const name of wanted)
-    {
-        visit(name);
-    }
-    return ordered;
+    return wanted;
 };
 
 export {
-    REPO, MARKETPLACE, DEFAULT_REF, ALIASES, PACKS_FALLBACK,
-    packs_url, parse_packs, load_packs, resolve_packs,
+    PACK_NAME, ALIASES, RETIRED, RETIRED_PACKS, OLD_MARKETPLACE, MOVED,
+    pack_dir, plugin_id, the_pack, resolve_packs,
 };

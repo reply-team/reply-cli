@@ -1,31 +1,30 @@
-import os from 'os';
-import {run_flat, type Clone_fn} from './adapter-flat';
-import {run_native} from './adapter-native';
-import {default_detect_deps, select_hosts, type Detect_deps} from './detect';
+import {run_flat, status_of} from './adapter-flat';
+import {default_detect_deps, select_hosts, type Detect_deps, type Detected_host} from './detect';
 import {host_ids} from './hosts';
 import {read_journal} from './journal';
-import {DEFAULT_REF, REPO, load_packs, resolve_packs} from './packs';
+import {PACK_NAME, RETIRED_PACKS, plugin_id, resolve_packs} from './packs';
+import {default_runner, old_plugins, remove_plugin} from './plugins';
 import {summarize} from './report';
-import {UsageError} from '../utils/errors';
+import {cli_version} from '../config';
 import type {Env} from '../config';
 import type {
-    Host_def, Host_outcome, Operation, Orphaned_packs, Pack, Report, Runner, Scope,
+    Host_def, Host_outcome, Operation, Orphaned_packs, Pack, Pack_outcome, Report, Runner, Scope,
 } from './types';
 
-// The one flow all four commands share: detect hosts, resolve packs in
-// dependency order, run the right adapter per host, collect outcomes. Every
-// external dependency is injectable so the whole thing is testable offline.
+// The one flow all four commands share: detect hosts, resolve the pack, copy
+// it into each host, and reach the plugins an earlier version installed
+// through a host's own CLI. Every external dependency is injectable so the
+// whole thing is testable offline.
 
 type Skills_deps = {
     detect?: Detect_deps;
     run?: Runner;
-    clone?: Clone_fn;
     home?: string;
     cwd?: string;
-    tmp_root?: string;
     env?: Env;
-    fetch_impl?: typeof fetch;
-    ref?: string;
+    // The directory holding each pack's directory; the package's own
+    // `skills` by default.
+    source?: string;
 };
 
 type Skills_opts = {
@@ -35,35 +34,6 @@ type Skills_opts = {
     project: boolean;
     dry_run: boolean;
     deps?: Skills_deps;
-};
-
-// A dependency may not be removed while something that needs it could stay
-// behind: that is exactly the adapter-without-core state the installer exists to
-// avoid. Deliberately conservative — it refuses based on the dependency graph
-// alone, without first asking every host what it has installed. A selective
-// removal is the rare path, the fix is one flag away, and being wrong in this
-// direction only costs an extra keystroke, while being wrong in the other
-// direction breaks a working assistant.
-const guard_remove = (packs: Pack[], all: Pack[]): void=>{
-    const going = new Set(packs.map(p=>p.name));
-    for (const pack of all)
-    {
-        if (going.has(pack.name))
-        {
-            continue;
-        }
-        const needed = pack.dependencies.filter(d=>going.has(d));
-        if (needed.length)
-        {
-            throw new UsageError(
-                `${pack.name} depends on ${needed.join(', ')}; removing it alone can leave that pack broken.`,
-                {
-                    code: 'usage.skills_remove',
-                    hint: `remove ${pack.name} too, or run \`reply skills remove\` to remove everything`,
-                },
-            );
-        }
-    }
 };
 
 const not_detected = (def: Host_def): Host_outcome=>({
@@ -105,45 +75,112 @@ const orphaned_packs = (env?: Env): Orphaned_packs[]=>{
     return orphans;
 };
 
+// Whether this run can ask the host's own CLI about the plugins an earlier
+// version installed: the host has one, it resolved, and its plugins live in
+// the scope this run acts on (Codex's are user-scoped only).
+const reaches_plugins = (host: Detected_host, scope: Scope): boolean=>
+    !!host.def.plugin_cli && !!host.bin && !(scope === 'project' && host.def.id === 'codex');
+
+// The plugin rows `list` adds beside the copies, under the plugin's own id.
+const listed_plugins = (packs: Pack[], plugins: Record<string, string>): Pack_outcome[]=>packs
+    .filter(pack=>plugins[pack.name] !== undefined)
+    .map(pack=>{
+        const name = plugin_id(pack.name);
+        const version = plugins[pack.name];
+        if (pack.retired)
+        {
+            return {name, action: 'current', version, retired: true};
+        }
+        return version === pack.version
+            ? {name, action: 'current', version}
+            : {name, action: 'upgraded', version: pack.version, from: version};
+    });
+
+const run_host = async(
+    opts: Skills_opts,
+    host: Detected_host,
+    packs: Pack[],
+    scope: Scope,
+    detect: Detect_deps,
+): Promise<Host_outcome>=>{
+    const deps = opts.deps ?? {};
+    const run = deps.run ?? default_runner;
+    const {operation, dry_run} = opts;
+    const listing = reaches_plugins(host, scope) ? await old_plugins(host, run, scope) : undefined;
+    const plugins = listing?.ok ? listing.versions : {};
+    const copying = operation === 'install' || operation === 'update';
+    const adopt: Record<string, string> = copying && plugins[PACK_NAME] !== undefined
+        ? {[PACK_NAME]: plugins[PACK_NAME]}
+        : {};
+
+    const outcome = await run_flat({
+        operation, host, packs, scope, dry_run, adopt,
+        home: deps.home ?? detect.home, cwd: deps.cwd, env: deps.env, source: deps.source,
+    });
+    const rows = [...outcome.packs ?? []];
+    const extra: Partial<Host_outcome> = {};
+
+    if (copying)
+    {
+        // The old plugin goes only once the copy that replaces it is in
+        // place, so a refused or failed copy never leaves the host with
+        // neither.
+        const copied = rows.find(p=>p.name === PACK_NAME);
+        if (plugins[PACK_NAME] !== undefined && copied && copied.action !== 'failed')
+        {
+            const id = plugin_id(PACK_NAME);
+            const removed = dry_run ? {ok: true as const} : await remove_plugin(host, run, id, scope);
+            extra.old_plugin = removed.ok
+                ? {id, action: 'removed'}
+                : {id, action: 'failed', detail: removed.detail};
+        }
+        const retired = RETIRED_PACKS.filter(name=>plugins[name] !== undefined).map(plugin_id);
+        if (retired.length)
+        {
+            extra.retired_plugins = retired;
+        }
+    }
+    else if (operation === 'list')
+    {
+        rows.push(...listed_plugins(packs, plugins));
+    }
+    else
+    {
+        for (const pack of packs.filter(p=>plugins[p.name] !== undefined))
+        {
+            const id = plugin_id(pack.name);
+            const removed = dry_run ? {ok: true as const} : await remove_plugin(host, run, id, scope);
+            rows.push(removed.ok
+                ? {name: id, action: 'removed', version: plugins[pack.name]}
+                : {name: id, action: 'failed', detail: removed.detail});
+        }
+    }
+
+    if (listing && !listing.ok && !outcome.hint)
+    {
+        extra.hint = `${host.def.label} did not list its plugins (${listing.detail}), so a`
+            + ` ${plugin_id(PACK_NAME)} plugin an earlier version installed, if there is one, was not reached`;
+    }
+    // A copy that failed outright keeps its own status; anything else is
+    // recomputed over the plugin rows too.
+    const status = outcome.reason ? outcome.status : status_of(rows);
+    return {...outcome, ...extra, packs: rows, status};
+};
+
 const run_skills = async(opts: Skills_opts): Promise<Report>=>{
     const deps = opts.deps ?? {};
     const detect = deps.detect ?? default_detect_deps();
-    const ref = deps.ref ?? DEFAULT_REF;
-    const registry = await load_packs({ref, fetch_impl: deps.fetch_impl});
-    // Install and update pull dependencies; remove must not — see resolve_packs.
-    const packs = resolve_packs(opts.requested, registry, {
-        dependencies: opts.operation !== 'remove',
-    });
+    const packs = resolve_packs(opts.requested, opts.operation);
     const scope: Scope = opts.project ? 'project' : 'user';
-
-    if (opts.operation === 'remove' && opts.requested.length)
-    {
-        guard_remove(packs, registry.packs);
-    }
 
     const {selected, missing} = select_hosts(opts.agents, detect);
     const hosts: Host_outcome[] = [];
 
     for (const host of selected)
     {
-        // A native host under --project falls back to the flat adapter only
-        // when its plugin mechanism cannot express project scope; Claude Code
-        // can, Codex cannot.
-        const native = host.def.kind === 'native-plugin'
-            && !(scope === 'project' && host.def.id === 'codex');
         let outcome: Host_outcome;
         try {
-            outcome = native
-                ? await run_native({
-                    operation: opts.operation, host, packs, scope,
-                    run: deps.run, dry_run: opts.dry_run,
-                })
-                : await run_flat({
-                    operation: opts.operation, host, packs, scope, ref,
-                    run: deps.run, clone: deps.clone, dry_run: opts.dry_run,
-                    home: deps.home ?? detect.home, cwd: deps.cwd,
-                    tmp_root: deps.tmp_root ?? os.tmpdir(), env: deps.env,
-                });
+            outcome = await run_host(opts, host, packs, scope, detect);
         } catch (error) {
             // An adapter is expected to turn every failure it knows about
             // into a Host_outcome; this is the backstop for the ones it
@@ -171,37 +208,21 @@ const run_skills = async(opts: Skills_opts): Promise<Report>=>{
         hosts.push(not_detected(def));
     }
 
-    // The commit is only known when this run itself cloned something: a flat
-    // host stamps its own outcome with the commit it cloned (see
-    // adapter-flat.ts), and only then — never on a native host, a skip, or a
-    // failure that never reached a clone. Reading it off the outcomes (rather
-    // than the journal) means a stale entry from an earlier run, or one that
-    // belongs to a different host, can never be attributed to this run. If
-    // flat hosts somehow disagree — cloning at different moments within the
-    // same run — no commit is reported rather than an arbitrary one.
-    const commits = new Set(hosts.map(h=>h.commit).filter((c): c is string=>!!c));
-    const commit = commits.size === 1 ? [...commits][0] : undefined;
-
-    // `requested` is what the user asked for in canonical form; `resolved` is
-    // that plus dependencies. Both are reported so an agent sees the pull
-    // without parsing prose. resolve_packs puts dependencies first, so the
-    // requested pack itself is always the last element.
-    const canonical = opts.requested.map(r=>resolve_packs([r], registry).slice(-1)[0].name);
-
     // `list` alone: it answers "what is installed where". The other operations
     // act on hosts, and can do nothing about one they no longer know.
     const orphans = opts.operation === 'list' ? orphaned_packs(deps.env) : [];
+    const names = packs.map(p=>p.name);
 
     return {
         action: opts.operation,
-        source: commit ? {repo: REPO, ref, commit} : {repo: REPO, ref},
-        requested: opts.requested.length ? canonical : packs.map(p=>p.name),
-        resolved: packs.map(p=>p.name),
+        source: {version: cli_version()},
+        requested: names,
+        resolved: names,
         hosts,
         summary: summarize(hosts, opts.operation),
         ...(orphans.length ? {orphans} : {}),
     };
 };
 
-export {guard_remove, run_skills};
+export {run_skills};
 export type {Skills_deps, Skills_opts};

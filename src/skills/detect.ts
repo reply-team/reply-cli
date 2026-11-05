@@ -7,8 +7,9 @@ import type {Host_def} from './types';
 
 type Detected_host = {
     def: Host_def;
-    // Resolved binary for a native host; undefined means "present but not
-    // runnable", which the adapter turns into an actionable skip.
+    // Resolved binary of a host's plugin CLI; undefined means the plugins an
+    // earlier version installed there cannot be reached this run. The copy
+    // itself never needs it.
     bin?: string;
     config_dir: string;
 };
@@ -89,9 +90,8 @@ const resolve_bin = (def: Host_def, deps: Detect_deps): string | undefined=>{
     return undefined;
 };
 
-// Presence is decided by the host's configuration directory. A native host
-// whose binary cannot be resolved is still detected — that is a fixable
-// situation the user needs to hear about, not an absence.
+// Presence is decided by the host's configuration directory. A host whose
+// binary cannot be resolved is still detected: the copy needs no binary.
 const detect_hosts = (deps: Detect_deps = default_detect_deps()): Detected_host[]=>{
     const found: Detected_host[] = [];
     for (const def of HOSTS)

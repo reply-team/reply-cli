@@ -57,16 +57,19 @@ with `REPLY_NO_UPDATE_CHECK=1` set.
 
 ## Where this fits
 
-Reply's agentic toolkit is three pieces. They are complementary, not alternatives:
+Reply's agentic toolkit is two pieces, with the skills that teach an agent to use them
+carried in this package. They are complementary, not alternatives:
 
 | | What it is | When you want it |
 |---|---|---|
-| **reply CLI** (this repo) | `npm i -g reply-cli` — authenticated access to *every* v3 endpoint via `reply api` | Your agent has a shell. This is the complete surface. |
+| **reply CLI** (this repo) | `npm i -g reply-cli` — authenticated access to *every* v3 endpoint via `reply api`, and the Reply skills (`reply skills install`) | Your agent has a shell. This is the complete surface. |
 | **[Reply MCP](https://github.com/reply-team/reply-mcp)** | A curated tool catalog over `mcp.reply.io` | Your client speaks MCP and has no shell — desktop apps, hosted assistants. |
-| **[reply-skills](https://github.com/reply-team/reply-skills)** | Outbound expertise as markdown skills: what to do, in what order, with what guardrails | Your agent knows *how* to call things but not *what* to run. |
 
-MCP gives your agent tools. Skills give it judgement. Most setups want both; a shell-capable
-agent can do everything through the CLI alone.
+The skills teach an agent how to perform an SDR operation against Reply: which endpoint, which
+scope, in what order, and what Reply's errors mean. The vendor-neutral SDR expertise — the
+operation catalogue, playbooks and guardrails those skills map onto — and the runtime skills ship
+with [Jason](https://github.com/reply-team/jason-ai), the catalogue under its `skills/business`.
+A shell-capable agent can do everything through the CLI alone.
 
 The shortest path that works: install the CLI, `reply auth login`, `reply skills install`, then
 talk to your agent in plain words. MCP is optional — add it when your client has no shell.
@@ -525,9 +528,10 @@ exist. PowerShell, cmd, macOS and Linux are unaffected.
 
 ## Skills
 
-Reply's outbound expertise ships as three markdown skill packs in
-[reply-skills](https://github.com/reply-team/reply-skills). One command installs
-them into every AI assistant on your machine, dependencies resolved:
+The Reply skills ship inside this package as one pack, `reply-adapter` (alias
+`adapter`), at the CLI's own version: `reply-api`, `reply-auth`, `reply-cli`,
+`reply-mcp` and `reply-operations-mapping`. One command copies them into every
+AI assistant on your machine, from the installed package, with no download:
 
 ```sh
 reply skills install
@@ -535,23 +539,12 @@ reply skills install
 
 ```
 ✓ detected Claude Code, Codex
-✓ Claude Code · ai-sdr-core, reply-adapter, agentic-runtime installed
-✓ Codex       · ai-sdr-core, reply-adapter, agentic-runtime installed
+✓ Claude Code · reply-adapter installed
+✓ Codex       · reply-adapter installed
 Start a new session in each assistant so the skills load.
 ```
 
-| Pack | Alias | What it gives your agent |
-|---|---|---|
-| `ai-sdr-core` | `core` | Vendor-neutral SDR operations, playbooks and guardrails |
-| `reply-adapter` | `adapter` | Executing those operations against Reply.io |
-| `agentic-runtime` | `runtime` | Durable multi-session work: plans, checkpoints, reports |
-
-Install a subset — dependencies come along automatically, so `adapter` pulls
-`core`:
-
 ```sh
-reply skills install core
-reply skills install adapter runtime
 reply skills install --agent codex        # only this assistant
 reply skills install --project            # into this repository, not your home
 ```
@@ -559,21 +552,29 @@ reply skills install --project            # into this repository, not your home
 Then manage them:
 
 ```sh
-reply skills list             # what's installed where (notes packs with an update available)
-reply skills update           # bring installed packs to the latest version
-reply skills remove runtime   # remove one pack
-reply skills remove           # remove all of them
+reply skills list             # what's installed where, and at which version
+reply skills update           # bring the installed skills to the version of this CLI
+reply skills remove           # remove everything this CLI installed
 ```
 
-On Claude Code and Codex the packs are installed through the assistant's own
-plugin mechanism, so they keep updating through it. Other `SKILL.md` hosts
-receive the skills as files. Add `--json` for a machine-readable report, and
+The skills move with the CLI: after `reply install` brings a newer CLI,
+`reply skills update` copies its skills over the old ones. Every assistant
+receives the skills as files. Add `--json` for a machine-readable report, and
 `--dry-run` to see the plan without changing anything.
 
-| Assistant | How it receives the packs | Skills path | Paths verified | To take effect |
+An earlier version of this CLI installed three packs, and installed them on
+Claude Code and Codex through the assistant's own plugin CLI. `install` and
+`update` now replace the old `reply-adapter` plugin with the copied
+files, removing that plugin through the assistant's own CLI, and say so; the
+two other plugins, and copies of the two other packs, stay installed, and the
+report names them. `list` and
+`remove` still find what an earlier version installed, under the old pack
+names too.
+
+| Assistant | How it receives the skills | Skills path | Paths verified | To take effect |
 |---|---|---|---|---|
-| Claude Code | its own plugin CLI | managed by the plugin CLI | yes | start a new session |
-| Codex | its own plugin CLI (`--project` copies files instead) | managed by the plugin CLI | yes | start a new session |
+| Claude Code | copied files | `~/.claude/skills`, or `.claude/skills` with `--project` | yes | start a new session |
+| Codex | copied files | `~/.agents/skills`, or `.agents/skills` with `--project` | yes | start a new session |
 | Cursor | copied files | `~/.cursor/skills`, or `.agents/skills` with `--project` | Cursor 3.14.27, cursor-agent 2026.08.04-aaa8809 | a new session (a new chat) |
 | Windsurf (ships as Devin) | copied files | `~/.codeium/windsurf/skills`, or `.windsurf/skills` with `--project` | Devin 3.6.27, devin CLI 3000.3.27 | a new session (the next `devin` run) |
 | Antigravity | copied files | `~/.gemini/config/skills`, or `.agents/skills` with `--project` | Antigravity 2.0.1 | nothing — it re-reads its skills every turn, including in a conversation already open |
@@ -585,10 +586,9 @@ Codex, Antigravity and GitHub Copilot. A project-scope install aimed at one of
 them therefore makes those skills visible in the others, and removing them for
 one changes what the others see. Use user scope when you want a host's skills to
 itself. GitHub Copilot reads two further repository directories, `.claude/skills`
-and `.github/skills`. This command never writes to either — Claude Code installs
-through its own plugin CLI in both scopes — so that crossover appears only when
-something else fills them: a skill copied there by hand, or the `npx skills`
-channel, which writes `.claude/skills` for a project-scoped Claude Code install.
+and `.github/skills`; `--project` for Claude Code writes `.claude/skills`, so a
+project-scope install for Claude Code is visible to GitHub Copilot in that
+repository too.
 
 Every assistant in the table has been verified against the version named. A host
 added later may arrive with its skills directory taken from the vendor's
@@ -600,8 +600,9 @@ Antigravity and GitHub Copilot with the release that adds them.
 GitHub Copilot is two products over one directory: the `copilot` CLI and the
 VS Code agent host, which ships `~/.copilot/skills` among the defaults of its
 `chat.agentSkillsLocations` setting — alongside `~/.claude/skills` and
-`~/.agents/skills`, user directories the CLI itself does not read. The CLI is
-what the row above was verified against. VS Code scans those directories once per window and does not watch them,
+`~/.agents/skills`, user directories the CLI itself does not read and where this
+command puts the skills for Claude Code and Codex, so VS Code sees those too.
+The CLI is what the row above was verified against. VS Code scans those directories once per window and does not watch them,
 so an install made while it is open needs `Developer: Reload Window` rather than
 just a new chat.
 

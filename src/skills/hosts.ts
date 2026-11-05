@@ -1,6 +1,6 @@
 import path from 'path';
 import {UsageError} from '../utils/errors';
-import type {Host_cli, Host_def} from './types';
+import type {Host_def, Plugin_cli} from './types';
 
 // One entry per assistant. Adding a host is a data change plus a verification
 // run — never a branch inside an adapter. `verified: false` means the paths come
@@ -9,34 +9,33 @@ import type {Host_cli, Host_def} from './types';
 // {home} in binary_paths is expanded by detect.ts; a leading '~/' is not used
 // so the strings stay platform-agnostic.
 
-const claude_cli: Host_cli = {
-    marketplace_add: (repo)=>['plugin', 'marketplace', 'add', repo],
+// Claude Code and Codex keep a plugin CLI, which an earlier version of this
+// CLI installed through; it is only asked to list and remove those plugins.
+// Claude Code's uninstall acts on user scope unless told another one.
+const claude_cli: Plugin_cli = {
     list_json: ()=>['plugin', 'list', '--json'],
-    install: (pack, marketplace, scope)=>['plugin', 'install', `${pack}@${marketplace}`, '--scope', scope],
-    update: (pack, marketplace)=>['plugin', 'update', `${pack}@${marketplace}`],
-    remove: (pack, marketplace)=>['plugin', 'uninstall', `${pack}@${marketplace}`],
-    update_scope: 'pack',
+    remove: (id, scope)=>scope === 'project'
+        ? ['plugin', 'uninstall', id, '--scope', 'project']
+        : ['plugin', 'uninstall', id],
 };
 
 // Codex spells the same operations differently and takes --json on all of them.
-const codex_cli: Host_cli = {
-    marketplace_add: (repo)=>['plugin', 'marketplace', 'add', repo, '--json'],
+const codex_cli: Plugin_cli = {
     list_json: ()=>['plugin', 'list', '--json'],
-    install: (pack, marketplace)=>['plugin', 'add', `${pack}@${marketplace}`, '--json'],
-    update: (_pack, marketplace)=>['plugin', 'marketplace', 'upgrade', marketplace, '--json'],
-    remove: (pack, marketplace)=>['plugin', 'remove', `${pack}@${marketplace}`, '--json'],
-    update_scope: 'marketplace',
+    remove: (id)=>['plugin', 'remove', id, '--json'],
 };
 
 const HOSTS: Host_def[] = [
     {
         id: 'claude-code',
         label: 'Claude Code',
-        kind: 'native-plugin',
+        kind: 'flat-skills-dir',
         config_dirs: ['.claude'],
         binaries: ['claude'],
         binary_paths: [],
-        cli: claude_cli,
+        plugin_cli: claude_cli,
+        // Its personal and project skills directories, per its skills page.
+        user_skills_dir: path.join('.claude', 'skills'),
         project_skills_dir: path.join('.claude', 'skills'),
         needs_new_session: true,
         verified: true,
@@ -44,15 +43,16 @@ const HOSTS: Host_def[] = [
     {
         id: 'codex',
         label: 'Codex',
-        kind: 'native-plugin',
+        kind: 'flat-skills-dir',
         config_dirs: ['.codex'],
         binaries: ['codex'],
         // Windows ships Codex with the desktop app, off PATH; the hash segment
         // varies, so detect.ts globs one level.
         binary_paths: [path.join('{home}', 'AppData', 'Local', 'OpenAI', 'Codex', 'bin', '*', 'codex.exe')],
-        cli: codex_cli,
-        // Codex's plugin mechanism is user-scoped, so --project falls back to
-        // copying into the repository's .agents/skills.
+        plugin_cli: codex_cli,
+        // Its user directory is $HOME/.agents/skills, and in a repository it
+        // reads .agents/skills from the working directory up to the root.
+        user_skills_dir: path.join('.agents', 'skills'),
         project_skills_dir: path.join('.agents', 'skills'),
         needs_new_session: true,
         verified: true,

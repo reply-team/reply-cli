@@ -1,0 +1,2986 @@
+# What this adapter can and cannot perform, one entry per contract operation.
+#
+# The contract describes the job. This file describes one product's coverage of it. Those are
+# different questions, and keeping them apart is the whole reason the vendor-neutral layer exists:
+# an operation missing here is a gap in this adapter, never a defect in the contract, and deleting
+# an operation from the contract because this API lacks it would undo the layer entirely.
+#
+# Every mapping table in this skill is generated from this file. Edit here, then regenerate.
+#
+# ---------------------------------------------------------------------------------------------
+# SCHEMA
+# ---------------------------------------------------------------------------------------------
+#
+#   - name: campaign.enroll        # must be an operation the contract declares
+#     fulfilment: direct           # direct | composed | partial | absent
+#     surface: >                   # the endpoint GROUP and the doc page title. NEVER a path.
+#       sequence-contacts -> Bulk add contacts to sequence
+#     scopes: [sequences:operate]  # the scopes the call needs
+#     beta: true                   # the surface is documented Beta or Coming soon
+#     order: >                     # for `composed`: the call order that realises the operation
+#     missing: >                   # REQUIRED for `partial`: which part of the promise is not kept
+#     because: >                   # REQUIRED for `absent`: why, in evidence rather than guesswork
+#     notes: >                     # what an agent must know to get it right
+#
+# THE FOUR VALUES
+#
+#   direct    one API surface performs it. Call it.
+#   composed  several calls in a stated order realise it. Follow the order; report the operation,
+#             not the calls.
+#   partial   performed, but not to the contract's full promise. `missing` says which part, and an
+#             agent must say so BEFORE the user commits to a route that depends on it.
+#   absent    not performable here today. Say so, name what the documentation says, and never
+#             substitute an adjacent endpoint. An enrichment that silently returns something else
+#             is worse than a missing capability.
+#
+# ABSENCE IS NOT A COVERAGE CLAIM. Every operation in the contract needs an entry; the generator
+# fails when one is missing. An unlisted operation is an unanswered question, not an implicit
+# `absent` — silence would let this adapter quietly ignore two hundred operations and still look
+# complete.
+#
+# ---------------------------------------------------------------------------------------------
+# EVIDENCE, AND THE ONE FAILURE MODE THAT MATTERS MOST
+# ---------------------------------------------------------------------------------------------
+#
+# `surface` names an endpoint group and a documentation page. It never names a path, a parameter
+# or a body field: those come from the documentation at call time. Inventing a path is the single
+# most common way an agent fails against this API, and a path written from memory here would be
+# that mistake made once and then trusted forever.
+#
+# An operation may only be `direct`, `composed` or `partial` on evidence — a documentation page
+# read, or the mapping this skill already carried. Anything else is `absent` with
+# `because: not evidenced`, which is a truthful statement about our knowledge rather than a guess
+# about the product. A wrong `absent` costs a user one question. A wrong `direct` costs them a
+# broken run and their trust.
+
+adapter: reply
+
+operations:
+
+  # -------------------------------------------------------------- worked entries, from evidence
+  # These eleven are transcribed from the mapping this skill carried at 1.1.0, which was written
+  # against the documentation. They are the shape every other entry should follow.
+
+  - name: contact.search
+    fulfilment: direct
+    surface: contacts -> Filter contacts, List all contacts
+    scopes: [contacts:read]
+    notes: Filtering by email is the identity check that belongs before any create.
+
+  - name: contact.create
+    fulfilment: direct
+    surface: contacts -> Import contacts
+    scopes: [contacts:write]
+    notes: >
+      Bulk-oriented: a large import returns a background job, so the operation completes when the
+      job reaches a terminal state, not when the call returns. Field mapping is decided in the
+      core layer and applied here.
+
+  - name: contact.delete
+    fulfilment: direct
+    surface: contacts -> the delete endpoint on its doc page
+    scopes: [contacts:write]
+    notes: Irreversible in this product as well as in the contract.
+
+  - name: list.create
+    fulfilment: direct
+    surface: contact-lists -> Create a contact list
+    scopes: [contacts:write]
+    notes: Check List contact lists first — reuse beats proliferation.
+
+  - name: campaign.get
+    fulfilment: direct
+    surface: sequences -> Get a sequence
+    scopes: [sequences:read]
+    notes: The verification read after every mutation.
+
+  - name: campaign.activate
+    fulfilment: direct
+    surface: sequences -> Start a sequence
+    scopes: [sequences:operate]
+    notes: >
+      Verify the status flipped by re-reading. The contract's approval class is unchanged by the
+      mapping: it is confirm_once with a mandatory preview naming the population, and knowing
+      which endpoint performs it changes nothing about that.
+
+  - name: campaign.pause
+    fulfilment: direct
+    surface: sequences -> Pause a sequence
+    scopes: [sequences:operate]
+    notes: Cheap and reversible — the protective move, and the right first response to a misfire.
+
+  - name: campaign.enroll
+    fulfilment: direct
+    surface: sequence-contacts -> Bulk add contacts to sequence
+    scopes: [sequences:operate, contacts:read]
+    notes: >
+      Returns per-contact results. Reconcile every one — added, already in sequence, not found,
+      forbidden, limit exceeded. Never summarise a partial result as success.
+
+  - name: conversation.list
+    fulfilment: direct
+    surface: inbox -> List inbox categories, List and filter inbox threads
+    scopes: [inbox:read]
+    notes: Categories carry unread counts, so reading them first gives the shape of the work.
+
+  - name: message.send
+    fulfilment: partial
+    surface: inbox -> Send a reply within a thread
+    scopes: [inbox:operate]
+    missing: >
+      Inside a thread, only a reply. The contract's message.send is one message to one person on
+      one channel, including the first one: from reply-cli 0.17.0 the direct sends (an email, a
+      LinkedIn message, InMail or voice message) send the first one outside any campaign, where
+      the account's Reply has the route; inside a campaign a first message is the campaign's
+      step, with no surface here.
+    notes: >
+      The reply goes out on the thread's own channel. If that channel's account is disconnected
+      the send fails — tell the user to reconnect, and never switch channel silently.
+      Where the runtime carrying the work passes the reserved `provider` key inside the
+      operation's arguments, `args.provider`, and the send is a direct send by email, that object
+      is `{"schedule_id": "<id>"}` and nothing else: the `id` of a schedule from `reply schedule
+      list`, written as a string of its digits. It goes as `--schedule-id` (from reply-cli 0.17.0). Another
+      shape or another key is refused before anything is sent, with a message naming the shape;
+      write the object in that shape and ask again. Reply refuses a schedule on every LinkedIn
+      direct send in this version (scheduleId is not supported for LinkedIn sends in this version,
+      a 400 on each LinkedIn route), so a schedule on a LinkedIn message is refused before any
+      call. A message composed as a template goes by the same command, in Reply's own syntax,
+      and Reply fills it in for the contact: a send Reply makes within the call is filled in
+      before anything goes and refused with nothing sent where Reply cannot fill it; one held for
+      a later moment or a schedule, or queued behind the account's other sends, is filled in when
+      it goes and fails then. The codes, the names Reply lists, the LinkedIn sending account's
+      two names and the formats that are never filled in are under reply-api, Direct sends,
+      Templates.
+
+  - name: contact.enrich
+    fulfilment: absent
+    surface: contact-enrichment -> enrich by email, enrich by profile URL, find email, find phone
+    because: >
+      Documented as available late August 2026 and not callable today. Say that, and name the date
+      the documentation gives. Never substitute an unrelated endpoint.
+
+  # --------------------------------------------------------------- families 1 to 5, from evidence
+  # Discovery, contacts, audiences, import, campaigns. The eight operations of this range that
+  # already have worked entries above are not repeated here.
+  #
+  # `scopes` is stated only where the doc page was actually read for it. Where the field is absent
+  # the scope was not verified, and an agent takes it from the page at call time like everything
+  # else. A guessed scope costs a 403 that reads like a permissions problem when it is not.
+
+  # ------------------------------------------------ 01 discovery, enrichment and verification
+
+  - name: candidate.search
+    fulfilment: partial
+    surface: >
+      live-data -> Preview a Live Data search, with the departments, industries, job titles,
+      locations and seniorities typeahead pages that build the filter
+    scopes: [contacts:write]
+    beta: true
+    missing: >
+      Preview answers how many and shows a capped sample, not the population. The whole result set
+      exists only after Start a Live Data search, and Start is not a read: it buys the people and
+      creates them as contacts. So "show me everyone this filter finds, before I spend anything"
+      cannot be answered here.
+    notes: >
+      Beta, and say so as part of the plan rather than as a footnote at the end. Build the filter
+      from the typeahead values instead of guessing accepted ones. Preview adds no prospects and
+      consumes no credits, which is what makes it the safe half of this operation. The write scope
+      on a read is what the page documents, not a mistake.
+
+  - name: candidate.get
+    fulfilment: partial
+    surface: live-data -> Get a Live Data search, List Live Data searches
+    beta: true
+    missing: >
+      The read is per search, not per person: it returns a search and what it found, and there is
+      no address for one found person on their own. Once Start has run, the person is an ordinary
+      contact and is read with Get a contact — so the discovery surface stops being the place to
+      look at exactly the moment the person becomes ours.
+    notes: >
+      Check List Live Data searches for an existing near-identical search before starting another
+      one. A repeat spends again and returns a different world.
+
+  - name: candidate.promote
+    fulfilment: partial
+    surface: live-data -> Start a Live Data search
+    scopes: [contacts:write]
+    beta: true
+    missing: >
+      There is no promote-these-ones surface. Start finds and buys in one act: it adds everyone
+      the filter returns as prospects and consumes credits per resulting contact, so the selection
+      has to be made in the filter and cannot be made from a reviewed result set. The per-item
+      promotion ledger the contract requires has to be read back off the search rather than off
+      the call.
+    notes: >
+      Preview before Start, always — Start spends the user's allowance and the mistake is only
+      visible once it is paid for. Show who came back in the preview and let the user approve the
+      filter itself. Start can optionally drop the found people into a sequence or a list; treat
+      that as enrolment and hold it to the enrolment gate rather than letting it ride along.
+
+  - name: company.search
+    fulfilment: absent
+    surface: live-data -> Preview a Live Data search
+    because: >
+      not evidenced — the preview reports a companiesCount, but the search returns and creates
+      people. No documented surface returns companies from the outside world as companies. The
+      accounts endpoints search only the companies we already hold, which is a different question
+      and must not be offered as an answer to this one.
+
+  - name: company.resolve
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface decides which company four spellings of a name refer
+      to. Accounts can be filtered by what we already hold, which finds an exact-ish match and
+      says nothing about the three spellings that did not match.
+
+  - name: company.enrich
+    fulfilment: absent
+    because: >
+      not evidenced — the enrichment surface is about people, and firmographics on a company are
+      not among its documented pages. The whole enrichment group is in any case documented as
+      available late August 2026 and is not callable today.
+
+  - name: employment.check
+    fulfilment: absent
+    because: >
+      not evidenced — nothing documented answers whether a person has left the company we have
+      them at. There is no job-change monitoring surface, and the AI insights page that might
+      touch on it is documented as available late August 2026 and is not callable today.
+
+  - name: email_address.verify
+    fulfilment: partial
+    surface: >
+      email-validations -> Estimate email validation, Schedule email validation; background-jobs
+      -> Get a background job
+    scopes: [contacts:operate, other:read]
+    missing: >
+      Two things. It validates people we already hold, taken by contact id, so a raw address that
+      is not a contact yet cannot be checked without creating one first. And it returns the
+      channel's verdict only — the send, hold or never_send decision the contract asks for comes
+      from a contactability policy this product does not hold, so that half is the agent's own
+      judgement and must be reported as such.
+    notes: >
+      Three calls in order: Estimate first, because it reports the eligible count and what it
+      would cost against the team's quota; then Schedule, which reserves credits and returns a
+      job; then poll the job to a terminal state and read the verdicts. Estimate is how the user
+      approves a spend before it happens, which makes skipping it the expensive shortcut.
+
+  - name: phone_number.verify
+    fulfilment: absent
+    surface: contact-enrichment -> find phone
+    because: >
+      not evidenced — the enrichment surface looks a number up; nothing documented checks that a
+      number we already hold is reachable or reports whether it is a mobile, a desk line or a
+      virtual one. Finding and verifying are different acts and the line type is the part that
+      changes what may be sent. The enrichment group is in any case not callable until late
+      August 2026.
+
+  - name: enrichment_policy.define
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface stores a buying order, an acceptance predicate or a
+      spend ceiling. Each metered call carries its own limits at call time, so nothing binds the
+      next one, and there is no version or author to read back.
+
+  - name: enrichment_policy.get
+    fulfilment: absent
+    because: not evidenced — there is no stored policy to read, since none can be defined.
+
+  # ------------------------------------------------ 02 contacts, identity and hygiene
+
+  - name: contact.get
+    fulfilment: direct
+    surface: contacts -> Get a contact
+    scopes: [contacts:read]
+    notes: The read-back after every write in this family. Cheap, and the only proof the write took.
+
+  - name: contact.resolve
+    fulfilment: partial
+    surface: contacts -> Filter contacts, Count filtered contacts
+    scopes: [contacts:read]
+    missing: >
+      Filtering answers one key set per call, so resolving a collection is one call per person,
+      and what comes back is a match list rather than a verdict: nothing returns "same human, this
+      confident, under this rule". Ambiguity between two candidate records is something the caller
+      has to notice and decide, and nothing marks it.
+    notes: >
+      Email is the key that behaves. Every other key is a filter over fields, which finds people
+      who look similar rather than people who are the same.
+
+  - name: contact.update
+    fulfilment: direct
+    surface: contacts -> Update a contact, Import contacts with an update policy
+    scopes: [contacts:write]
+    notes: >
+      Which of the two applies depends on the dedupe policy the user chose, and that choice is the
+      core layer's to make. A collection goes through the import path and comes back as a job.
+
+  - name: contact.restore
+    fulfilment: absent
+    because: >
+      not evidenced — the contacts group documents Delete a contact and Bulk delete contacts and
+      nothing that brings one back. Treat a delete here as irreversible with no restore window,
+      and say so before deleting rather than after.
+
+  - name: timeline.get
+    fulfilment: composed
+    surface: >
+      contacts -> Get activities for a contact, Get inbox threads for a contact, Get sequences for
+      a contact, Get a contact's statuses
+    scopes: [contacts:read]
+    order: >
+      contacts -> Get activities for a contact for what we did, then Get inbox threads for a
+      contact for what came back, then Get sequences for a contact and Get a contact's statuses
+      for where they stand right now.
+    notes: >
+      Four reads and no single chronology: each comes back per source and merging them in time
+      order is this adapter's work, not the API's. Anything that happened off-platform is in none
+      of them, so a timeline assembled here is what the product saw, not what happened.
+
+  - name: provenance.set
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface records where a person's data came from or under what
+      terms. A custom field could hold the text, and must not be reported as provenance: the
+      contract's version carries the lawful basis the sending decision rests on, and a field with
+      a source name typed into it proves nothing.
+
+  - name: job_change.record
+    fulfilment: absent
+    because: >
+      not evidenced — nothing documented forks a record when somebody moves employer. Updating the
+      company on the existing contact is the opposite of what the operation asks for: it destroys
+      the history at the old employer, which is usually the reason we were talking to them.
+
+  - name: cooldown.set
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface holds a person until a date and then releases them.
+      Suppression is permanent until lifted by hand, which is a different promise, and offering it
+      as a cooldown means a person we meant to come back to in Q4 is never contacted again.
+
+  - name: contact.disqualify
+    fulfilment: absent
+    because: >
+      not evidenced — the contact status surfaces are about sequence participation and delivery
+      outcomes, not about whether somebody is a prospect at all. The blacklist rules are
+      suppression, a different act with a different meaning: using one for the other tells the
+      user we may never contact this person, when what they said was that this person is not a
+      fit.
+
+  - name: contact.requalify
+    fulfilment: absent
+    because: >
+      not evidenced — there is no qualification state to reverse, since none can be recorded.
+
+  - name: contact.normalize
+    fulfilment: absent
+    because: >
+      not evidenced — nothing documented rewrites records into a house format under a declared
+      rule set while keeping what was there before. Bulk updates through the import path can
+      overwrite values, which is not the same operation: it keeps no prior value and reports no
+      rule set, so nothing can be undone or explained afterwards.
+
+  - name: identity_policy.define
+    fulfilment: partial
+    surface: contacts -> Import contacts
+    scopes: [contacts:write]
+    missing: >
+      The decision exists as an argument on each import — skip existing, which never overwrites,
+      or update existing — and nowhere else. There is no stored policy, no version, nobody
+      recorded as having set it, and the matching rules themselves are not configurable. Every
+      import re-decides the question, and two imports can disagree with nothing to notice it.
+    notes: >
+      Because the policy cannot live in the product, it has to be carried by whatever keeps the
+      user's durable context, and re-confirmed at each import rather than assumed from last time.
+
+  - name: identity_policy.get
+    fulfilment: absent
+    because: >
+      not evidenced — there is no stored identity policy to read back, only the choice made on
+      each import, which is not recorded anywhere afterwards.
+
+  - name: duplicate.list
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface reports suspected duplicates. Filtering can confirm
+      that two records share an address once you already suspect it; nothing proposes the clusters
+      in the first place, which is the entire operation.
+
+  - name: duplicate.merge
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface combines two contact records into one. Deleting the
+      loser and updating the winner is not a merge: it destroys the history the contract requires
+      the merge to carry across, and there is no restore.
+
+  - name: duplicate.link
+    fulfilment: absent
+    because: >
+      not evidenced — nothing records that two records are the same human while both have to stay.
+
+  - name: duplicate.unlink
+    fulfilment: absent
+    because: not evidenced — there is no link to undo, since none can be made.
+
+  - name: duplicate.reject
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface records a not-a-duplicate decision, so the same pair
+      would be proposed again by anything that looks a second time.
+
+  - name: field.define
+    fulfilment: direct
+    surface: custom-fields -> Create a custom field, List all custom fields
+    scopes: [contacts:write]
+    notes: >
+      List first. A second field with almost the same name is how a mapping starts putting the
+      right value in the wrong place, and nothing downstream will notice.
+
+  - name: field.retire
+    fulfilment: partial
+    surface: custom-fields -> Delete a custom field
+    scopes: [contacts:write]
+    missing: >
+      Delete, not retire, and nothing reports what still references the field before it goes. The
+      check the contract requires before repeating — is this still used by a mapping, a filter or
+      a template — has to be done by hand, and the documentation does not say what happens to the
+      values already stored. Treat the loss as total until somebody demonstrates otherwise.
+
+  # ------------------------------------------------ 03 audience and lists
+
+  - name: segment.define
+    fulfilment: absent
+    because: >
+      not evidenced — filters are expressed per call and no documented surface saves one under a
+      name. A contact list cannot stand in for a segment: it holds people, not a definition, it
+      does not re-evaluate, and it cannot say who would match tomorrow.
+
+  - name: segment.get
+    fulfilment: absent
+    because: not evidenced — there is no saved definition to show, since none can be saved.
+
+  - name: segment.list
+    fulfilment: absent
+    because: not evidenced — there are no saved definitions to list.
+
+  - name: segment.delete
+    fulfilment: absent
+    because: not evidenced — there is nothing to retire.
+
+  - name: segment.preview
+    fulfilment: direct
+    surface: >
+      contacts -> Count filtered contacts, Filter contacts; live-data -> Preview a Live Data
+      search
+    scopes: [contacts:read, contacts:write]
+    notes: >
+      Two universes, two surfaces, and the cost difference the contract describes is real here:
+      counting our own contacts is free, and the external preview adds no prospects and consumes
+      no credits either. The external half is Beta; the internal half is not. Run whichever
+      applies before anything that spends — this is the operation that makes the spend reviewable.
+
+  - name: segment.materialize
+    fulfilment: composed
+    surface: >
+      contacts -> Filter contacts; contact-lists -> List contact lists, Create a contact list, Add
+      contacts to a contact list
+    scopes: [contacts:read, contacts:write]
+    order: >
+      contacts -> Filter contacts to evaluate the definition, then contact-lists -> Create a
+      contact list or reuse one from List contact lists, then Add contacts to a contact list, then
+      contacts -> Filter contacts by that list to reconcile what actually landed.
+    notes: >
+      The freeze is genuine but is not recorded as one: nothing on the list says which definition
+      or which as-of time produced it, so that has to be written down outside the product or the
+      list becomes a set of people nobody can account for. Say before you start that there is no
+      way to take people back off a list — see list_membership.remove — so a list built from the
+      wrong filter is corrected by building another one.
+
+  - name: list.list
+    fulfilment: direct
+    surface: contact-lists -> List contact lists
+    scopes: [contacts:read]
+    notes: The first call before any list.create — reuse beats proliferation.
+
+  - name: list.get
+    fulfilment: partial
+    surface: contact-lists -> Get a contact list, Get contact's lists; contacts -> Filter contacts
+    scopes: [contacts:read]
+    missing: >
+      What is on the list is readable; where it came from is not. Nothing records the definition,
+      the import or the search behind a list, so the second half of the question has no answer
+      here — and it must not be improvised from the list's name, which is the one place a wrong
+      answer will look plausible.
+
+  - name: list_membership.add
+    fulfilment: direct
+    surface: contact-lists -> Add contacts to a contact list, Move contacts to a contact list
+    scopes: [contacts:write]
+    notes: >
+      Add and Move are different acts: Move takes people off wherever they were. Reconcile
+      afterwards by filtering contacts by the list, because the count asked for and the count that
+      landed differ often enough to matter.
+
+  - name: list_membership.remove
+    fulfilment: absent
+    surface: contact-lists -> Move contacts to a contact list
+    because: >
+      not evidenced — the contact lists group documents adding and moving and nothing that takes a
+      person off a list. Move relocates people to another list rather than removing them, so using
+      it as a removal quietly files them somewhere else. This is the gap that makes a mis-built
+      list expensive, and the honest response is to get the list right before it is written rather
+      than to plan on trimming it.
+
+  - name: list.delete
+    fulfilment: direct
+    surface: contact-lists -> Delete a contact list
+    scopes: [contacts:write]
+    notes: >
+      Check what still references it first — no campaign binding is reported back, and nothing
+      after the fact will tell you what broke.
+
+  - name: audience.assess
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface judges whether a set of people is fit to work.
+      Duplicates cannot be listed, contactability is not modelled, and address verification is a
+      separate metered job over contacts rather than over a list. The assessment is therefore the
+      agent's own and has to be reported as a judgement, not as something the product checked.
+
+  - name: audience.screen
+    fulfilment: absent
+    because: >
+      not evidenced — nothing re-checks a list against the exclusion rules and takes the failures
+      out. The blacklist rules can be read and a validation job can be run, but there is no
+      removal from a list at all, so the second half of the operation has nowhere to land.
+
+  - name: contactability_policy.define
+    fulfilment: absent
+    because: >
+      not evidenced — the blacklist rules are individual exclusion entries for domains, addresses
+      and exceptions, not a policy answering send, hold or never_send per verdict and per flag.
+      Reporting them as one would leave every verdict the rules do not mention silently defaulting
+      to send, which is exactly the failure the policy exists to prevent.
+
+  - name: contactability_policy.get
+    fulfilment: absent
+    because: >
+      not evidenced — there is no policy to read, only the individual blacklist entries.
+
+  # ------------------------------------------------ 04 import
+
+  - name: source.inspect
+    fulfilment: absent
+    because: >
+      not evidenced as an API surface, and rightly so — the file is inspected locally, before any
+      call, which is what the import ordering this skill already carried says: inspect the source
+      locally, zero API calls. There is no upload-and-profile endpoint and there does not need to
+      be. Do the inspection, then show the user what would land, then ask.
+
+  - name: import.apply
+    fulfilment: composed
+    surface: contacts -> Import contacts, Filter contacts; background-jobs -> Get a background job
+    scopes: [contacts:write, other:read]
+    order: >
+      contacts -> Import contacts, then background-jobs -> Get a background job polled to a
+      terminal state, then contacts -> Filter contacts by the target list to reconcile created,
+      updated, skipped and failed against what was asked for.
+    notes: >
+      A large import returns a job reference, not a result: the operation completes when the job
+      reaches a terminal state, never when the call returns. A job that ends failed gets its body
+      read for the reason — never blind-retry a bulk write, because the first attempt may have
+      partially succeeded. The approval gate over the file, the count, the mapping, the dedupe
+      policy and the target list belongs before the first call.
+
+  - name: import.list
+    fulfilment: partial
+    surface: background-jobs -> List background jobs
+    scopes: [other:read]
+    missing: >
+      There is no import history. Imports appear as background jobs among every other kind of job,
+      and the documentation does not say the listing can be filtered to imports, so the question
+      is answered by reading a general job list and recognising them. Anything older than that
+      listing retains is simply gone.
+
+  - name: import.get
+    fulfilment: partial
+    surface: background-jobs -> Get a background job
+    scopes: [other:read]
+    missing: >
+      A job is identified by its own id, not by an import record, and the documentation does not
+      state that the result carries a per-row ledger tying each source row to the contact it
+      created or matched. Keep that reconciliation yourself at import time — after the fact it may
+      not be recoverable at all.
+
+  - name: import.revert
+    fulfilment: absent
+    because: >
+      not evidenced — nothing undoes an import. Bulk deleting the contacts is not a revert: it
+      destroys people the import updated rather than created, and it cannot put back a field the
+      import overwrote. Say the import is not reversible before it runs, which is the only moment
+      at which saying it helps anyone.
+
+  # ------------------------------------------------ 05 campaign, schedule, windows and limits
+
+  - name: campaign.list
+    fulfilment: partial
+    surface: >
+      sequences -> List all sequences, Count sequences; sequence-folders -> List sequences in a
+      folder
+    scopes: [sequences:read]
+    missing: >
+      State comes back; health does not. Nothing in the listing separates a campaign that is fine
+      from one that is not progressing, degraded or blocked, so "what is running, and what is
+      quietly broken" needs a second pass over stats and sender health — and that verdict is this
+      adapter's judgement, not a field it read.
+
+  - name: campaign.create
+    fulfilment: direct
+    surface: sequences -> Create a sequence, List all sequences
+    scopes: [sequences:write]
+    notes: >
+      Creating never arms anything: the new sequence comes back in a new state and starting it is
+      a separate call with a separate approval. List first — reuse is usually right, and a
+      fourteenth near-identical campaign is how a mailbox ends up sending to the same person from
+      three directions.
+
+  - name: campaign.clone
+    fulfilment: composed
+    surface: >
+      sequences -> Save a sequence as a template, Create a sequence from a template;
+      sequence-templates -> List all sequence templates
+    scopes: [sequences:write]
+    order: >
+      sequences -> Save a sequence as a template, then Create a sequence from a template. Check
+      sequence-templates -> List all sequence templates first in case the template already exists.
+    notes: >
+      The template route carries structure and content and not enrolments, history or results,
+      which is what the contract asks of a clone. Read the new campaign back and confirm the
+      schedule and sender bindings came with it before assuming they did.
+
+  - name: campaign.update
+    fulfilment: partial
+    surface: sequences -> Update a sequence, Change sequence owner
+    scopes: [sequences:write]
+    missing: >
+      Owner moves through its own endpoint, so one conceptual update is two calls. Beyond that
+      there is no declared successor and no personalisation tier on the sequence: a campaign that
+      hands over to another one cannot say so here and has to be tracked outside the product.
+    notes: >
+      The update is last-write-wins — read the campaign first, or a field nobody meant to touch is
+      reverted by a call that only meant to change the name. The owner endpoint is separate and
+      may carry its own scope; take it from its page.
+
+  - name: reply_policy.set
+    fulfilment: partial
+    surface: sequences -> Update a sequence
+    scopes: [sequences:write]
+    missing: >
+      One switch, not a decision per event class: a reply either finishes the person or sending
+      continues, and that is the whole vocabulary. There is no per-event-class routing and no
+      attribution window, so "a reply within thirty days still counts as this campaign's" cannot
+      be expressed at all.
+    notes: >
+      Continuing to send after a reply is the setting that keeps writing to somebody who already
+      answered. The contract raises this to confirm_once for exactly that reason, and learning it
+      is one field on an update endpoint changes nothing about the confirmation.
+
+  - name: schedule.set
+    fulfilment: partial
+    surface: >
+      schedules -> Create a schedule, Update a schedule, Set default schedule; sequences -> Update
+      a sequence to attach it
+    scopes: [sequences:write]
+    missing: >
+      Windows per day and the timezone policy are there, including sending in the prospect's own
+      timezone rather than the schedule's. A delay basis and an out-of-window behaviour are not:
+      nothing states whether a touch falling outside a window defers to the next open one or is
+      skipped, so the defer-or-skip decision the contract makes the user take has no setting to
+      carry it. Holidays are all-or-nothing per schedule.
+    notes: >
+      Two calls: create or update the schedule, then attach it through the sequence update. A
+      schedule is a shared object, so changing one silently rewrites every future date on every
+      campaign pointing at it — which is the damage the contract's confirm_once is guarding
+      against. Check who else uses it before editing rather than after.
+
+  - name: pacing.set
+    fulfilment: partial
+    surface: sequences -> Update a sequence
+    scopes: [sequences:write]
+    missing: >
+      People admitted per day, messages per day and a minimum gap between sends all exist, and so
+      does a same-domain cap the contract does not ask for. Jitter and the cold-start ramp do not:
+      a new campaign runs at its full configured rate from day one unless somebody raises the
+      numbers by hand over several days, and nothing records that they intended to.
+    notes: >
+      These are per-campaign, which is the point of the operation — slowing this campaign without
+      slowing everything else on the same mailbox. Ceilings that belong to the sending capability
+      itself are set elsewhere and are not reachable from here.
+
+  - name: sender_binding.set
+    fulfilment: partial
+    surface: >
+      sequence-email-accounts -> Assign email account to sequence, Set sequence email accounts,
+      Remove email account from sequence; sequence-linkedin-accounts -> Assign a LinkedIn account
+      to a sequence
+    scopes: [sequences:operate]
+    missing: >
+      Binding is per campaign only — named participations cannot be bound. And the documentation
+      does not say what happens to people already mid-campaign when the binding changes, so the
+      preview the contract requires, the one telling a user which live threads are about to change
+      From address, cannot be produced from this API.
+    notes: >
+      Because the live-participation behaviour is undocumented, treat a rebinding on a running
+      campaign as an act with an unknown blast radius: pause, rebind, read back, resume. Confirm
+      the sender is healthy before binding it to anything.
+
+  - name: campaign.validate
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface answers whether a campaign is safe to turn on. The
+      pieces a validation would read do exist separately, as steps, sender assignments, the
+      schedule and the enrolled count, so the check is assembled by the agent out of several reads
+      and reported as its own work. Never report it as something the product verified: an
+      unpublished template or a schedule that never opens will not announce itself.
+
+  - name: campaign.test
+    fulfilment: partial
+    surface: email-templates -> Send a test email, Render an email template
+    scopes: [sequences:operate]
+    missing: >
+      It tests a template, not the campaign. There is no surface that sends step one exactly as a
+      real contact would receive it, the documentation places no restriction on the recipient
+      address, and nothing checks that the unsubscribe mechanism in the message actually works.
+      The contract's test — receive it yourself, click the unsubscribe link, and only to an
+      address the workspace can demonstrate it owns — is only partly reachable.
+    notes: >
+      A test send is still a send and still metered, so the contract's confirm_each stands. Say
+      which parts were tested and which were not, rather than reporting a green test.
+
+  - name: campaign.resume
+    fulfilment: direct
+    surface: sequences -> Start a sequence, Bulk start sequences
+    scopes: [sequences:operate]
+    notes: >
+      The same endpoint as activation, so it will not refuse a campaign that was never paused the
+      way the contract says a resume should. Read the state first and decide which operation you
+      are actually performing: the two carry different approvals, and only one of them is a first
+      activation.
+
+  - name: campaign.freeze
+    fulfilment: partial
+    surface: >
+      sequences -> Pause a sequence; or holiday-calendars -> Create a holiday calendar with
+      schedules -> Link a holiday calendar to a schedule
+    scopes: [sequences:operate, sequences:write]
+    missing: >
+      Neither route is a freeze. A pause carries no expiry and never resumes itself, so the thing
+      that makes a freeze safe — that somebody forgetting about it is not a failure — is gone. A
+      dated holiday calendar does expire by itself, but it suppresses at the schedule, and a
+      schedule may be shared by campaigns nobody meant to stop.
+    notes: >
+      Say which route was taken and what it costs. A pause leaves the resume as a human's job, so
+      it belongs in whatever carries work across sessions rather than in someone's memory. A
+      linked calendar needs a check of which other campaigns point at that schedule, before
+      linking.
+
+  - name: campaign.unfreeze
+    fulfilment: partial
+    surface: >
+      sequences -> Start a sequence; or schedules -> Unlink a holiday calendar from a schedule
+    scopes: [sequences:operate, sequences:write]
+    missing: >
+      No preview of what letting it go early releases. The contract wants the count of messages
+      that go out the moment the suppression lifts, and nothing here produces one, so the user is
+      approving a release whose size nobody has been told.
+    notes: >
+      Work the release out from the enrolled counts and the pacing before asking for the
+      confirmation, and say out loud that the number is an estimate rather than a reading.
+
+  - name: campaign.archive
+    fulfilment: direct
+    surface: sequences -> Archive a sequence, Bulk archive sequences
+    scopes: [sequences:operate]
+    notes: >
+      Refuses with a conflict when the campaign is already archived or in an incompatible state,
+      and the documentation does not enumerate those states — so read the campaign back rather
+      than inferring what the conflict meant. Stop live enrolments with a reason first, as the
+      contract requires.
+
+  - name: campaign.unarchive
+    fulfilment: direct
+    surface: sequences -> Unarchive a sequence, Bulk unarchive sequences
+    scopes: [sequences:operate]
+    notes: >
+      Bringing it back into the working set does not start it sending. That is a separate call and
+      a separate decision, and the contract keeps them apart for a reason.
+
+  - name: schedule.resolve
+    fulfilment: absent
+    because: >
+      not evidenced — nothing documented returns a resolved calendar. The schedule can be read and
+      so can a linked holiday calendar, but the day-by-day answer for a campaign or for one
+      person, showing what a weekend, a holiday or a closed window moved, has to be computed and
+      cannot be checked against anything.
+
+  - name: send_window.resolve
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface answers when one person may be contacted on one
+      channel. Some inputs are readable, being the schedule's windows, its timezone policy and its
+      linked holiday calendars, but legal quiet hours in the recipient's local time and operator
+      blackouts are not modelled at all, so the parts that carry legal weight are the ones missing.
+
+  - name: blackout.define
+    fulfilment: partial
+    surface: >
+      holiday-calendars -> Create a holiday calendar, Update a holiday calendar; schedules -> Link
+      a holiday calendar to a schedule
+    scopes: [sequences:write]
+    missing: >
+      Named date ranges exist, with an annual-repeat flag. Defer-or-skip does not: nothing states
+      whether the touches a range stops come back afterwards or are lost, which is half of what
+      the contract asks the user to decide. Nor does the create call take the region the range
+      applies to, so whose region applies cannot be stated at the moment the range is drawn.
+    notes: >
+      A calendar suppresses nothing until it is linked to a schedule, and it then applies to every
+      campaign on that schedule. Linking is the act; creating is not, and reporting the create as
+      the blackout is how a holiday range ends up suppressing nothing.
+
+  - name: blackout.list
+    fulfilment: composed
+    surface: >
+      holiday-calendars -> List holiday calendars; schedules -> List linked holiday calendars
+    scopes: [sequences:read]
+    order: >
+      holiday-calendars -> List holiday calendars for everything defined, then, for each schedule
+      a campaign in scope actually uses, schedules -> List linked holiday calendars. An unlinked
+      calendar suppresses nothing and must not be reported as suppression in force.
+    notes: >
+      This answers which ranges are in force and until when for the campaigns you name, not
+      account-wide in one call. State the scope you checked, because the difference between "no
+      blackouts" and "no blackouts on the two campaigns I looked at" is the whole answer.
+
+  - name: blackout.remove
+    fulfilment: partial
+    surface: >
+      schedules -> Unlink a holiday calendar from a schedule; holiday-calendars -> Delete a
+      holiday calendar
+    scopes: [sequences:write]
+    missing: >
+      The lift itself works. The preview does not: nothing says whether removing a range opens a
+      window that is open right now on a live campaign, or how many messages go out as a result —
+      and that preview is what the contract uses to decide whether this is an act at all. Here it
+      has to be reasoned out instead of read.
+    notes: >
+      Unlink lifts the suppression for one schedule; delete removes the calendar from every
+      schedule that used it. They are different-sized acts, and the user should be told which one
+      is being proposed before they agree to it.
+
+  - name: frequency_policy.define
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface caps how often one person, account or domain hears
+      from us across campaigns. The per-campaign same-domain limit is the nearest thing and is a
+      different promise: one campaign's contacts-per-domain-per-day, not a cross-campaign,
+      cross-channel cap. Offering it as one would let three campaigns touch the same person in a
+      day while the limit reports as respected.
+
+  - name: frequency_policy.get
+    fulfilment: absent
+    because: >
+      not evidenced — there is no cap to read, since none can be defined, and the per-campaign
+      same-domain limit answers a different question.
+
+  - name: capacity.estimate
+    fulfilment: absent
+    because: >
+      not evidenced — nothing projects whether a plan can physically run. Sending capacity, pacing
+      and existing load are each readable somewhere, but no surface puts them against a planned
+      volume over a stated horizon. Any answer is the agent's own arithmetic over several reads
+      and has to be reported that way, with the reads it rests on named.
+
+  # ---------------------------------------------------- families 12-16, 91 operations
+  # Signals and triggers · inbound · consent, suppression and privacy · sending capability
+  # and deliverability · social and messaging channels.
+  #
+  # Evidence: the 1.1.0 mapping this skill carried, the documentation index, and the pages
+  # named below read directly. Most of this range is `absent`, which is the honest result:
+  # the contract describes the whole job and no product covers all of it.
+
+  # ------------------------------------------------------------ 12 — signals and triggers
+
+  - name: signal.list
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. Nothing reports that someone
+      changed job, visited a page, raised funding or engaged publicly.
+    notes: >
+      ai-sdr-intent-signals -> Industries typeahead, Technologies typeahead is the nearest
+      thing and it is not this: it resolves the words a user says into values a prospect
+      search accepts. Offering it here answers a different question than the one asked.
+
+  - name: signal.get
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. Without a feed there is
+      nothing to read one observation from.
+
+  - name: signal.acknowledge
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this.
+
+  - name: signal_policy.define
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. Nothing arbitrates between
+      two things firing on the same person, because nothing fires.
+
+  - name: signal_policy.get
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this.
+
+  - name: trigger.create
+    fulfilment: partial
+    surface: webhooks -> Create a webhook subscription, List supported event types
+    scopes: [webhooks:write, webhooks:read]
+    missing: >
+      Only the watching half. A subscription delivers a named event to a listener outside the
+      product; the rule's other half — producing work in response — has no surface, so the
+      acting side must live in the agent runtime. The watchable set is fixed and product-side
+      (message sent, opened, clicked, replied, bounced; contact opted out or finished;
+      connection request sent and accepted; account connection lost or erroring), so a rule
+      that must watch something outside that set cannot be expressed at all.
+    notes: >
+      Read List supported event types before promising a rule — the event names are the whole
+      vocabulary, and a trigger written against an event that is not on that list will never
+      fire rather than failing loudly.
+
+  - name: trigger.update
+    fulfilment: partial
+    surface: >
+      webhooks -> Update a webhook subscription, Enable a webhook subscription,
+      Disable a webhook subscription
+    scopes: [webhooks:write, webhooks:operate]
+    missing: >
+      The same half as trigger.create: what the rule watches can be changed, what it produces
+      cannot, because production is not in the product.
+    notes: >
+      "Switch it off without losing it" maps exactly onto Disable, which is the reversible
+      move. Deleting a subscription to stop it and re-creating it later is not the same act
+      and loses the subscription's history.
+
+  - name: trigger.list
+    fulfilment: partial
+    surface: webhooks -> List webhook subscriptions, List supported event types
+    scopes: [webhooks:read]
+    missing: >
+      What each rule watches is listed; what it produces is not, and cannot be, since the
+      producing half is external. Report the watch, and say plainly that the action behind it
+      is the runtime's and not the product's.
+
+  - name: trigger.delete
+    fulfilment: partial
+    surface: webhooks -> Delete a webhook subscription
+    scopes: [webhooks:write]
+    missing: >
+      Removes the watch only. Whatever the agent runtime built on top of that event keeps
+      existing and has to be taken down separately, or it becomes a rule waiting on an event
+      that will never arrive again.
+
+  - name: trigger_run.list
+    fulfilment: partial
+    surface: webhooks -> Get webhook delivery logs
+    scopes: [webhooks:read]
+    missing: >
+      Deliveries, not runs. The log says which event fired and whether it reached the
+      listener; what work came out of it and what a policy held back are not recorded, because
+      neither the work nor the policy exists on this side. Never report a delivery count as a
+      count of work done.
+
+  # -------------------------------------------------------------------------- 13 — inbound
+
+  - name: inbound_lead.record
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. There is no inbound-lead or
+      form-capture group: an arrival has nowhere to be recorded as an arrival, with the clock
+      the rest of this family depends on.
+    notes: >
+      Do not simulate the queue out of tasks, contact owners or inbox categories. Those
+      entities have their own meanings and their own operations, and an arrival modelled as a
+      task loses the one thing that made it an arrival — the response clock.
+
+  - name: inbound_lead.list
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this.
+
+  - name: inbound_lead.get
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this.
+
+  - name: inbound_lead.route
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. There is no routing rule —
+      territory, existing owner, round-robin or availability — anywhere in the documentation.
+    notes: >
+      Contact and account ownership can be changed, but changing an owner is not routing an
+      arrival: it carries no rule, no queue and no clock, and reporting it as routing would
+      claim a guarantee that was never made.
+
+  - name: inbound_lead.claim
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this.
+
+  - name: inbound_lead.release
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this.
+
+  - name: inbound_lead.triage
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. Nothing classifies what kind
+      of request an arrival is.
+    notes: >
+      Inbox categories classify reply threads on conversations we started. That is a different
+      act on a different entity, and it is covered by its own contract operation.
+
+  - name: inbound_lead.close
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this.
+
+  - name: inbound_lead.reopen
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this.
+
+  - name: response_policy.define
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. No response target can be
+      stated, so none can be measured or breached.
+
+  - name: response_policy.get
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this.
+
+  # ------------------------------------------ 14 — consent, suppression and privacy
+
+  - name: outreach.precheck
+    fulfilment: partial
+    surface: >
+      contacts -> Get a contact's statuses;
+      contact-blacklist-rules -> List email blacklist rules, List domain blacklist rules,
+      List email exception blacklist rules
+    scopes: [contacts:read]
+    order: >
+      Read the contact's statuses first — the opted-out state is a global flag there, and a
+      person opted out is a stop with no further questions. Then search the email rules for
+      the address and the domain rules for its domain. Read the exception rules as well: a
+      match on a domain rule is not final on its own.
+    missing: >
+      It answers one question — is this person opted out or excluded on email — and the
+      operation asks four. There is no channel dimension, so a social or phone precheck is not
+      covered. There is no timing half, so "if not, when" cannot be answered. There is no
+      consent basis and no external-register gate. Nothing says what would fix it. Say all of
+      this before a user commits to a route that treats the precheck as sufficient.
+    notes: >
+      The result is stale the moment it returns, here as in the contract. Nothing about
+      knowing which endpoint answers it changes that.
+
+  - name: suppression.check
+    fulfilment: partial
+    surface: >
+      contact-blacklist-rules -> List email blacklist rules, List domain blacklist rules,
+      List email exception blacklist rules
+    scopes: [contacts:read]
+    missing: >
+      The "why". A rule carries its pattern and whether it is system-wide, and nothing else —
+      no reason class comes back, so the answer is yes-or-no with no ground for it. Only email
+      addresses and domains are covered; a number, a social profile or a whole account has no
+      equivalent.
+    notes: >
+      The listings filter by pattern, so a raw identifier can be checked without it being a
+      contact in the system — which is the part of this operation that matters.
+
+  - name: suppression.list
+    fulfilment: partial
+    surface: >
+      contact-blacklist-rules -> List email blacklist rules, List domain blacklist rules,
+      List email exception blacklist rules
+    scopes: [contacts:read]
+    missing: >
+      Three separate lists rather than one, and none of the three facets the operation
+      promises: no scope, no reason class, no record of who added the entry. Numbers, social
+      profiles and whole accounts are not represented at all.
+
+  - name: suppression.add
+    fulfilment: partial
+    surface: >
+      contact-blacklist-rules -> Create an email blacklist rule, Create a domain blacklist
+      rule, Bulk create email blacklist rules, Bulk create domain blacklist rules
+    scopes: [contacts:write]
+    missing: >
+      "And here is why" has nowhere to go — no reason is recorded against a rule, so the
+      reason has to be kept in the agent's own record or it is lost, and suppression.remove
+      later has nothing to weigh. Numbers, social profiles and whole accounts have no
+      equivalent.
+    notes: >
+      The contract's read-before-repeating has a real surface here: search the listing for the
+      pattern first. Adding a pattern that already exists is a refusal, so a blind retry is
+      wrong.
+
+  - name: suppression.remove
+    fulfilment: partial
+    surface: >
+      contact-blacklist-rules -> Delete an email blacklist rule, Delete a domain blacklist
+      rule, Bulk delete email blacklist rules, Bulk delete domain blacklist rules
+    scopes: [contacts:write]
+    missing: >
+      The evidence that licenses the lift is not recorded, and no retention floor is exposed
+      to check against — so the one guard the contract puts on this irreversible act cannot be
+      enforced by the product and must be enforced by the agent before the call. Email
+      addresses and domains only.
+
+  - name: optout.record
+    fulfilment: partial
+    surface: >
+      contact-blacklist-rules -> Create an email blacklist rule, Bulk create email blacklist
+      rules
+    scopes: [contacts:write]
+    missing: >
+      It records the exclusion, not the act. What they said, where it arrived, when they did
+      it and when we learned of it have nowhere to go, so the evidence that this was their
+      decision is not retained. The product carries its own opted-out state on a contact —
+      readable through Get a contact's statuses — but no documented surface sets it.
+    notes: >
+      This is the protective floor operation: recording that somebody said stop is performed
+      first and reported immediately. A blacklist rule stops future sends, which is the effect
+      that matters most; keep the act itself in the agent's own record alongside it.
+
+  - name: optout.poll
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. Nothing pulls un-ingested stop
+      signals from the channel — one-click unsubscribes, list-unsubscribe requests, blocks or
+      stop keywords.
+    notes: >
+      The notification surface carries a contact-opted-out event. That is a push about an
+      opt-out the product has already ingested, not the backlog of ones it has not, and the
+      two are not interchangeable: subscribing to it tells you nothing about what is waiting
+      at the channel.
+
+  - name: optout.confirm
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. No opt-out confirmation exists
+      as its own act, and no ledger records whether one was already sent.
+    notes: >
+      A direct email to a contact can be sent, and using it for this is the substitution to
+      refuse. This confirmation is exactly-once, non-promotional and may never require
+      anything of the recipient; with no ledger to check, a second one is a breach rather than
+      a duplicate, and nothing here would stop it.
+
+  - name: consent.record
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. There is no permission record:
+      what they were told, when, how it was captured and what it covers have nowhere to live.
+
+  - name: consent.revalidate
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. With no basis recorded there
+      is nothing to recompute and no contactability to downgrade.
+
+  - name: consent.prove
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this.
+
+  - name: notice.send
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. Neither the delivery of a
+      privacy notice nor the record that it was delivered has a surface.
+
+  - name: disclosure.check
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this.
+
+  - name: disclosure.record
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. Nothing binds a disclosure to
+      the message that carried it.
+
+  - name: dnc_registry.check
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. No external do-not-contact
+      register is reachable from here; the blacklist rules are our own list, not a
+      jurisdiction's.
+
+  - name: privacy_request.create
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. There is no privacy-request
+      entity, so no clock starts and nothing later can be tied to a request.
+
+  - name: privacy_request.update
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this.
+
+  - name: privacy_request.refuse
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this.
+
+  - name: privacy_request.fulfill
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. There is no recorded request
+      to fulfil against, and no export of everything held about a person.
+    notes: >
+      Contacts can be deleted, singly and in bulk. That is contact.delete, a different
+      contract operation with a different meaning, and performing it must never be reported as
+      fulfilling a privacy request: the request record is the whole point of this operation
+      and it does not exist here.
+
+  - name: deletion_feed.poll
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. No external erasure register
+      is reachable from here.
+
+  - name: deletion_feed.report
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this.
+
+  - name: retention.apply
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. No storage limit can be stated
+      or enforced, and no floor is exposed to stop at.
+
+  - name: audit_log.search
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. There is no audit surface: who
+      changed what, when, on our side is not answerable.
+    notes: >
+      A contact's activity history is the record of outreach that touched that contact. It is
+      not a record of our own changes, and it cannot answer why this person was contacted at
+      all — which is the harder half of the question and the one that gets asked under
+      pressure.
+
+  # -------------------------------------- 15 — sending capability and deliverability
+
+  - name: sender.list
+    fulfilment: partial
+    surface: >
+      email-accounts -> List email accounts, Filter email accounts;
+      linkedin-accounts -> List LinkedIn accounts, List pending LinkedIn accounts
+    scopes: [channels:read]
+    missing: >
+      Two lists rather than one, and only two of the four capability classes. Mailboxes and
+      social accounts are covered; numbers and business messaging identities have no group at
+      all, so a channel the user asks about may be invisible rather than empty.
+    notes: >
+      Merge the two and label every row with its channel, or the caller cannot tell what it is
+      looking at. Read the pending social list too: a half-finished connection must read as
+      pending setup, never as absent, and leaving it out is how a sender that is nearly ready
+      gets connected a second time.
+
+  - name: sender.get
+    fulfilment: partial
+    surface: >
+      email-accounts -> Get an email account;
+      linkedin-accounts -> Get a LinkedIn account
+    scopes: [channels:read]
+    missing: >
+      Identity, channel and configured pacing come back. Pool membership and registration do
+      not, because neither concept exists here — see sender_pool.* and
+      messaging_registration.*. Mailboxes and social accounts only.
+
+  - name: sender.health
+    fulfilment: partial
+    surface: >
+      email-accounts -> Get an email account, Test SMTP connectivity, Test IMAP connectivity;
+      linkedin-accounts -> Get a LinkedIn account
+    scopes: [channels:read, channels:operate]
+    missing: >
+      Connection state and configured limits are readable, and the mailbox read reports
+      whether the provider has locked or throttled the account. Warm-up position, the
+      channel's automation sanction, and any statement of how much of today's capacity is
+      still available are not exposed — so three of the five things this operation promises
+      have to be tracked by the agent or left unanswered. Numbers and business messaging
+      identities are not covered.
+    notes: >
+      The connectivity tests verify the credential actively rather than reporting a cached
+      status, which is the difference that matters when an account looks fine and is not.
+      A disconnected or erroring account is still a hard stop: this is a core operation and
+      the launch chain refuses on it.
+
+  - name: sender.connect
+    fulfilment: partial
+    surface: >
+      email-accounts -> Create an email account, Connect Gmail account via OAuth,
+      Connect Office 365 account via OAuth;
+      linkedin-accounts -> Create a connection link, Create a direct connection link
+    scopes: [channels:write]
+    missing: >
+      Mailboxes and social accounts only; numbers and business messaging identities have no
+      surface. On the social channel the call produces a link a person has to complete, so the
+      operation is not finished when the call returns.
+    notes: >
+      Poll the pending social list until the account appears in the real one. Until then it is
+      the contract's pending-setup state, and reporting it as connected is how a campaign gets
+      launched against a sender that cannot send.
+
+  - name: sender.disconnect
+    fulfilment: partial
+    surface: >
+      email-accounts -> Delete an email account, Bulk delete email accounts;
+      linkedin-accounts -> Delete a LinkedIn account, Bulk delete LinkedIn accounts
+    scopes: [channels:write]
+    missing: >
+      It deletes rather than detaches, and the guard the contract puts on this operation is
+      absent: nothing refuses while live enrolments or open conversations still depend on the
+      sender, and no rebind target can be supplied. The check is the caller's, and it has to
+      happen before the call because there is nothing to undo afterwards.
+    notes: >
+      What is bound to a sender is readable only one campaign at a time
+      (sequence-email-accounts -> List email accounts in sequence; sequence-linkedin-accounts
+      -> List LinkedIn accounts for a sequence), so the check is a scan. On the social channel
+      sender.pause is the reversible alternative and is usually what the user actually wants.
+
+  - name: sender.reauthorize
+    fulfilment: partial
+    surface: >
+      linkedin-accounts -> Reconnect a LinkedIn account;
+      email-accounts -> Connect Gmail account via OAuth, Connect Office 365 account via OAuth
+    scopes: [channels:write]
+    missing: >
+      Only the social channel has a reconnect that names the existing account. On a mailbox
+      the documented route is re-running the provider connection, and nothing states that the
+      history behind it survives — which is the whole promise of this operation. Verify by
+      re-reading rather than assuming, and tell the user what you could not confirm.
+
+  - name: sender.pause
+    fulfilment: partial
+    surface: linkedin-accounts -> Toggle LinkedIn account status
+    scopes: [channels:operate]
+    missing: >
+      Social accounts only. A mailbox has no documented pause — the resume surface exists with
+      no counterpart — so on email the protective move has to be made one level up, at
+      campaign.pause or by removing the sender from the campaign. Say which one you used,
+      because they are not the same blast radius.
+    notes: >
+      The social call flips between enabled and disabled rather than setting a state. Read the
+      account first: issued blind against an already-paused account it re-enables it, which
+      turns the first move in an incident into the worst one.
+
+  - name: sender.resume
+    fulfilment: partial
+    surface: >
+      email-accounts -> Resume sending;
+      linkedin-accounts -> Toggle LinkedIn account status
+    scopes: [channels:operate]
+    missing: >
+      Nothing refuses the resume on an invalid warm-up position, because no warm-up position
+      is exposed at all — the contract's guard has to be enforced by the caller or it is not
+      enforced. The mailbox surface is scoped to accounts the provider locked or throttled,
+      not to an operator pause, and no operator pause exists on that channel.
+    notes: >
+      Resolve the underlying problem before calling, then re-read the account to confirm the
+      lock actually cleared. The social call flips rather than sets — read state first, same
+      as with sender.pause.
+
+  - name: sender_limit.set
+    fulfilment: partial
+    surface: >
+      linkedin-accounts -> Update LinkedIn account limits;
+      email-accounts -> Update an email account
+    scopes: [channels:write]
+    missing: >
+      The contract's one decision is two different surfaces, one per channel, and only the
+      social one is a dedicated limits endpoint — on a mailbox the limits ride on the account
+      update, so a careless call can overwrite settings the caller did not intend to touch.
+      Numbers and business messaging identities have no surface.
+    notes: >
+      Read the limits in force first and re-read after: report what actually took, not what
+      was requested. Lowering is protective; raising is the direction that needs the approval,
+      and the mapping does not change that.
+
+  - name: warmup_plan.set
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. No ramp can be defined, read
+      or started, and no warm-up position is exposed anywhere in the API.
+    notes: >
+      This is the absence that costs the most in this family: sender.resume refuses on the
+      warm-up position, and with no position readable that refusal cannot be automated. Tell
+      the user the ramp is theirs to hold, and hold it in the agent's own record.
+
+  - name: message_element.set
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. The legal identification
+      block, the postal address, the channel's stop artefacts and the tracking domain have no
+      per-sender configuration surface.
+
+  - name: sender.reserve
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. There is no allowance
+      reservation, so two parallel runs against one sender can spend the same capacity twice
+      and neither will be told.
+
+  - name: sender.release
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. Nothing to give back, since
+      nothing can be claimed.
+
+  - name: sender.summarize
+    fulfilment: absent
+    surface: email-accounts -> Get email account stats, Filter email account stats
+    because: >
+      The per-sender figures surface is documented Coming soon and is not callable today. Say
+      that rather than reaching for something adjacent, and check the page again before
+      planning around it.
+    notes: >
+      The reporting overview is account-wide, not per sender, and answers a different
+      question. Substituting it produces a number that looks like this sender's and is not,
+      which is worse than having none. Even when the stats surface opens, failures by class,
+      complaints with their publisher and denominator, deferrals and throttles are not
+      promised by it.
+
+  - name: restriction.record
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. There is no restriction
+      ledger, so a restriction cannot be recorded, counted, or carried forward.
+    notes: >
+      The arrival of one is observable — the notification surface carries account-alert,
+      connection-lost and account-error events, and the mailbox read reports a provider lock.
+      What is missing is the durable record behind them. Keep it in the agent's own record:
+      the recurrence count and the invalidated warm-up position both hang off it, and
+      platforms escalate on how often a sender is restricted rather than on what for.
+
+  - name: restriction.appeal
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. No appeal route is exposed;
+      where the platform offers one it is outside this API, and saying so plainly is the
+      correct answer.
+
+  - name: sender_pool.create
+    fulfilment: partial
+    surface: >
+      sequence-email-accounts -> Set sequence email accounts, Assign email account to
+      sequence;
+      sequence-linkedin-accounts -> Assign a LinkedIn account to a sequence
+    scopes: [sequences:read, sequences:operate]
+    missing: >
+      There is no pool object. The grouping exists only as the set of senders bound to one
+      campaign, so it cannot be named, cannot be created before the campaign exists, and
+      cannot be reused by a second campaign without being rebuilt. Routing policy is not part
+      of it.
+    notes: >
+      Rotation across the bound senders is the product's own behaviour, so do not tell a user
+      that sending across several senders is unavailable — that is a wrong answer, not a
+      cautious one. What is unavailable is the reusable, named, independently routable pool.
+
+  - name: sender_pool.update
+    fulfilment: partial
+    surface: >
+      sequence-email-accounts -> Set sequence email accounts, Assign email account to
+      sequence, Remove email account from sequence;
+      sequence-linkedin-accounts -> Assign a LinkedIn account to a sequence, Remove a LinkedIn
+      account from a sequence
+    scopes: [sequences:read, sequences:operate]
+    missing: >
+      Membership changes, one campaign at a time. The routing policy does not — and sticky per
+      recipient in particular is not selectable, which on a conversational channel is
+      correctness rather than optimisation. Say that before a user commits to a route that
+      needs a recipient to keep hearing from the same sender.
+    notes: >
+      Setting the whole set replaces it. Read the current members first, or a call meant to
+      add one sender silently removes the rest.
+
+  - name: sender_pool.list
+    fulfilment: partial
+    surface: >
+      sequence-email-accounts -> List email accounts in sequence;
+      sequence-linkedin-accounts -> List LinkedIn accounts for a sequence
+    scopes: [sequences:read]
+    missing: >
+      Pools cannot be enumerated. Every read is scoped to one campaign, so "what pools exist"
+      is answerable only by walking every campaign, and how work routes across the members is
+      not reported at all.
+
+  - name: sender_pool.delete
+    fulfilment: partial
+    surface: >
+      sequence-email-accounts -> Remove email account from sequence;
+      sequence-linkedin-accounts -> Remove a LinkedIn account from a sequence
+    scopes: [sequences:read, sequences:operate]
+    missing: >
+      There is no pool to dissolve. Removing every binding leaves the campaign with no sender
+      rather than dissolving a named group — nothing refuses it while the campaign is live and
+      no replacement target can be supplied, so the campaign is left unable to send and
+      nothing says so.
+    notes: >
+      The capabilities themselves are untouched, as the contract expects: this removes
+      bindings, not senders.
+
+  - name: sending_domain.register
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. Domains are not a first-class
+      entity here; a sender carries its address and that is all.
+
+  - name: sending_domain.list
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this.
+
+  - name: sending_domain.retire
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this.
+
+  - name: authentication_requirement.list
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. What has to be published for a
+      domain to authenticate is not stated anywhere in the API.
+
+  - name: domain_compliance.check
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. No verdict per publisher and
+      per requirement is available, so a failing requirement cannot be named.
+
+  - name: domain_reputation.get
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. No reputation signal,
+      blocklist listing or dataset is exposed.
+
+  - name: message_compliance.check
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. Nothing evaluates a rendered
+      message against what it will be held to: required elements, a working unsubscribe, or
+      the reputation of the domains it links to.
+    notes: >
+      The rendered message itself can be obtained (email-templates -> Render an email
+      template, Send a test email), so the check can be performed outside the product against
+      a real rendering rather than against the source. That is worth doing, and it is not this
+      operation — report it as an external check.
+
+  - name: placement_test.create
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. There is no seed-list send and
+      no per-provider placement result.
+    notes: >
+      The email-validation surface estimates and schedules address validation. That answers
+      whether an address exists, never where a message lands, and offering it here would
+      answer a deliverability question with a data-quality one.
+
+  - name: placement_test.get
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this.
+
+  - name: messaging_registration.submit
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. No brand or use-case
+      registration exists, because the channels that require one before any send is permitted
+      are not represented in this API.
+
+  - name: messaging_registration.get
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this.
+
+  - name: approved_content.submit
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. No content is submitted to a
+      platform for pre-approval.
+    notes: >
+      The pending-approval surface in the AI-SDR cluster is a person inside the organisation
+      approving generated content before it sends. This operation is a platform gating content
+      before we are permitted to send it at all. They are different actors with different
+      consequences for refusal, and mapping one onto the other would report an internal
+      sign-off as a platform's permission.
+
+  - name: approved_content.get
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this.
+
+  - name: approved_content.retire
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this.
+
+  # ---------------------------------------------- 16 — social and messaging channels
+
+  - name: social_invitation.send
+    fulfilment: direct
+    surface: direct-outreach -> Send a LinkedIn connection request to a contact
+    scopes: [contacts:operate]
+    notes: >
+      The optional note is supported, and that is exactly why the contract's confirm_each
+      applies: it is content addressed to one named person, so the literal text is approved
+      before the call, not a description of it. The person must already be a contact carrying
+      a profile URL, and the caller names which connected social account sends it — so
+      sender.health comes first. The send happens outside any campaign, which means campaign
+      pacing does not apply to it and the daily invitation limit has to be respected by the
+      caller; see linkedin-guardrails for the pacing this operation is subject to.
+      The contract's read before repeating — the invitation state for this pair — has no
+      surface here, because social_invitation.list is absent. Keep that ledger in the agent's
+      own record, or a retry becomes a second invitation to somebody who already has one.
+
+  - name: social_invitation.list
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. Invitations sent cannot be
+      listed, so neither what is pending nor how old it is can be answered.
+    notes: >
+      The pending social-account listing is a different thing despite the similar name: it is
+      accounts waiting to finish connecting to the product, not invitations waiting on people.
+      Confusing the two produces a confident answer to a question nobody asked.
+
+  - name: social_invitation.withdraw
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. A sent invitation cannot be
+      taken back through the API.
+
+  - name: social_invitation.accept
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this.
+
+  - name: social_invitation.decline
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this.
+
+  - name: social_relationship.get
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. Nothing answers, on demand,
+      whether we are connected to this person or at what degree.
+    notes: >
+      The notification surface reports connection requests sent and accepted, so a standing
+      relationship ledger can be maintained outside the product from those events. That is a
+      ledger the agent builds and owns; it is not a read, and it knows nothing about people we
+      never invited.
+
+  - name: social_profile.view
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. No profile read is exposed,
+      metered or otherwise.
+
+  - name: social_profile.follow
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this.
+
+  - name: social_profile.unfollow
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this.
+
+  - name: social_post.react
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this.
+
+  - name: social_post.comment
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. No published content can be
+      posted under a person's identity through this API.
+
+  - name: social_credit.get
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. The metered messaging
+      allowance is not readable: how many credits remain, when they expire and whether a reply
+      returns one are all unanswerable.
+    notes: >
+      A metered message can be sent without any way to check the balance first, so the meter
+      is discovered by exhausting it. Warn the user before planning volume that depends on it.
+
+  - name: conversation_window.get
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. Nothing reports whether this
+      person may be written to freely right now, only with pre-approved content, or only by
+      spending a credit.
+    notes: >
+      Both routes exist as sends — an ordinary message and a metered one — but nothing says
+      which is permitted for a given person, so the choice is the caller's and a wrong one
+      fails at send time rather than at planning time. That is a real cost to surface before
+      the user commits to a social route.
+
+  # ------------------------------------------------------- family 6 — steps, content, content policy
+
+  - name: step.list
+    fulfilment: direct
+    surface: sequence-steps -> List all sequence steps, Get a sequence step
+    scopes: [sequences:read]
+    notes: >
+      The step carries its own execution mode, which is what tells you which steps owe a human
+      rather than going out on their own.
+
+  - name: step.add
+    fulfilment: partial
+    surface: sequence-steps -> Create a sequence step, Bulk create sequence steps
+    scopes: [sequences:write]
+    missing: >
+      Position is not settable. The create body has no position, order or index field, so a step
+      lands after the ones already made and no reorder endpoint exists to correct it. Content is
+      inline on the step rather than bound to a template version, so a step cannot reference
+      published copy. A branch is expressed as a condition step plus a parent reference and a
+      positive-or-negative flag, and the evaluation window and early-satisfaction behaviour the
+      contract asks for have no field at all.
+    notes: >
+      Channel and kind arrive together as one discriminated type — email, LinkedIn with its own
+      action subtype, call, SMS, WhatsApp, task, condition — and the delay is a single minutes
+      value, so the contract's unit and basis have to be reduced to minutes before the call.
+      Complex step work, notably variants on a live sequence and LinkedIn steps, is often better
+      handed to the product's own editor than approximated here. Say so and hand off rather than
+      guessing.
+
+  - name: step.update
+    fulfilment: partial
+    surface: sequence-steps -> Update a sequence step
+    scopes: [sequences:write]
+    missing: >
+      The step type is a discriminator and cannot be changed, so moving a step to another channel
+      means delete and re-add, which loses the step's variants with it. Position is out of reach
+      here for the same reason it is in step.add.
+    notes: >
+      A full replacement rather than a patch — read the step first and resend every field you are
+      not changing, or the delay and the copy you left out are gone. Nothing in the documentation
+      restricts the call while the sequence is live, so the in-flight statement the contract
+      requires is the agent's obligation and not the API's.
+
+  - name: step.remove
+    fulfilment: direct
+    surface: sequence-steps -> Delete a sequence step, Bulk delete sequence steps
+    scopes: [sequences:write]
+    notes: >
+      Takes the step's variants and their history with it. Re-read the step list afterwards — an
+      absent step is a completed removal, not a failure.
+
+  - name: step.reorder
+    fulfilment: absent
+    because: >
+      Neither Create a sequence step nor Update a sequence step exposes a position, order or index
+      field, and no reorder endpoint is documented. Steps sit in the order they were created.
+      Delete and re-add is not a substitute — it destroys variants and their measurement history,
+      which is the exact loss this operation exists to prevent.
+
+  - name: variant.add
+    fulfilment: direct
+    surface: sequence-steps -> Create a step variant, Bulk create step variants
+    scopes: [sequences:write, sequences:operate]
+    notes: >
+      A variant carries a subject, a message, an enabled flag and up to three attachment
+      identifiers. There is no split share, so report the split as unsettable rather than assuming
+      one — which is what the operation itself already requires. Enable step variants and Disable
+      step variants govern whether the step uses variants at all and need the operate scope rather
+      than write.
+
+  - name: variant.update
+    fulfilment: direct
+    surface: sequence-steps -> Update a step variant
+    scopes: [sequences:write]
+    notes: >
+      The enabled flag is here, which makes disabling the right move for a variant under test.
+
+  - name: variant.remove
+    fulfilment: direct
+    surface: sequence-steps -> Delete a step variant, Bulk delete step variants
+    scopes: [sequences:write]
+    notes: >
+      Destroys the variant's measurement history. Disable it instead while a test is running.
+
+  - name: variant.list
+    fulfilment: direct
+    surface: sequence-steps -> List step variants
+    scopes: [sequences:read]
+    notes: >
+      Returns each variant's enabled flag. The share each runs at is not part of the model here,
+      so report it as unavailable rather than inferring an even split.
+
+  - name: template.create
+    fulfilment: partial
+    surface: email-templates -> Create an email template
+    scopes: [sequences:write]
+    missing: >
+      No draft state. A template exists in one state and is usable the moment it is created, so
+      the contract's guarantee that unreviewed copy cannot be sent is not enforced by the product
+      and has to be carried by the approval gate instead.
+    notes: >
+      Folders organise templates — read List email template folders and List email templates
+      first, because reuse beats proliferation here as much as it does for lists.
+
+  - name: template.update
+    fulfilment: partial
+    surface: email-templates -> Update an email template
+    scopes: [sequences:write]
+    missing: >
+      No versioning. The update replaces the content in place and no earlier version is kept, so
+      the rule that a change always produces a new draft and never mutates published copy cannot
+      be honoured. Keep the previous text yourself if anyone may need it back.
+    notes: >
+      Steps hold their copy inline, so changing a template does not change what a live campaign
+      sends. Those are two separate edits, and which one the user actually asked for is worth
+      settling before either.
+
+  - name: template.get
+    fulfilment: partial
+    surface: email-templates -> Get an email template, Get template variables
+    scopes: [sequences:read]
+    missing: >
+      No version list, no published or retired state, and no list of what binds it — steps carry
+      their own copy, so there is nothing to report as a dependent.
+    notes: >
+      Get template variables is the read that says which merge fields the copy needs, before
+      anyone renders it against a real person.
+
+  - name: template.list
+    fulfilment: partial
+    surface: email-templates -> List email templates, List email template folders
+    scopes: [sequences:read]
+    missing: >
+      The second half of the question. Folders say where a template sits; nothing says whether its
+      copy is draft, published or retired, because those states do not exist here.
+
+  - name: template.publish
+    fulfilment: absent
+    because: >
+      No version lifecycle is documented for templates. There is no draft, no published version
+      and no publish endpoint — a template is usable from the moment it exists. Never present
+      creating or updating one as publishing it.
+
+  - name: template.retire
+    fulfilment: absent
+    because: >
+      The same absent lifecycle. Delete an email template destroys the template rather than
+      retiring a version, and it cannot answer the question this operation is really asking —
+      which live campaigns still depend on this copy — so it must not be substituted.
+
+  - name: content_policy.define
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. The blacklist rules govern which
+      addresses and domains may be contacted, not what the copy may say, and substituting them
+      answers a different question entirely.
+
+  - name: content_policy.list
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this.
+
+  - name: content_policy.check
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. Nothing takes a rendered message
+      and returns the rules it breaks, so copy has to be checked against the account's rules
+      outside the product before it is approved.
+
+  # ------------------------------------------------------------------------- family 7 — messages
+
+  - name: message.draft
+    fulfilment: partial
+    surface: email-templates -> Render an email template, Get template variables
+    scopes: [sequences:operate]
+    missing: >
+      The render returns a subject and a body and nothing else. The footer, the identification
+      block and the unsubscribe mechanism the contract requires the draft to show are absent from
+      the response, so what is previewed cannot be proved to be the whole of what would leave.
+      Merge values that are missing or wrong are reported, which is the part it does keep.
+    notes: >
+      Renders against one contact identifier, optionally in the context of a campaign and a
+      sending identity so their variables resolve too. Two other renders exist and both carry a
+      beta mark — Get sequence preview for a contact under sequence-contacts, and Generate an AI
+      draft reply under inbox — so say beta out loud before planning a route through either.
+
+  - name: message.schedule
+    fulfilment: partial
+    surface: >
+      direct-outreach -> the direct sends (an email, a LinkedIn message, InMail or voice message,
+      and Send a LinkedIn connection request to a contact), each with its send-after moment
+    missing: >
+      Only a send outside any campaign, and only where the account's Reply has the route. From
+      reply-cli 0.17.0 the direct sends take `--send-after`, a moment with its offset, which the CLI
+      sends as UTC, and Reply holds the send until then; a moment already past is sent at once. A
+      Reply that does not keep a direct send for later answers a bare 404, and nothing is
+      scheduled. The contract's read before repeating — the pending sends for this person on this
+      thread — has no list surface here: a harness that keeps the reference reads and cancels by
+      it.
+    notes: >
+      From reply-cli 0.17.0, send with `--idempotency-key`, which goes as the Idempotency-Key header:
+      the same request repeated under the same key answers the send Reply took and sends nothing
+      twice, so a lost answer is repeated under the key rather than read around. Reply honours the
+      key only where it has the direct-send routes, so read `reply direct-send get` of a reference
+      first (from reply-cli 0.17.0): its own `direct_send.not_found` or `direct_send.not_owned` says
+      the routes are there, a bare 404 says they are not, and a key sent there protects nothing.
+      The answer names the send's `reference` and its `state`: `sent` means it went, `failed` and `cancelled` are final, and
+      any other state means Reply holds it and it has not gone yet. Keep the reference; it is the
+      only handle on the send, and after a lost answer `reply direct-send get` of it is read before
+      any repeat. Reply keeps a key for a day, so a repeat goes under it only within 23 hours of
+      the first try; past that, nothing is sent again. From reply-cli 0.17.0 an email direct send
+      also takes `--schedule-id`, a schedule from `reply schedule list`; Reply refuses it on every
+      LinkedIn route. Reply then holds the send until the schedule's first opening at or after the
+      moment, or after now where none is given, and the answer names no moment: Reply estimates
+      one only where the schedule opens within 30 days, and reply-cli does not pass the estimate.
+      A manual-email task dated for the 14th is still queued work for a person, not a queued send.
+
+  - name: scheduled_message.list
+    fulfilment: absent
+    because: >
+      No surface lists the pending sends — not by person, campaign or sender. From reply-cli 0.17.0,
+      `reply direct-send get <reference>` reads one send by its reference — its state, its moment,
+      when it went and why it failed — which answers for a send already known and never for "what is
+      queued". A harness that keeps the reference reads and cancels by it.
+
+  - name: scheduled_message.cancel
+    fulfilment: partial
+    surface: direct-outreach -> the direct send's cancel, by its reference
+    missing: >
+      By reference only, and only where the account's Reply has the route. From reply-cli 0.17.0,
+      `reply direct-send cancel <reference>` cancels one direct send still held for its moment.
+      Nothing lists the pending sends, so a harness that keeps the reference reads and cancels by
+      it; a send whose reference was not kept cannot be found to cancel. What is pending in a live
+      participation is still the next touch of a campaign, and stopping that is enrollment.pause or
+      enrollment.stop rather than this.
+    notes: >
+      A cancel of a send already cancelled is a success, and one whose answer was lost is safe to
+      run again. A send that has gone answers `direct_send.already_sent` and one that failed
+      `direct_send.already_failed`: report it as gone or failed, never as cancelled. A bare 404 means
+      the account's Reply does not have the route yet.
+
+  # ----------------------------------------------------------------------- family 8 — enrollment
+
+  - name: enrollment.list
+    fulfilment: direct
+    surface: >
+      sequence-contacts -> List contacts in sequence, List contacts in sequence with extended
+      state; contacts -> Get sequences for a contact
+    scopes: [sequences:read, contacts:read]
+    notes: >
+      Both ends of the same read are covered — the campaign's people, and one person's campaigns.
+      Count contacts in sequence is documented as coming soon, so count by paging the list rather
+      than planning around it.
+
+  - name: enrollment.get
+    fulfilment: direct
+    surface: >
+      sequence-contacts -> Get a contact in a sequence, List contacts in sequence with extended
+      state
+    scopes: [sequences:read]
+    notes: >
+      The extended-state listing is the one that carries progress detail; the single read is the
+      cheaper check-first before a hold, a resume or a stop. Which of the fields this operation
+      names are actually present comes from those two pages at call time, not from here.
+
+  - name: enrollment.pause
+    fulfilment: partial
+    surface: sequence-contacts -> Set contacts' status in this sequence
+    scopes: [sequences:operate]
+    missing: >
+      No reason is accepted and there is no dated automatic resume. The hold is a bare status, so
+      why someone was held and when they should carry on again survive only wherever the agent
+      chooses to write them down.
+    notes: >
+      At most one hundred people per call, and only a participation that is currently active can
+      be held. The response returns failures keyed by person and an empty object when every one
+      succeeded — reconcile per person rather than reading that empty object as a count.
+
+  - name: enrollment.resume
+    fulfilment: partial
+    surface: sequence-contacts -> Set contacts' status in this sequence
+    scopes: [sequences:operate]
+    missing: >
+      Setting a participation back to active is accepted from any current state, so the refusal
+      the contract requires — resume only what is actually held — is not enforced by the API. The
+      check-first read has to perform it, or a finished participation is quietly restarted and
+      someone is written to again.
+    notes: >
+      On a live campaign this sends. The preview naming who resumes is the approval artefact and
+      knowing which endpoint performs the call softens nothing about that.
+
+  - name: enrollment.stop
+    fulfilment: partial
+    surface: sequence-contacts -> Remove contact from sequence, Bulk remove contacts from sequence
+    scopes: [sequences:operate]
+    missing: >
+      The mandatory reason. The body carries identifiers and nothing else, so neither why someone
+      was taken out nor that a different person was the cause can be recorded — and naming that
+      other person is part of the operation, not a nicety. Record the reason wherever the run
+      itself is recorded.
+    notes: >
+      The bulk response counts requested, removed, not found and not in sequence, and lists the
+      identifiers actually removed. An already-absent participation reads as a completed stop.
+
+  - name: disposition.set
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. Marking someone replied or bounced
+      records what happened to a message, and an inbox category records what a reply meant;
+      neither is the business outcome of the participation, and pressing one into service as a
+      stand-in corrupts the number people are measured on.
+
+  # -------------------------------------------------------------------- family 9 — conversations
+
+  - name: conversation.get
+    fulfilment: direct
+    surface: inbox -> Get inbox thread, List messages in an inbox thread
+    scopes: [inbox:read]
+    notes: >
+      Two reads — the thread, then its messages in order. Note the thread's channel while you are
+      there, because a reply has to go out on the same one.
+
+  - name: conversation.classify
+    fulfilment: partial
+    surface: inbox -> Assign or clear a thread's category, Assign threads to a category
+    scopes: [inbox:operate]
+    missing: >
+      The meaning is recorded, its provenance is not. No field carries who decided it, which
+      message they decided it from, or how sure they were, so a category set by a model and one
+      set by a person are indistinguishable afterwards.
+    notes: >
+      The vocabulary is the account's own inbox categories — read List inbox categories first and
+      map onto what exists rather than inventing a label. Re-read the thread to confirm it took.
+
+  - name: conversation.assign
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. Assign threads to a category and
+      Assign or clear a thread's category move a thread between categories, not between people,
+      and the resemblance in the names is exactly the trap. Changing who owns the person is a
+      different act with different consequences and is not a substitute.
+
+  - name: conversation.snooze
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. Nothing takes a thread out of the
+      queue and brings it back on a date.
+
+  - name: conversation.close
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. Mark threads as read records a
+      read state, not a worked one, and deleting a thread destroys it. Neither says the thread was
+      dealt with, which is the whole of what closing one means.
+
+  - name: conversation.reopen
+    fulfilment: absent
+    because: >
+      Nothing closes a thread here, so nothing reopens one. Mark threads as unread is the nearest
+      surface and it says something else.
+
+  - name: referral.record
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. The pieces exist separately, since
+      the named person can be created and the referrer can be taken out of the campaign, but
+      nothing records that the one came from the other — and that link is the only fact that
+      justifies contacting a stranger, so performing the two calls without it is not the
+      operation.
+
+  - name: activity.log
+    fulfilment: partial
+    surface: contacts -> Add a note to a contact
+    scopes: [contacts:operate]
+    missing: >
+      Only the note. A free-text note is one of the things this operation records; an email sent
+      from a personal client, a conversation in a corridor, or a message on a channel we do not
+      send from cannot be logged as an activity with its channel, direction and time, so the
+      record stays an incomplete account of what happened to this person.
+    notes: >
+      Get activities for a contact is the read that shows what the product recorded itself, and a
+      note is not guaranteed to appear in it. Check before telling the user the record is whole.
+
+  # ---------------------------------------------------------------------------- family 10 — tasks
+
+  - name: task.list
+    fulfilment: direct
+    surface: tasks -> List all tasks, Filter tasks
+    scopes: [tasks:read]
+    notes: >
+      Filter tasks is the one that answers what is owed today, by due window and by owner.
+
+  - name: task.get
+    fulfilment: direct
+    surface: tasks -> Get a task
+    scopes: [tasks:read]
+    notes: >
+      A task carries the message it is asking for as a subject and a body, so this read gives a
+      human what they need to do the work rather than a pointer to it.
+
+  - name: task.create
+    fulfilment: composed
+    surface: tasks -> Create a task, Reassign a task
+    scopes: [tasks:write]
+    order: >
+      Create a task, then Reassign a task when the queue belongs to somebody else — the create
+      body has no assignee field, so the task lands with the calling user. Work for yourself needs
+      only the first call.
+    notes: >
+      Type, start time, due time and a body are required, the type decides what the task is for,
+      and LinkedIn work carries its own subtype. Batch reassign tasks handles a set in one call.
+
+  - name: task.complete
+    fulfilment: direct
+    surface: tasks -> Complete a task, Batch complete tasks
+    scopes: [tasks:operate]
+    notes: >
+      Marks the work done and sends nothing, which is exactly what this operation means. Execute
+      and complete a task is a separate endpoint that does send the message the task holds —
+      never reach for it to satisfy this operation. If the user wants the send, that is
+      message.send with the approval message.send requires.
+
+  - name: task.skip
+    fulfilment: absent
+    because: >
+      The documented task states are new, finished, cancelled, archived and detached from a
+      campaign, and none of them is skipped. The update endpoint cannot set a state at all, so
+      declining a task while recording that it was declined has no surface. Completing it instead
+      would put a lie in the record.
+
+  - name: task.reschedule
+    fulfilment: direct
+    surface: tasks -> Update a task
+    scopes: [tasks:write]
+    notes: >
+      Start and due times are both updatable, but the call replaces the whole task — read it
+      first and resend the type, the body and the person, or they are lost. Only a task still in
+      its new state can be updated, so finished work cannot be pushed to tomorrow.
+
+  - name: task.cancel
+    fulfilment: partial
+    surface: tasks -> Delete a task, Bulk delete tasks
+    scopes: [tasks:write]
+    missing: >
+      Dropping the work is possible, recording that it was deliberately dropped is not. Deletion
+      destroys the task, and the cancelled state the documentation describes cannot be set through
+      the update endpoint, so afterwards nothing distinguishes work called off from work that was
+      never there.
+    notes: >
+      Say the deletion is irreversible before doing it. The contract treats this operation as
+      compensatable and on this surface it is not, which is a difference the user has to hear
+      first rather than discover.
+
+  - name: task.reassign
+    fulfilment: direct
+    surface: tasks -> Reassign a task, Batch reassign tasks
+    scopes: [tasks:write]
+    notes: >
+      The batch form is the one for handing over a whole queue. Reconcile per task rather than
+      assuming the entire set moved.
+
+  - name: call.place
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. Execute and complete a task, the
+      only endpoint that performs a task's action, supports manual email and SMS and rejects every
+      other type, so a call task cannot be dialled through the API. Calls are placed in the
+      product, and the user needs telling that plainly.
+
+  - name: call.log
+    fulfilment: absent
+    because: >
+      not evidenced — call activity is readable through reporting, under Get calls reporting
+      overview and List call activity, and nothing writes one. A call that happened away from the
+      product cannot be recorded here.
+
+  - name: call_recording.get
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this, and none for the agreement that
+      permitted the recording either.
+
+  - name: call_recording.discard
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. A recording that has to be
+      destroyed must be dealt with in the product, and that has to be said out loud rather than
+      left for the user to assume an agent handled it.
+
+  # ------------------------------------------------------------------------- family 11 — meetings
+
+  - name: meeting.propose
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. Nothing offers times and nothing
+      hands over a way to pick one. Toggle thread meeting-intent marks that a thread is about a
+      meeting and proposes nothing, so it must not be read as a booking surface.
+
+  - name: meeting.book
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. Meetings appear in reporting as
+      facts that already happened; no endpoint creates one, issues an invitation, or records a
+      meeting that was invited elsewhere.
+
+  - name: meeting.confirm
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. There is nothing to read a
+      meeting's attendee responses from and nothing that chases the people who have not answered.
+
+  - name: meeting.reschedule
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. With no booking surface there is
+      no meeting here to move.
+
+  - name: meeting.cancel
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. Tell the user to cancel it in the
+      calendar rather than leaving someone expecting a meeting nobody will attend.
+
+  - name: meeting_outcome.record
+    fulfilment: absent
+    because: >
+      not evidenced — the meetings report carries when a booking was made, by whom, from which
+      campaign and on which channel, and no outcome field of any kind. Held, no-show and cancelled
+      beforehand cannot be told apart here, which also means meeting outcomes cannot be read back
+      out of this product later.
+
+  - name: meeting.list
+    fulfilment: partial
+    surface: reports -> List meetings
+    scopes: [reporting:read]
+    missing: >
+      A booking ledger rather than a calendar. A row gives who booked it, the channel it came
+      from, the person, the campaign and when the booking was made — not when the meeting is, who
+      is attending, how to join, or how it went. Nothing upcoming can be answered from it and no
+      outcome can be read out of it.
+    notes: >
+      Filterable by date window and by user, so it does answer how many meetings were booked and
+      by whom over a stated period. Measurement is rate-limited harder than the rest of the
+      surface — sequential calls, cached within the session, no polling.
+
+  - name: meeting.get
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. The reporting list is the only
+      place a meeting appears at all and it has no per-meeting read.
+
+  - name: qualification.record
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. Custom fields could be made to
+      hold the answers, but that is a schema somebody would have to invent, and inventing it here
+      would produce a record no other run could read back.
+
+  - name: handoff.create
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. Changing who owns a person moves
+      the record; it makes no offer, starts no clock, and can be neither accepted nor refused, so
+      it is not this operation.
+
+  - name: handoff.accept
+    fulfilment: absent
+    because: >
+      Nothing creates a handoff here, so there is nothing to accept and no commitment clock to
+      start.
+
+  - name: handoff.reject
+    fulfilment: absent
+    because: >
+      Nothing creates a handoff here, so there is nothing to refuse.
+
+  - name: handoff.return
+    fulfilment: absent
+    because: >
+      Nothing creates or accepts a handoff here, so there is nothing to give back.
+
+  - name: handoff.withdraw
+    fulfilment: absent
+    because: >
+      Nothing creates a handoff here, so there is nothing to pull back.
+
+  - name: handoff.list
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. Nothing shows what has been handed
+      over and left unanswered, in either direction.
+
+  - name: handoff.get
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this.
+
+  - name: opportunity.create
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface was found for this. A conversion into a deal is
+      recorded wherever the pipeline lives, and this adapter has no view of that. Name the system
+      the user should record it in rather than approximating it with a field on a person or an
+      account.
+
+
+  # ------------------------------------------------------------ 17 — oversight, review and safety
+  # Evidence: the AI SDR pending-approval and sequence-settings pages, the contact blacklist rule
+  # group, and the endpoint index checked for a stop-rule, budget, escalation or review surface.
+
+  - name: approval.request
+    fulfilment: absent
+    because: >
+      No documented surface puts an item into a queue for a human. The pending-approval endpoints
+      list, read, send, reject and regenerate items that are already there — the AI SDR sequence
+      generates them itself under the approval mode set on that sequence, and nothing else can be
+      queued for review.
+
+  - name: approval.list
+    fulfilment: partial
+    surface: ai-sdr-pending-approvals -> List pending approvals
+    scopes: [ai-sdr:read]
+    beta: true
+    missing: >
+      Only AI-generated messages inside an AI SDR sequence reach this queue, on email and
+      LinkedIn. A bulk write, a piece of content or a policy change waiting on a human has no
+      queue here at all, so an empty queue does not mean nothing is waiting.
+    notes: >
+      Each item carries when it was created rather than how long it has waited — the age the
+      operation reports is computed from that. The queue can be filtered by sequence and by user.
+
+  - name: approval.get
+    fulfilment: partial
+    surface: ai-sdr-pending-approvals -> Get pending approval for a contact
+    scopes: [ai-sdr:read]
+    beta: true
+    missing: >
+      The item is addressed by contact rather than by an approval identifier, and only an
+      AI-generated message is retrievable this way. Anything else a human is being asked to
+      approve has no item to fetch.
+
+  - name: approval.resolve
+    fulfilment: partial
+    surface: >
+      ai-sdr-pending-approvals -> Send a pending approval, Send a batch of pending approvals,
+      Reject (delete) a pending approval
+    scopes: [ai-sdr:write]
+    beta: true
+    missing: >
+      Rejection records no reason and is heavier than the contract's reject: it discards the
+      queued draft and removes the contact from the sequence, with nothing documented to bring
+      either back. Tell the user that before they reject, and keep the reason wherever the run is
+      recorded.
+    notes: >
+      Approving is the send, exactly as the contract has it, so the approval class is unchanged by
+      the mapping — one named recipient is confirm_each, and the batch send is confirm_once over a
+      preview that names the population.
+
+  - name: autonomy.get
+    fulfilment: partial
+    surface: ai-sdr-sequences -> Read AI SDR sequence settings
+    scopes: [ai-sdr:read]
+    beta: true
+    missing: >
+      One AI SDR sequence's own settings — whether its generated messages need approval, and
+      whether autopilot is on. Nothing states what a credential may do unattended across the
+      account, and there is no queue timeout, unattended action cap or escalation target to read.
+      Everywhere else, autonomy is the agent's own policy held outside this product.
+
+  - name: autonomy.set
+    fulfilment: partial
+    surface: >
+      ai-sdr-sequences -> Set the approval mode, Enable autopilot, Disable autopilot
+    scopes: [ai-sdr:operate]
+    beta: true
+    missing: >
+      The gate and the mode, on one AI SDR sequence. The queue timeout and what a timeout means,
+      the unattended action cap, the escalation target and per-channel differences have no setting
+      here.
+    notes: >
+      Turning the gate off can also release everything already waiting, in the same call. That
+      makes loosening the gate a send, not a settings change, and it must be previewed and
+      approved as one.
+
+  - name: escalation.raise
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this
+
+  - name: escalation.list
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this
+
+  - name: escalation.resolve
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this
+
+  - name: editorial_review.record
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface binds a named human's review to a sent message. A
+      message approved out of the AI SDR queue records that it was sent, which is not the same
+      fact and must never be reported as one.
+
+  - name: editorial_review.get
+    fulfilment: absent
+    because: >
+      not evidenced — nothing records the review, so nothing can return it. The honest answer to
+      an auditor here is that no review evidence exists in this product.
+
+  - name: review.request
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this
+
+  - name: review.list
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this
+
+  - name: review.get
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this
+
+  - name: review.score
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this
+
+  - name: feedback.record
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this
+
+  - name: review_policy.define
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this
+
+  - name: review_policy.get
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this
+
+  - name: scorecard.define
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this
+
+  - name: scorecard.list
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this
+
+  - name: scorecard.publish
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this
+
+  - name: scorecard.retire
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this
+
+  - name: coaching.summarize
+    fulfilment: absent
+    because: >
+      not evidenced — the reporting surfaces cover activity and performance, not coaching. Nothing
+      records that someone attended, listened, commented, scored or gave feedback, so there is
+      nothing to summarise per coach.
+
+  - name: budget.get
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface reports what is left on a meter. A meter does exist:
+      starting a Live Data search spends the user's data allowance. That the remaining allowance
+      cannot be read is exactly why a search is previewed before it is started.
+
+  - name: budget.set
+    fulfilment: absent
+    because: >
+      not evidenced — checked against the endpoint index, nothing sets an allowance ceiling of the
+      kind a pre-flight check reads.
+
+  - name: stoprule.set
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this
+
+  - name: stoprule.list
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this
+
+  - name: stoprule.clear
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this
+
+  - name: stoprule_firing.list
+    fulfilment: absent
+    because: >
+      not evidenced — nothing stops the work by itself here, so there are no firings to list. When
+      sending is off in this product it was a person or an agent that stopped it, and the reason
+      lives in the run record rather than in the API.
+
+  - name: stoprule_firing.get
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this
+
+  - name: outreach.hold
+    fulfilment: partial
+    surface: >
+      contact-blacklist-rules -> Create an email blacklist rule, Create a domain blacklist rule,
+      Bulk create email blacklist rules, Bulk create domain blacklist rules
+    scopes: [contacts:write]
+    missing: >
+      This blocks future contact and nothing else. Live enrolments, scheduled steps, open tasks,
+      pending approvals and outstanding meeting proposals are untouched by it, and the rule
+      returns no per-item ledger of who was actually reached. The kill switch the contract
+      describes is only realised once those are stopped too, through their own operations, and
+      every one of them has to be reported.
+    notes: >
+      A person is held by an email rule and a company or a domain by a domain rule. Rules are
+      account-wide, so check the existing rules before adding one and expect the block to apply to
+      work other people own.
+
+  - name: outreach.release
+    fulfilment: partial
+    surface: >
+      contact-blacklist-rules -> Delete an email blacklist rule, Delete a domain blacklist rule,
+      List email blacklist rules, List domain blacklist rules
+    scopes: [contacts:write, contacts:read]
+    missing: >
+      Deleting the rule lifts the block, but nothing resumes by itself: whatever was stopped when
+      the hold went on has to be restarted deliberately, and no ledger of what was held exists to
+      restart it from. Re-check each person's eligibility first — the contract requires it and
+      this product will not.
+
+  # --------------------------------------- 18 — the team: people, ownership, workload and targets
+  # Evidence: the user-account pages, the contact and account owner endpoints, the task
+  # reassignment endpoints, and the endpoint index checked for workload, quota and goal surfaces.
+
+  - name: actor.list
+    fulfilment: partial
+    surface: user-account -> List team users
+    missing: >
+      Identity only — the team, the user identifier, the display name and the email address. The
+      state the operation asks for, active, ramping, unavailable or gone, is not carried, so this
+      read cannot tell an agent whether the person it is about to hand work to is still there.
+    notes: >
+      No scope required. It covers the teams this credential can act in; people outside them do
+      not appear, which is a different answer from not existing.
+
+  - name: actor.get
+    fulfilment: partial
+    surface: user-account -> Get current user, List team users
+    missing: >
+      Only the calling credential has a record of its own. Anyone else is an identity row in the
+      team listing and nothing more — no state, and none of the ceilings that apply to them.
+
+  - name: team.list
+    fulfilment: direct
+    surface: user-account -> List team users
+    notes: >
+      Every row carries the team it belongs to, so one read answers both which teams exist and who
+      is in them. No scope required. Teams this credential cannot act in are not listed.
+
+  - name: workload.get
+    fulfilment: absent
+    because: >
+      not evidenced — checked against the endpoint index, nothing reports what a person is
+      carrying. Open tasks and live enrolments can each be listed on their own, but no surface
+      answers the question this operation asks, and adding up two listings is not the same answer.
+
+  - name: workload_policy.define
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this
+
+  - name: workload_policy.get
+    fulfilment: absent
+    because: >
+      not evidenced — no ceiling is declared anywhere, so the answer here is always none declared,
+      which the contract reads as unlimited.
+
+  - name: ownership.get
+    fulfilment: partial
+    surface: accounts -> Get an account; contacts -> Filter contacts
+    scopes: [contacts:read]
+    missing: >
+      The owner is an attribute of the record rather than a surface of its own, so it is read with
+      the record. The second half of the question has no answer here at all: nothing states
+      whether acting on an unowned record would make the actor its owner, and that rule is set in
+      the product's own settings rather than returned by any response.
+
+  - name: ownership.assign
+    fulfilment: direct
+    surface: contacts -> Change contacts owner; accounts -> Update account owner
+    scopes: [contacts:operate, contacts:write]
+    notes: >
+      One endpoint per subject kind — people through the contact group, companies through the
+      account group. There is no routing rule to defer to here, so the caller names the person;
+      check they are still on the team first, because the owner listing carries no state.
+
+  - name: assignment_policy.define
+    fulfilment: absent
+    because: not evidenced — no documented surface was found for this
+
+  - name: assignment_policy.get
+    fulfilment: absent
+    because: >
+      not evidenced — no routing rule is stored in this product, so there is none to read and
+      nothing that would say who gets the next piece of work.
+
+  - name: book.transfer
+    fulfilment: partial
+    surface: >
+      contacts -> Change contacts owner; accounts -> Update account owner; tasks -> Batch reassign
+      tasks
+    scopes: [contacts:operate, contacts:write, tasks:write]
+    missing: >
+      Three parts of the book move — contact ownership, account ownership and open tasks. The
+      senders behind live threads, the open conversations and the authored content do not, and no
+      surface reports the book as a whole, so the ledger the contract requires has to be built by
+      the caller from what each call returns before anything is repeated.
+    notes: >
+      Reassigning ownership does not re-point the sending account behind a live thread. Say so
+      before the transfer: a departing person's threads keep sending from their mailbox until the
+      sequences are changed, and that is the part users are most often surprised by.
+
+  - name: goal.define
+    fulfilment: absent
+    because: >
+      not evidenced — checked against the endpoint index, this product stores no quota, goal or
+      target, so there is nothing to set.
+
+  - name: goal.get
+    fulfilment: absent
+    because: not evidenced — no target is stored here, so there is none to read.
+
+  - name: goal.list
+    fulfilment: absent
+    because: not evidenced — no target is stored here, so there is none to list.
+
+  - name: pace.get
+    fulfilment: absent
+    because: >
+      not evidenced — pace is a target measured against achievement, and no target exists in this
+      product. Achievement alone is readable through the reporting surfaces, and reporting it as
+      pace would invent the half that is missing.
+
+  # ----------------------------------------------------------- 19 — accounts and buying groups
+  # Evidence: the account pages, read against the account record shape on its own doc page.
+
+  - name: account.get
+    fulfilment: direct
+    surface: accounts -> Get an account
+    scopes: [contacts:read]
+    notes: >
+      The record carries the owner, the stage it is in and how many people are linked to it. The
+      verification read after any account write.
+
+  - name: account.search
+    fulfilment: direct
+    surface: accounts -> Filter accounts, List accounts
+    scopes: [contacts:read]
+    notes: >
+      Companies already held, never an outside database and never metered — matching the contract
+      exactly. The discovery family is where an outside search belongs.
+
+  - name: account.update
+    fulfilment: partial
+    surface: accounts -> Update an account
+    scopes: [contacts:write]
+    missing: >
+      The account's stage can be moved and the rest of the record edited, but the tier the
+      contract names has no home on the record and neither does the reason for the change. The
+      stages are whatever this account has declared, so resolve the words the user says against
+      them before writing — a stage that does not exist is a guess.
+
+  - name: account.claim
+    fulfilment: absent
+    because: >
+      not evidenced — there is no lease on an account here. Ownership can be changed, which is a
+      different and heavier act: it does not expire by itself, and using it as a claim would leave
+      the account permanently reassigned.
+
+  - name: account.release
+    fulfilment: absent
+    because: not evidenced — nothing claims an account, so there is nothing to release.
+
+  - name: account_membership.create
+    fulfilment: direct
+    surface: accounts -> Bulk add contacts to an account
+    scopes: [contacts:operate]
+    notes: >
+      Bulk-shaped: reconcile every person in the response rather than reporting the call. Attach
+      deliberately, so that four spellings of one company do not become four accounts.
+
+  - name: account_membership.list
+    fulfilment: partial
+    surface: accounts -> List contacts for an account
+    scopes: [contacts:read]
+    missing: >
+      Who is attached, and no more. How each person came to be attached is not recorded, so the
+      basis the contract wants on every row cannot be given, and whether someone is being touched
+      right now needs a separate read against the sequence they are in.
+
+  - name: account_membership.delete
+    fulfilment: direct
+    surface: accounts -> Bulk remove contacts from an account
+    scopes: [contacts:operate]
+    notes: >
+      Detaches the person from the company; it does not delete the person and does not stop any
+      outreach they are in.
+
+  - name: collision.check
+    fulfilment: partial
+    surface: >
+      accounts -> List contacts for an account; sequence-contacts -> List contacts in sequence
+      with extended state, Get a contact in a sequence
+    scopes: [contacts:read, sequences:read]
+    missing: >
+      Only outreach collisions are visible, and only by assembling them: the people on the
+      account, then each one's state in the sequences they are in, then the owner on each record.
+      A live customer, support or opportunity motion is invisible here — it lives in the CRM — so
+      a clean answer from this check is not evidence that the company is free.
+    notes: >
+      Re-run it immediately before enrolling. Collisions appear between planning and execution,
+      and the gap is exactly where the embarrassing double-touch happens.
+
+  - name: buying_group.define
+    fulfilment: absent
+    because: >
+      not evidenced — people can be attached to an account, but nothing records what each of them
+      does in a decision, so a group with roles cannot be expressed here.
+
+  - name: buying_group.get
+    fulfilment: absent
+    because: not evidenced — no group with roles is stored, so there is none to return.
+
+  - name: buying_group.enroll
+    fulfilment: absent
+    because: >
+      not evidenced — no surface enrols a group as a group. Enrolling several people from one
+      account one by one is a different act: nothing staggers them, orders them, or reacts to one
+      person's reply on behalf of the others, and doing it by hand while calling it this operation
+      would hide exactly the coordination the operation exists for.
+
+  # --------------------------------------------------------------------------- 20 — measurement
+  # Evidence: the reports group in the endpoint index, the sequence stats anchors carried by the
+  # 1.1.0 mapping, and the index checked for export, opportunity and metric-definition surfaces.
+
+  - name: engagement.summarize
+    fulfilment: partial
+    surface: >
+      reports -> Get email reporting overview, Get calls reporting overview, Get tasks reporting
+      overview, Get LinkedIn reporting overview, Get channel efficiency overview, Get team
+      performance overview; sequences -> Get stats for all sequences, Get sequence stats
+    scopes: [reporting:read, sequences:read]
+    missing: >
+      The grouping is not an argument. Each report offers the one breakdown it was built for — by
+      channel, by sequence, by team member — and a question that needs a different grouping has to
+      be assembled from the rows behind the numbers instead. The measure set is likewise the
+      report's, not the caller's.
+    notes: >
+      These endpoints are rate-limited harder than the rest of the API: sequential calls, cached
+      within the session, no polling. Report the window alongside every figure — two numbers are
+      only comparable when the window and the basis match.
+
+  - name: engagement_event.list
+    fulfilment: direct
+    surface: >
+      reports -> List email activity, List call activity, List task activity, List LinkedIn
+      activity
+    scopes: [reporting:read]
+    notes: >
+      One listing per channel — these are the rows behind the summary, and the route to any
+      grouping the overviews do not offer. Same stricter rate limits.
+
+  - name: funnel.summarize
+    fulfilment: partial
+    surface: >
+      reports -> Get email reporting overview, Get channel efficiency overview, List meetings
+    scopes: [reporting:read]
+    missing: >
+      No surface returns a ladder. The stages come from separate reads, and neither the
+      denominator a stage is measured against nor how well that stage can be known at all is
+      stated anywhere — the caller declares both and has to say so when reporting the result.
+      Stages past the meeting are not covered by any of these.
+
+  - name: opportunity.summarize
+    fulfilment: absent
+    because: >
+      not evidenced — checked against the endpoint index, nothing here carries opportunities or
+      revenue. That answer lives in the CRM, and reporting meetings as though they were the far
+      end of the funnel would overstate what is known.
+
+  - name: attribution.explain
+    fulfilment: absent
+    because: >
+      not evidenced — no attribution model is stated anywhere, so nothing can explain why an
+      outcome was credited where it was, or what another model would have said.
+
+  - name: response_time.summarize
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface reports time from arrival to first touch, or from a
+      reply arriving to it being answered.
+
+  - name: metric.describe
+    fulfilment: absent
+    because: >
+      not evidenced — checked against the endpoint index, there is no enumeration or definition
+      surface. What a figure means here is prose on its report page, read by a human, and it says
+      nothing about how far the figure can be trusted.
+
+  - name: metric.compare
+    fulfilment: absent
+    because: >
+      not evidenced — no surface compares two arms or reports a sample size and an interval. Two
+      report calls placed side by side are not this operation: the arithmetic that says whether
+      the difference means anything is the part that is missing.
+
+  - name: export.request
+    fulfilment: absent
+    because: >
+      not evidenced — checked against the endpoint index, no general data export exists. The
+      reporting listings return rows inline and paginated, which is a read rather than a bounded
+      extract, and treating one as the other would move personal data with none of the handling an
+      extract implies.
+
+  - name: export.get
+    fulfilment: absent
+    because: not evidenced — nothing produces an extract here, so there is none to collect.
+
+  # ---------------------------------------------------------------- 21 — introspection and runtime
+  # Evidence: the user-account and background-job pages, the custom field group, the inbox
+  # category group, the documented rate limits, and the index checked for an idempotency lookup.
+
+  - name: operation.search
+    fulfilment: absent
+    because: >
+      Nothing in this product answers it, and nothing should — the thing being searched is the
+      contract, which the core pack carries. Recorded absent because this register answers only
+      for what this adapter performs.
+
+  - name: operation.describe
+    fulfilment: absent
+    because: >
+      As above: an operation's meaning, its refusals and its five properties come from the
+      contract in the core pack, not from any API surface here.
+
+  - name: operation.preview
+    fulfilment: partial
+    surface: >
+      sequence-contacts -> Get sequence preview for a contact; ai-sdr-sequences -> Preview
+      autopilot results; live-data -> Preview a Live Data search
+    beta: true
+    missing: >
+      There is no general dry run. Three specific acts can be previewed, all of them beta, and
+      every other write is knowable only by performing it — which means that for most operations
+      the preview an approval gate wants has to be assembled from reads before the write, not
+      requested from the product.
+    notes: >
+      Preview before Start on a Live Data search is a hard rule, not a courtesy: Start spends the
+      user's allowance and Preview does not.
+
+  - name: plan.validate
+    fulfilment: absent
+    because: >
+      not evidenced — no surface takes a plan. Authority, ordering, preconditions and headroom are
+      checked step by step against the reads each step needs, by the agent, before anything runs.
+
+  - name: contract.describe
+    fulfilment: absent
+    because: >
+      Nothing here describes the contract — which version is in force, what was renamed from what,
+      and what it binds an agent to is the core pack's own answer, not this API's.
+
+  - name: capability.list
+    fulfilment: partial
+    surface: user-account -> Get current user, List team users
+    missing: >
+      The granted scope set is not returned by anything. Identity and the teams a credential may
+      act in are readable; what it may actually do is discovered only by making a call and reading
+      an insufficient_scope refusal back. For an unattended run that means the honest per-capability
+      answer is unknown until something is attempted, and unknown is not permission.
+    notes: >
+      Neither read needs a scope, so both work with any working credential. When a capability has
+      to be known in advance, the key's scopes are visible in the product settings rather than
+      through the API.
+
+  - name: vocabulary.list
+    fulfilment: partial
+    surface: inbox -> List inbox categories
+    scopes: [inbox:read]
+    missing: >
+      Only the reply categories this account has declared. Enrolment statuses, meeting outcomes,
+      step intents, exit reasons, content-policy rule classes and the properties a branch
+      condition may be written over have no listing at all — checked against the endpoint index,
+      there is no enumeration surface. For those kinds the answer is unknown, which the contract
+      allows and which is not the same as an empty list.
+
+  - name: schema.describe
+    fulfilment: partial
+    surface: custom-fields -> List all custom fields, Get a custom field
+    scopes: [contacts:read]
+    missing: >
+      Custom fields only, and only on people. No surface describes the standard fields of a record
+      kind or says which of them may be written; that is prose on the record's own doc pages, read
+      at call time, and it cannot be enumerated.
+
+  - name: channel.describe
+    fulfilment: absent
+    because: >
+      not evidenced — no documented surface states a channel's own rules: whether automation is
+      sanctioned there, how its allowance works, how long a reply window stays open or what
+      recording consent it expects. A sending account's configured limits are a different thing
+      and belong to the sender operations; using them as an answer here would confuse one
+      mailbox's ceiling with the channel's rules.
+
+  - name: adapter.describe
+    fulfilment: partial
+    surface: >
+      the Rate limits guide page; background-jobs -> Get a background job
+    scopes: [other:read]
+    missing: >
+      Nothing returns any of this. The request ceilings and the queued-versus-inline rule are
+      documented in prose — reporting and stats endpoints are limited harder than the rest, and a
+      long write answers with a background job to poll — but batch ceilings, page sizes and the
+      scope and lifetime of an idempotency key are not stated, and none of it can be read per
+      installation.
+
+  - name: adapter.verify
+    fulfilment: absent
+    because: >
+      not evidenced — nothing here tests fulfilment. This register is the claim, made from
+      documentation rather than from a run, and it is the thing a verification would check rather
+      than a substitute for one.
+
+  - name: job.get
+    fulfilment: partial
+    surface: background-jobs -> Get a background job, List background jobs
+    scopes: [other:read]
+    missing: >
+      Status, progress and the terminal timestamps are documented, but the result payload is
+      opaque and its shape varies by job kind, so the per-item ledger the contract requires is not
+      guaranteed to be there. Where one outcome per item is needed, reconcile against the entities
+      themselves rather than trusting the job to carry it.
+    notes: >
+      A long write completes when the job reaches a terminal state, not when the call returns.
+      Never blind-retry a bulk write that failed — the first attempt may have partly succeeded.
+
+  - name: job.cancel
+    fulfilment: direct
+    surface: background-jobs -> Cancel a background job
+    scopes: [other:operate]
+    notes: >
+      Items already processed stay processed, exactly as the contract has it. Cancelling is not an
+      undo: it leaves a partial result, and that result has to be reconciled and reported.
+
+  - name: invocation.get
+    fulfilment: absent
+    because: >
+      not evidenced — checked against the endpoint index, nothing looks a call up by the
+      idempotency key it was sent with. After a lost response the only recovery is the operation's
+      own check-first read, which is why every write in the contract names one.
+
+  - name: term.resolve
+    fulfilment: absent
+    because: >
+      Nothing here resolves a word onto a concept. The vocabularies this account declares can be
+      listed, but mapping a colleague's shorthand or another system's label onto the right concept
+      is the contract's own answer in the core pack.

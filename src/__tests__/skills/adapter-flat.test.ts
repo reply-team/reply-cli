@@ -2,24 +2,23 @@ import {describe, it, expect, beforeEach, afterEach, vi} from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import {canonical, clone_repo, copy_dir, run_flat, skills_target} from '../../skills/adapter-flat';
+import {canonical, copy_dir, run_flat, skills_target} from '../../skills/adapter-flat';
 import {host_by_id} from '../../skills/hosts';
-import {PACKS_FALLBACK, resolve_packs} from '../../skills/packs';
 import {journal_entry, record_pack} from '../../skills/journal';
 import type {Detected_host} from '../../skills/detect';
-import type {Runner} from '../../skills/types';
+import type {Pack} from '../../skills/types';
 
-const all = resolve_packs([], PACKS_FALLBACK);
-const core_only = resolve_packs(['core'], PACKS_FALLBACK);
-// reply-adapter and agentic-runtime, requested directly with no dependency
-// expansion, so ai-sdr-core is absent from the set — used to put two packs
-// that do not depend on each other in the same run without either blocking
-// the other via ai-sdr-core (see 'run_flat abort status' below).
-const adapter_and_runtime_only = resolve_packs(['adapter', 'runtime'], PACKS_FALLBACK, {dependencies: false});
+// run_flat copies whatever packs it is given from a directory of packs, so
+// these tests give it several: the journal an earlier version wrote holds up
+// to three per host, and `list` and `remove` still act on all of them.
+const pack = (name: string): Pack=>({name, version: '0.1.0'});
+const all = [pack('ai-sdr-core'), pack('reply-adapter'), pack('agentic-runtime')];
+const core_only = [pack('ai-sdr-core')];
+const adapter_and_runtime_only = [pack('reply-adapter'), pack('agentic-runtime')];
 
 let root: string;
 let home: string;
-let clone_dir: string;
+let source_dir: string;
 const env = ()=>({REPLY_CONFIG_DIR: path.join(root, 'config')});
 
 const cursor = (): Detected_host=>
@@ -31,34 +30,30 @@ const cursor = (): Detected_host=>
 const copilot = (): Detected_host=>
     ({def: host_by_id('github-copilot'), config_dir: path.join(home, '.copilot')});
 
-// A native host reachable by run_flat only under --project (it has no
-// user_skills_dir), used to exercise the "no directory for this scope" path.
-const codex = (): Detected_host=>
-    ({def: host_by_id('codex'), config_dir: path.join(home, '.codex')});
-
-// Stands in for `git clone`: builds the pack layout the real repo has.
-const fake_clone = async(): Promise<{dir: string; commit: string}>=>{
-    for (const pack of all)
+// Stands in for the package's `skills` directory: one directory per pack,
+// one skill in each.
+const make_source = (): void=>{
+    for (const p of all)
     {
-        const skills = path.join(clone_dir, 'plugins', pack.name, 'skills');
-        fs.mkdirSync(path.join(skills, `${pack.name}-skill`), {recursive: true});
+        const skill = path.join(source_dir, p.name, `${p.name}-skill`);
+        fs.mkdirSync(skill, {recursive: true});
         fs.writeFileSync(
-            path.join(skills, `${pack.name}-skill`, 'SKILL.md'),
-            `---\nname: ${pack.name}-skill\ndescription: d\n---\n`,
+            path.join(skill, 'SKILL.md'),
+            `---\nname: ${p.name}-skill\ndescription: d\n---\n`,
         );
     }
-    return {dir: clone_dir, commit: 'deadbee'};
 };
 
 const flat_opts = (operation: 'install' | 'remove' | 'list' | 'update', packs = all)=>({
-    operation, host: cursor(), packs, scope: 'user' as const, ref: 'main',
-    home, cwd: path.join(root, 'project'), env: env(), clone: fake_clone,
+    operation, host: cursor(), packs, scope: 'user' as const,
+    home, cwd: path.join(root, 'project'), env: env(), source: source_dir,
 });
 
 beforeEach(()=>{
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'reply-flat-'));
     home = path.join(root, 'home');
-    clone_dir = path.join(root, 'clone');
+    source_dir = path.join(root, 'source');
+    make_source();
     fs.mkdirSync(path.join(home, '.cursor'), {recursive: true});
 });
 afterEach(()=>{
@@ -74,7 +69,8 @@ describe('skills_target', ()=>{
         expect(skills_target(host_by_id('cursor'), 'project', home, '/p')).toBe(path.join('/p', '.agents', 'skills'));
     });
 
-    it('sends a native host under --project to its project directory', ()=>{
+    it('sends Codex to .agents/skills in both scopes', ()=>{
+        expect(skills_target(host_by_id('codex'), 'user', home, '/p')).toBe(path.join(home, '.agents', 'skills'));
         expect(skills_target(host_by_id('codex'), 'project', home, '/p')).toBe(path.join('/p', '.agents', 'skills'));
     });
 });
@@ -102,12 +98,12 @@ describe('run_flat install', ()=>{
         expect(fs.existsSync(path.join(target, 'reply-adapter-skill'))).toBe(false);
     });
 
-    it('journals the version, ref, commit and the files it wrote', async()=>{
+    it('journals the version and the files it wrote, and no ref or commit', async()=>{
         await run_flat(flat_opts('install', core_only));
         const entry = journal_entry('cursor', 'user', 'ai-sdr-core', env());
         expect(entry?.version).toBe('0.1.0');
-        expect(entry?.commit).toBe('deadbee');
-        expect(entry?.ref).toBe('main');
+        expect(entry).not.toHaveProperty('commit');
+        expect(entry).not.toHaveProperty('ref');
         expect(entry?.files.some(f=>f.endsWith('SKILL.md'))).toBe(true);
     });
 
@@ -137,15 +133,12 @@ describe('run_flat install', ()=>{
         expect(journal_entry('cursor', 'user', 'ai-sdr-core', env())).toBeUndefined();
     });
 
-    it('fails the host with an actionable hint when cloning fails', async()=>{
-        const outcome = await run_flat({
-            ...flat_opts('install'),
-            clone: async()=>{ throw new Error('git not found'); },
-        });
+    it('fails the host, rather than rejecting, when the pack cannot be read', async()=>{
+        const outcome = await run_flat({...flat_opts('install', core_only), source: path.join(root, 'nowhere')});
         expect(outcome.status).toBe('failed');
-        expect(outcome.reason).toBe('clone-failed');
-        expect(outcome.detail).toContain('git not found');
-        expect(outcome.hint).toContain('git');
+        expect(outcome.reason).toBe('copy-failed');
+        expect(outcome.detail).toContain('nowhere');
+        expect(outcome.hint).toBeDefined();
     });
 });
 
@@ -163,12 +156,9 @@ describe('run_flat remove and list', ()=>{
         expect(outcome.packs).toEqual([]);
     });
 
-    it('lists what the journal says is installed without cloning', async()=>{
+    it('lists what the journal says is installed', async()=>{
         await run_flat(flat_opts('install', core_only));
-        const outcome = await run_flat({
-            ...flat_opts('list'),
-            clone: async()=>{ throw new Error('list must not clone'); },
-        });
+        const outcome = await run_flat(flat_opts('list'));
         expect(outcome.packs).toEqual([{name: 'ai-sdr-core', action: 'current', version: '0.1.0'}]);
     });
 
@@ -211,15 +201,10 @@ describe('run_flat scope isolation', ()=>{
 // must still be reported and journaled rather than orphaned.
 describe('run_flat copy failures', ()=>{
     it('reports a failed status instead of rejecting when a per-pack copy throws, keeping earlier successes', async()=>{
-        const broken_clone = async(): Promise<{dir: string; commit: string}>=>{
-            const core_skills = path.join(clone_dir, 'plugins', 'ai-sdr-core', 'skills');
-            fs.mkdirSync(path.join(core_skills, 'ai-sdr-core-skill'), {recursive: true});
-            fs.writeFileSync(path.join(core_skills, 'ai-sdr-core-skill', 'SKILL.md'), '---\nname: x\n---\n');
-            // Deliberately no plugins/reply-adapter/skills directory, so its
-            // readdirSync throws mid-loop.
-            return {dir: clone_dir, commit: 'deadbee'};
-        };
-        const outcome = await run_flat({...flat_opts('install', all), clone: broken_clone});
+        // No reply-adapter directory in the source, so its readdirSync
+        // throws mid-loop.
+        fs.rmSync(path.join(source_dir, 'reply-adapter'), {recursive: true, force: true});
+        const outcome = await run_flat(flat_opts('install', all));
         expect(outcome.status).toBe('partial');
         expect(outcome.reason).toBe('copy-failed');
         expect(outcome.packs).toEqual([{name: 'ai-sdr-core', action: 'installed', version: '0.1.0'}]);
@@ -256,7 +241,7 @@ describe('run_flat deletion containment', ()=>{
         const outside = path.join(root, 'outside.txt');
         fs.writeFileSync(outside, 'do not touch');
         record_pack('cursor', 'user', 'ai-sdr-core', {
-            version: '0.1.0', ref: 'main', commit: 'deadbee', scope: 'user',
+            version: '0.1.0', scope: 'user',
             files: [outside], complete: true, installed_at: '2026-07-30T00:00:00.000Z',
         }, env());
         const outcome = await run_flat(flat_opts('remove', core_only));
@@ -296,7 +281,7 @@ describe('run_flat deletion containment', ()=>{
         const direct = path.join(target, 'direct.txt');
         fs.writeFileSync(direct, 'x');
         record_pack('cursor', 'user', 'ai-sdr-core', {
-            version: '0.1.0', ref: 'main', commit: 'deadbee', scope: 'user',
+            version: '0.1.0', scope: 'user',
             files: [direct], complete: true, installed_at: '2026-07-30T00:00:00.000Z',
         }, env());
         await run_flat(flat_opts('remove', core_only));
@@ -323,56 +308,18 @@ describe('run_flat name collisions', ()=>{
         expect(outcome.status).toBe('failed');
         expect(fs.readFileSync(mine)).toEqual(before);
         expect(journal_entry('cursor', 'user', 'ai-sdr-core', env())).toBeUndefined();
-        // Nothing else depends on ai-sdr-core in this run, so nothing was
-        // blocked — the hint is specifically for blocked dependents, not for
-        // the failure itself.
         expect(outcome.hint).toBeUndefined();
     });
 });
 
-// Required fix, raised by the controller from a concern in the original
-// self-review: adapter-native.ts never lets a dependent install while its
-// dependency failed (failed_names/blocked_names). run_flat must enforce the
-// same invariant — a pack that fails on a collision (I3) or a copy error (I1)
-// must block anything depending on it, exactly like the native adapter.
-describe('run_flat dependency blocking', ()=>{
-    it('blocks every pack that depends on one that failed on a collision, and never copies them', async()=>{
-        const target = path.join(home, '.cursor', 'skills');
-        fs.mkdirSync(path.join(target, 'ai-sdr-core-skill'), {recursive: true});
-        fs.writeFileSync(
-            path.join(target, 'ai-sdr-core-skill', 'SKILL.md'),
-            '---\nname: mine\ndescription: not the pack\n---\nkeep me\n',
-        );
-
-        const outcome = await run_flat(flat_opts('install', all));
-
-        // reply-adapter and agentic-runtime both depend on ai-sdr-core, so
-        // neither is attempted — blocked packs get no outcome entry at all,
-        // matching adapter-native.ts's blocked_names behavior.
-        expect(outcome.packs).toEqual([{
-            name: 'ai-sdr-core', action: 'failed', detail: 'conflicts with an existing skill: ai-sdr-core-skill',
-        }]);
-        expect(outcome.status).toBe('failed');
-        expect(outcome.hint).toContain('reply-adapter');
-        expect(outcome.hint).toContain('agentic-runtime');
-        expect(fs.existsSync(path.join(target, 'reply-adapter-skill'))).toBe(false);
-        expect(fs.existsSync(path.join(target, 'agentic-runtime-skill'))).toBe(false);
-        expect(journal_entry('cursor', 'user', 'reply-adapter', env())).toBeUndefined();
-        expect(journal_entry('cursor', 'user', 'agentic-runtime', env())).toBeUndefined();
-    });
-});
-
-// C1 (final review): reverse removal order is necessary but not sufficient.
-// Once delete_files can report a file it could not remove, a failed removal
-// must stop its dependency being removed too, or the host is left holding an
-// adapter with no core — the one state this installer exists to prevent.
-describe('run_flat remove dependency guard', ()=>{
-    it('keeps a dependency installed when removing a pack that depends on it failed', async()=>{
+// A failed removal keeps its entry, and the packs around it are removed:
+// nothing depends on anything any more, so one failure blocks nothing.
+describe('run_flat remove', ()=>{
+    it('keeps the entry of a pack it could not remove and removes the others', async()=>{
         await run_flat(flat_opts('install', all));
         const target = path.join(home, '.cursor', 'skills');
 
-        // Removal walks [agentic-runtime, reply-adapter, ai-sdr-core]; the
-        // first rmSync is agentic-runtime's only file.
+        // The first rmSync is ai-sdr-core's only file.
         const rm_spy = vi.spyOn(fs, 'rmSync').mockImplementationOnce(()=>{
             throw Object.assign(new Error('EPERM: operation not permitted, unlink'), {code: 'EPERM'});
         });
@@ -384,26 +331,23 @@ describe('run_flat remove dependency guard', ()=>{
         }
 
         expect(outcome.packs?.map(p=>[p.name, p.action])).toEqual([
-            ['agentic-runtime', 'failed'],
+            ['ai-sdr-core', 'failed'],
             ['reply-adapter', 'removed'],
+            ['agentic-runtime', 'removed'],
         ]);
         expect(outcome.status).toBe('partial');
-        expect(outcome.hint).toContain('ai-sdr-core');
-        // The core survives on disk and in the journal, because a pack that
-        // depends on it is still installed.
         expect(fs.existsSync(path.join(target, 'ai-sdr-core-skill', 'SKILL.md'))).toBe(true);
         expect(journal_entry('cursor', 'user', 'ai-sdr-core', env())?.version).toBe('0.1.0');
-        expect(journal_entry('cursor', 'user', 'agentic-runtime', env())?.version).toBe('0.1.0');
         expect(journal_entry('cursor', 'user', 'reply-adapter', env())).toBeUndefined();
     });
 
-    it('removes everything, in reverse order, when nothing fails', async()=>{
+    it('removes everything when nothing fails', async()=>{
         await run_flat(flat_opts('install', all));
         const outcome = await run_flat(flat_opts('remove', all));
         expect(outcome.packs?.map(p=>[p.name, p.action])).toEqual([
-            ['agentic-runtime', 'removed'],
-            ['reply-adapter', 'removed'],
             ['ai-sdr-core', 'removed'],
+            ['reply-adapter', 'removed'],
+            ['agentic-runtime', 'removed'],
         ]);
         expect(outcome.status).toBe('ok');
         expect(outcome.hint).toBeUndefined();
@@ -440,7 +384,6 @@ describe('run_flat project-scope entries belong to one repository', ()=>{
         await run_flat({...flat_opts('install', core_only), scope: 'project'});
         const outcome = await run_flat({
             ...flat_opts('list', core_only), scope: 'project', cwd: other_project(),
-            clone: async()=>{ throw new Error('list must not clone'); },
         });
         expect(outcome.packs).toEqual([]);
     });
@@ -484,20 +427,8 @@ describe('run_flat shared project directories across hosts', ()=>{
 
         const list_outcome = await run_flat({
             ...flat_opts('list', core_only), scope: 'project', host: copilot(),
-            clone: async()=>{ throw new Error('list must not clone'); },
         });
         expect(list_outcome.packs).toEqual([{name: 'ai-sdr-core', action: 'current', version: '0.1.0'}]);
-    });
-});
-
-// I5: a host with no directory configured for the requested scope (a native
-// host under `user` scope) must be skipped, not crashed on with a TypeError
-// from joining `undefined` into a path.
-describe('run_flat with no skills directory for the scope', ()=>{
-    it('reports skipped instead of crashing', async()=>{
-        const outcome = await run_flat({...flat_opts('install', core_only), host: codex(), scope: 'user'});
-        expect(outcome.status).toBe('skipped');
-        expect(outcome.reason).toBe('no-skills-dir');
     });
 });
 
@@ -532,7 +463,7 @@ describe('run_flat when the journal outlives the files', ()=>{
     it('forgets an entry whose recorded files are outside the target root and already gone', async()=>{
         const moved_away = path.join(root, 'old-location', 'ai-sdr-core-skill', 'SKILL.md');
         record_pack('cursor', 'user', 'ai-sdr-core', {
-            version: '0У.1.0', ref: 'main', commit: 'deadbee', scope: 'user',
+            version: '0.1.0', scope: 'user',
             files: [moved_away], complete: true, installed_at: '2026-07-30T00:00:00.000Z',
         }, env());
 
@@ -546,41 +477,6 @@ describe('run_flat when the journal outlives the files', ()=>{
     });
 });
 
-// Minor, requested alongside the fixes above: clone_repo must not leave its
-// temp directory behind on either failure path, and must check the exit code
-// of `git rev-parse HEAD` rather than journaling an empty commit.
-describe('clone_repo', ()=>{
-    it('throws and removes its temp directory when `git clone` fails', async()=>{
-        let captured_dir = '';
-        const run: Runner = async(_bin, args)=>{
-            if (args[0] === 'clone')
-            {
-                captured_dir = args[args.length - 1];
-                return {code: 128, stdout: '', stderr: 'fatal: repository not found'};
-            }
-            return {code: 0, stdout: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n', stderr: ''};
-        };
-        await expect(clone_repo({ref: 'main', run, tmp_root: root})).rejects.toThrow('repository not found');
-        expect(captured_dir).not.toBe('');
-        expect(fs.existsSync(captured_dir)).toBe(false);
-    });
-
-    it('throws and removes its temp directory when `git rev-parse HEAD` fails', async()=>{
-        let captured_dir = '';
-        const run: Runner = async(_bin, args)=>{
-            if (args[0] === 'clone')
-            {
-                captured_dir = args[args.length - 1];
-                return {code: 0, stdout: '', stderr: ''};
-            }
-            return {code: 1, stdout: '', stderr: 'fatal: not a git repository'};
-        };
-        await expect(clone_repo({ref: 'main', run, tmp_root: root})).rejects.toThrow('not a git repository');
-        expect(captured_dir).not.toBe('');
-        expect(fs.existsSync(captured_dir)).toBe(false);
-    });
-});
-
 // New Important from the re-review: a failed copy journaled under the target
 // version reads as installed, so the hint's own suggested fix ("re-run
 // install") silently does nothing. Journal_entry.complete distinguishes a
@@ -589,7 +485,7 @@ describe('clone_repo', ()=>{
 describe('run_flat incomplete installs', ()=>{
     it('really re-copies a pack whose entry is marked incomplete, even at the target version', async()=>{
         record_pack('cursor', 'user', 'ai-sdr-core', {
-            version: '0.1.0', ref: 'main', commit: 'deadbee', scope: 'user',
+            version: '0.1.0', scope: 'user',
             files: [], complete: false, installed_at: '2026-07-30T00:00:00.000Z',
         }, env());
 
@@ -628,7 +524,8 @@ describe('run_flat incomplete installs', ()=>{
             throw new Error('simulated disk failure');
         });
         try {
-            const outcome = await run_flat(flat_opts('update', core_only));
+            // A newer version, so the update copies.
+            const outcome = await run_flat(flat_opts('update', [{name: 'ai-sdr-core', version: '0.2.0'}]));
             expect(outcome.status).toBe('failed');
             expect(outcome.reason).toBe('copy-failed');
         } finally {
@@ -650,13 +547,12 @@ describe('run_flat incomplete installs', ()=>{
 
     it('does not report an incomplete pack as current in `list`', async()=>{
         record_pack('cursor', 'user', 'ai-sdr-core', {
-            version: '0.1.0', ref: 'main', commit: 'deadbee', scope: 'user',
+            version: '0.1.0', scope: 'user',
             files: [], complete: false, installed_at: '2026-07-30T00:00:00.000Z',
         }, env());
 
         const outcome = await run_flat({
             ...flat_opts('list', core_only),
-            clone: async()=>{ throw new Error('list must not clone'); },
         });
 
         expect(outcome.packs?.map(p=>p.action)).not.toContain('current');
@@ -664,42 +560,31 @@ describe('run_flat incomplete installs', ()=>{
     });
 });
 
-// This adapter clones a *ref*, so a new commit on `main` can rewrite every
-// file while the version stays 0.1.0. Reporting `current` for that is right —
-// the version really did not move — but the outcome must still record that the
-// bytes did, or a run that rewrote the user's files reads as a no-op.
-describe('run_flat re-copy at an unchanged version', ()=>{
-    // Same layout as fake_clone, different commit — as a second `update` a day
-    // later would see after the ref moved.
-    const clone_at = (commit: string)=>async()=>{
-        await fake_clone();
-        return {dir: clone_dir, commit};
-    };
-
-    it('marks the pack refreshed when the ref moved but the version did not', async()=>{
-        await run_flat({...flat_opts('install', core_only), clone: clone_at('aaaaaaa')});
-        const outcome = await run_flat({...flat_opts('update', core_only), clone: clone_at('bbbbbbb')});
-
-        expect(outcome.packs).toEqual([{
-            name: 'ai-sdr-core', action: 'current', version: '0.1.0', refreshed: true,
-        }]);
-        expect(journal_entry('cursor', 'user', 'ai-sdr-core', env())?.commit).toBe('bbbbbbb');
+// The version names the bytes: the package carries one copy of the pack per
+// version, so a copy already at the version is current and not re-copied.
+describe('run_flat at an unchanged version', ()=>{
+    it('re-copies nothing on update when the copy is complete and at the version', async()=>{
+        await run_flat(flat_opts('install', core_only));
+        const file = path.join(home, '.cursor', 'skills', 'ai-sdr-core-skill', 'SKILL.md');
+        fs.writeFileSync(file, 'edited');
+        const outcome = await run_flat(flat_opts('update', core_only));
+        expect(outcome.packs).toEqual([{name: 'ai-sdr-core', action: 'current', version: '0.1.0'}]);
+        expect(fs.readFileSync(file, 'utf8')).toBe('edited');
     });
 
-    it('does not mark it refreshed when the same commit is re-copied', async()=>{
-        await run_flat({...flat_opts('install', core_only), clone: clone_at('aaaaaaa')});
-        const outcome = await run_flat({...flat_opts('update', core_only), clone: clone_at('aaaaaaa')});
-
-        expect(outcome.packs).toEqual([{name: 'ai-sdr-core', action: 'current', version: '0.1.0'}]);
+    it('reports an upgrade on --dry-run and writes nothing', async()=>{
+        record_pack('cursor', 'user', 'ai-sdr-core', {
+            version: '0.0.9', scope: 'user', files: [], complete: true, installed_at: '2026-07-30T00:00:00.000Z',
+        }, env());
+        const outcome = await run_flat({...flat_opts('update', core_only), dry_run: true});
+        expect(outcome.packs).toEqual([{name: 'ai-sdr-core', action: 'upgraded', version: '0.1.0', from: '0.0.9'}]);
+        expect(fs.existsSync(path.join(home, '.cursor', 'skills', 'ai-sdr-core-skill'))).toBe(false);
     });
 
-    it('never guesses on --dry-run, which does not clone', async()=>{
-        await run_flat({...flat_opts('install', core_only), clone: clone_at('aaaaaaa')});
-        const outcome = await run_flat({
-            ...flat_opts('update', core_only), dry_run: true,
-            clone: async()=>{ throw new Error('a dry run must not clone'); },
-        });
-        expect(outcome.packs).toEqual([{name: 'ai-sdr-core', action: 'current', version: '0.1.0'}]);
+    it('counts from the version of the plugin it adopts, on update with no copy of its own', async()=>{
+        const outcome = await run_flat({...flat_opts('update', core_only), adopt: {'ai-sdr-core': '0.0.5'}});
+        expect(outcome.packs).toEqual([{name: 'ai-sdr-core', action: 'upgraded', version: '0.1.0', from: '0.0.5'}]);
+        expect(fs.existsSync(path.join(home, '.cursor', 'skills', 'ai-sdr-core-skill', 'SKILL.md'))).toBe(true);
     });
 });
 
@@ -743,14 +628,14 @@ describe('run_flat abort status', ()=>{
 const CASE_INSENSITIVE_FS = process.platform === 'win32' || process.platform === 'darwin';
 
 describe('run_flat differently-cased journaled paths', ()=>{
-    // `update`, not `install`: the entry is already complete at the target
-    // version, so `install` would skip the copy entirely without ever
-    // reaching the collision/ownership check these tests exercise.
+    // An earlier version's entry, so the run reaches the collision and
+    // ownership check these tests exercise: a complete copy at the target
+    // version would be current and skip the copy entirely.
     const seed_differently_cased_entry = (): string=>{
         const target = path.join(home, '.cursor', 'skills');
         const differently_cased = path.join(target, 'AI-SDR-CORE-SKILL', 'SKILL.MD');
         record_pack('cursor', 'user', 'ai-sdr-core', {
-            version: '0.1.0', ref: 'main', commit: 'deadbee', scope: 'user',
+            version: '0.0.9', scope: 'user',
             files: [differently_cased], complete: true, installed_at: '2026-07-30T00:00:00.000Z',
         }, env());
         fs.mkdirSync(path.join(target, 'ai-sdr-core-skill'), {recursive: true});
@@ -763,9 +648,7 @@ describe('run_flat differently-cased journaled paths', ()=>{
 
         const outcome = await run_flat(flat_opts('update', core_only));
 
-        // Re-copied from a fresh clone, but at the same version — so `current`,
-        // and the replaced content is proof the copy itself was not skipped.
-        expect(outcome.packs).toEqual([{name: 'ai-sdr-core', action: 'current', version: '0.1.0'}]);
+        expect(outcome.packs).toEqual([{name: 'ai-sdr-core', action: 'upgraded', version: '0.1.0', from: '0.0.9'}]);
         expect(fs.readFileSync(path.join(target, 'ai-sdr-core-skill', 'SKILL.md'), 'utf8'))
             .not.toBe('old content');
     });
@@ -818,7 +701,7 @@ describe('run_flat differently-cased journaled paths', ()=>{
 
         const outcome = await run_flat({...flat_opts('update', core_only), canonicalise: ignoring_case});
 
-        expect(outcome.packs).toEqual([{name: 'ai-sdr-core', action: 'current', version: '0.1.0'}]);
+        expect(outcome.packs).toEqual([{name: 'ai-sdr-core', action: 'upgraded', version: '0.1.0', from: '0.0.9'}]);
         expect(fs.readFileSync(path.join(target, 'ai-sdr-core-skill', 'SKILL.md'), 'utf8'))
             .not.toBe('old content');
     });
@@ -836,7 +719,7 @@ describe('run_flat differently-cased journaled paths', ()=>{
         fs.writeFileSync(real, 'old content');
         const recorded = path.join(target, 'recorded-under-another-name', 'SKILL.md');
         record_pack('cursor', 'user', 'ai-sdr-core', {
-            version: '0.1.0', ref: 'main', commit: 'deadbee', scope: 'user',
+            version: '0.1.0', scope: 'user',
             files: [recorded], complete: true, installed_at: '2026-07-30T00:00:00.000Z',
         }, env());
 
