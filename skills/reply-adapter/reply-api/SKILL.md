@@ -6,7 +6,7 @@ description: >
   Use before calling any non-trivial v3 endpoint, when choosing an endpoint for a task,
   or when an API call fails and needs interpretation.
 metadata:
-  version: 1.5.0
+  version: 1.5.1
   pack: reply-adapter
   category: execution
   maturity: reviewed
@@ -73,7 +73,9 @@ per-page `.md` fetches; the spec is large.
   has no feed yet answers a bare 404 — page through the inbox threads instead.
 - **Rate limits:** 100 req/min and 3000 req/hour per user; reporting and sequence-stats endpoints
   are stricter. On 429 the CLI already retried honoring `Retry-After` — if it still fails, wait
-  and reduce concurrency (sequential calls for bulk work).
+  and reduce concurrency (sequential calls for bulk work). The exception is a 429 that names a
+  `reference` or says a daily or weekly limit was reached: it is never resent and comes back at
+  once as the refusal it is.
 - **Direct sends** (from reply-cli 0.17.0): `--send-after <moment>` takes a moment with its offset
   and sends it as UTC, and Reply holds the send until then. `--idempotency-key <key>` goes as the
   `Idempotency-Key` header: the same request repeated under it answers the send Reply took rather
@@ -192,7 +194,7 @@ Record endpoint paths used, entity IDs created/modified, background-job IDs and 
 | 403 `insufficient_scope` | key lacks the endpoint's scope | tell the user which scope is missing; don't retry |
 | 403/401 `TEAM_REQUIRED`·`TEAM_NOT_ACCESSIBLE`·`USER_REQUIRED`·`USER_NOT_FOUND` | team/user resolution | see reply-auth skill |
 | 404 | wrong/stale ID | re-list the entity, re-resolve the ID — don't invent IDs |
-| 429 | rate limit | respect `Retry-After`; go sequential |
+| 429 | rate limit | respect `Retry-After`; go sequential; one that names a `reference` or says a daily or weekly limit was reached is never resent and comes back at once as the refusal it is |
 | 5xx | transient | already retried; wait, retry once, then report the API may be down |
 
 ## Safety
@@ -207,6 +209,9 @@ skill's confirmation rules — especially anything that sends messages or starts
 
 ## Changelog
 
+- 1.5.1 (2026-11-05): *Conventions* and the error table say that a 429 naming a `reference` or
+  saying a daily or weekly limit was reached is never resent and comes back at once as the refusal
+  it is.
 - 1.5.0 (2026-10-30): *Conventions* says how a direct send's text is filled in as a template:
   on an email, a LinkedIn message and an InMail; a send that goes now refused by reply-cli 0.17.2's
   three codes, with the names Reply lists; a held send filled in when it goes and failed then; the
