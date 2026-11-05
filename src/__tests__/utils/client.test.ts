@@ -283,6 +283,90 @@ describe('utils/client', ()=>{
             expect(mock_fetch).toHaveBeenCalledTimes(2);
         });
 
+        describe('a 429 that settles the request is one attempt', ()=>{
+            const LIMIT_WITH_RECORD = {
+                title: 'Too Many Requests', status: 429, code: 'directLinkedIn.weeklyLimitReached', detail: 'The send failed.',
+                reference: 'linkedin-1042', state: 'failed', sendAfter: '2026-11-03T14:00:00Z',
+            };
+            const once_only = async(body: unknown, headers: Record<string, string> = {})=>{
+                instant_timers();
+                mock_fetch.mockImplementation(async()=>err_res(429, body, headers));
+                const {request_raw} = await import('../../utils/client');
+                const r = await request_raw(BASE, 'tok', 'POST', '/x', {a: 1});
+                expect(r.status).toBe(429);
+                expect(mock_fetch).toHaveBeenCalledTimes(1);
+                return r;
+            };
+
+            it.each([
+                ['a reference and a state', {reference: 'linkedin-1042', state: 'failed'}],
+                ['a reference under a code that names no allowance', {code: 'directLinkedIn.unknown', reference: 'email-7'}],
+                ['the weekly allowance', {code: 'directLinkedIn.weeklyLimitReached'}],
+                ['the daily allowance', {code: 'directLinkedIn.dailyLimitReached'}],
+                ['the weekly allowance in another family', {code: 'directEmail.weeklyLimitReached'}],
+                ['the daily allowance in another family', {code: 'supportRequest.dailyLimitReached'}],
+                ['the weekly allowance with no family', {code: 'weeklyLimitReached'}],
+                ['the daily allowance with no family', {code: 'dailyLimitReached'}],
+            ])('%s is not resent', async(_name, body)=>{
+                await once_only({title: 'Too Many Requests', ...body});
+            });
+
+            it('hands the caller the whole answer of that one attempt, with a short Retry-After not waited out', async()=>{
+                const r = await once_only(LIMIT_WITH_RECORD, {'Retry-After': '2'});
+                expect(r.data).toEqual(LIMIT_WITH_RECORD);
+                expect(r.response_headers['retry-after']).toBe('2');
+            });
+
+            it('holds for a read too: it goes by the answer, not by the call', async()=>{
+                instant_timers();
+                mock_fetch.mockImplementation(async()=>err_res(429, {code: 'directLinkedIn.dailyLimitReached'}));
+                const {request_raw} = await import('../../utils/client');
+                expect((await request_raw(BASE, 'tok', 'GET', '/x')).status).toBe(429);
+                expect(mock_fetch).toHaveBeenCalledTimes(1);
+            });
+
+            it('throws from request as any other refusal, after that one attempt', async()=>{
+                instant_timers();
+                mock_fetch.mockImplementation(async()=>err_res(429, LIMIT_WITH_RECORD));
+                const err = await get(BASE, 'tok', '/x').catch(e=>e);
+                expect(err).toBeInstanceOf(Api_error);
+                expect(err.status).toBe(429);
+                expect(err.code).toBe('directLinkedIn.weeklyLimitReached');
+                expect(mock_fetch).toHaveBeenCalledTimes(1);
+            });
+        });
+
+        describe('an ordinary 429 keeps its retry', ()=>{
+            it.each([
+                ['no body', ''],
+                ['a title alone', {title: 'Too Many Requests', status: 429}],
+                ['a code that names no allowance', {code: 'rateLimit.exceeded'}],
+                ['a code that only resembles an allowance', {code: 'linkedInCommentPreview.dailySampleLimitReached'}],
+                ['a null reference', {code: 'rateLimit.exceeded', reference: null, state: null}],
+                ['an empty reference', {reference: ''}],
+                ['a reference that is not text', {reference: 1042}],
+                ['a body of JSON null', 'null'],
+                ['a body of a JSON list', '[]'],
+                ['a body that is not JSON', 'API calls quota exceeded!'],
+            ])('%s is resent up to the limit', async(_name, body)=>{
+                instant_timers();
+                mock_fetch.mockImplementation(async()=>err_res(429, body));
+                const {request_raw} = await import('../../utils/client');
+                expect((await request_raw(BASE, 'tok', 'POST', '/x', {a: 1})).status).toBe(429);
+                expect(mock_fetch).toHaveBeenCalledTimes(4); // initial + 3 retries
+            });
+
+            it('waits out a short Retry-After as before, and takes the answer after it', async()=>{
+                instant_timers();
+                mock_fetch.mockReset();
+                mock_fetch.mockResolvedValueOnce(err_res(429, {title: 'Too Many Requests'}, {'Retry-After': '2'}))
+                    .mockResolvedValueOnce(json_res({ok: true}));
+                const {request_raw} = await import('../../utils/client');
+                expect((await request_raw(BASE, 'tok', 'POST', '/x', {a: 1})).status).toBe(200);
+                expect(mock_fetch).toHaveBeenCalledTimes(2);
+            });
+        });
+
         const broken_body = ()=>new Response(new ReadableStream({
             start(c){ c.error(new TypeError('terminated')); },
         }), {status: 200});
