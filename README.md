@@ -475,7 +475,9 @@ the others checks or relies on Reply's own state rather than repeating an effect
 
 **Retries.** Reads are retried on errors. A write is retried only when it can't have reached Reply:
 the connection was never made, or a `429` asked to wait 3 seconds or less. A longer `429` comes back
-as `rate_limited` with `retry_after`.
+as `rate_limited` with `retry_after`. A `429` that names a `reference` or says a daily or weekly limit
+was reached is never resent, whatever it asks to wait: Reply may have recorded the attempt, and a repeat
+would record another. Each comes back at once as the refusal it is.
 
 ## Raw API access
 
@@ -508,7 +510,8 @@ A write through `reply api` (POST, PUT, PATCH, DELETE) is never resent on a 5xx 
 connection that broke after sending. That last case exits 3: the write may have happened. `reply api`
 goes by the method alone, so this includes a POST that only reads, such as the `…/filter` calls; run
 it again yourself if it failed. A `429` is waited out only when `Retry-After` asks for 3 seconds or
-less; a longer one is printed as the `429` it is.
+less; a longer one is printed as the `429` it is, and so is one whose body names a `reference` or a
+daily or weekly limit.
 
 ### Windows: Git Bash rewrites the path
 

@@ -1,8 +1,8 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import {describe, it, expect, beforeEach} from 'vitest';
-import {mock_fetch, json, ctx, sent, answer, capture} from './helpers';
+import {describe, it, expect, beforeEach, afterEach} from 'vitest';
+import {mock_fetch, json, ctx, sent, answer, capture, instant_timers, real_timers} from './helpers';
 import {handle_direct_send, type Direct_send_name, type Direct_send_opts} from '../../operations/direct-send';
 
 const SUBJECT = 'Quick question, Marta';
@@ -228,6 +228,67 @@ describe('the LinkedIn sends', ()=>{
             expect(shown(e), shown(e)).not.toContain('Marta');
             expect(mock_fetch, code).toHaveBeenCalledTimes(1);
         }
+    });
+
+    describe('a limit is one attempt at the send', ()=>{
+        beforeEach(()=>{ instant_timers(); });
+        afterEach(()=>{ real_timers(); });
+
+        // Every call gets the same refusal, so a retry shows up in the call count rather than in a request left unanswered.
+        const always = (body: Record<string, unknown>, status = 429, headers: Record<string, string> = {})=>{
+            mock_fetch.mockImplementation(async()=>json(body, status, headers));
+        };
+        const LIMITED = {title: 'Too Many Requests', status: 429};
+        const details_of = (e: unknown)=>(e as {details?: unknown}).details;
+
+        it('a provider limit that recorded a failed send is one call, and names that send', async()=>{
+            always({
+                ...LIMITED, code: 'directLinkedIn.weeklyLimitReached', detail: 'The send failed.',
+                reference: 'linkedin-1042', state: 'failed', sendAfter: '2026-11-03T14:00:00Z',
+            });
+            const e = await failure('linkedin-connect', {note: NOTE}, LINKEDIN_OPTS);
+            expect(e).toMatchObject({code: 'linkedin.limit_reached', exit_code: 1, status: 429, reply_code: 'directLinkedIn.weeklyLimitReached'});
+            expect(details_of(e)).toStrictEqual({limit: 'weekly', reference: 'linkedin-1042', state: 'failed', send_after: '2026-11-03T14:00:00Z'});
+            expect(mock_fetch).toHaveBeenCalledTimes(1);
+        });
+
+        it('each allowance is one call, with no reference and no Retry-After to go by', async()=>{
+            for (const [reply_code, limit] of [['directLinkedIn.dailyLimitReached', 'daily'], ['directLinkedIn.weeklyLimitReached', 'weekly']])
+            {
+                mock_fetch.mockReset();
+                always({...LIMITED, code: reply_code});
+                const e = await failure('linkedin-message', {body: TEXT}, LINKEDIN_OPTS);
+                expect(e, reply_code).toMatchObject({code: 'linkedin.limit_reached', details: {limit}});
+                expect(mock_fetch, reply_code).toHaveBeenCalledTimes(1);
+            }
+        });
+
+        it('passes on a short Retry-After rather than waiting it out', async()=>{
+            always({...LIMITED, code: 'directLinkedIn.dailyLimitReached'}, 429, {'Retry-After': '2'});
+            expect(await failure('linkedin-message', {body: TEXT}, LINKEDIN_OPTS)).toMatchObject({code: 'linkedin.limit_reached', retry_after: 2});
+            expect(mock_fetch).toHaveBeenCalledTimes(1);
+        });
+
+        it('a 429 naming a send under a code that is no limit is one call too, and stays rate_limited', async()=>{
+            always({...LIMITED, code: 'directLinkedIn.somethingNew', reference: 'linkedin-1042', state: 'failed'});
+            const e = await failure('linkedin-message', {body: TEXT}, LINKEDIN_OPTS);
+            expect(e).toMatchObject({code: 'rate_limited', details: {reference: 'linkedin-1042', state: 'failed'}});
+            expect(mock_fetch).toHaveBeenCalledTimes(1);
+        });
+
+        it('a plain rate limit is still resent, and the send goes through', async()=>{
+            answer(json(LIMITED, 429), activity('LinkedInConnect'));
+            expect(await run('linkedin-connect', {note: NOTE}, LINKEDIN_OPTS)).toMatchObject({status: 'sent', activity_id: 1042});
+            expect(mock_fetch).toHaveBeenCalledTimes(2);
+        });
+
+        it('at any other status an allowance code stays reply.refused, and still names the send', async()=>{
+            always({title: 'Bad Request', status: 400, code: 'directLinkedIn.weeklyLimitReached', reference: 'linkedin-1042', state: 'failed'}, 400);
+            const e = await failure('linkedin-connect', {note: NOTE}, LINKEDIN_OPTS);
+            expect(e).toMatchObject({code: 'reply.refused', reply_code: 'directLinkedIn.weeklyLimitReached'});
+            expect(details_of(e)).toStrictEqual({reference: 'linkedin-1042', state: 'failed'});
+            expect(mock_fetch).toHaveBeenCalledTimes(1);
+        });
     });
 
     it('holds a text to the length Reply publishes, counting characters as its document does, before any call', async()=>{

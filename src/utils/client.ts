@@ -15,6 +15,8 @@ const RETRY_BASE_MS = 500;
 // The longest Retry-After waited out here. A longer one goes back to the caller as the 429 it
 // is: a wait inside one call spends a time budget the caller may not have.
 const MAX_WAIT_SECONDS = 3;
+// The allowances a 429 can say have run out, as opposed to a pace that was too fast.
+const ALLOWANCE_CODES = ['weeklyLimitReached', 'dailyLimitReached'];
 // Node's fetch reports every transport failure as TypeError('fetch failed') with the system
 // error on `.cause`. These are failures to connect at all, so the request never left: no route,
 // no answer to the connect, a URL that can't be parsed, or a TLS handshake that failed.
@@ -127,6 +129,22 @@ const parse_retry_after = (raw: string | null | undefined): number | null=>{
 
 const backoff_ms = (attempt: number): number=>RETRY_BASE_MS * 2 ** attempt;
 
+// Whether a 429 answers the request instead of asking for it later, read from the body alone so
+// a route that answers in the same shape is covered too. A reference means Reply recorded this
+// attempt, so sending it again records another. An allowance that has run out won't come back
+// within any wait made here. A code is matched on its last part: the part before the dot is only
+// the family of the route that answered.
+const settles_request = (text: string): boolean=>{
+    const body = parse_body(text) as {reference?: unknown; code?: unknown} | string | null;
+    if (typeof body !== 'object' || body === null)
+    {
+        return false;
+    }
+    const {reference, code} = body;
+    return (typeof reference === 'string' && reference !== '')
+        || (typeof code === 'string' && ALLOWANCE_CODES.includes(code.slice(code.lastIndexOf('.') + 1)));
+};
+
 // One request under the retry policy, body included: an answer that breaks off mid-body is a
 // failure after sending like any other. It returns the final Response and its text for any HTTP
 // status. It throws RuntimeError('network') when Reply could not be reached and nothing was sent,
@@ -160,7 +178,7 @@ const send = async(url: string, init: RequestInit, kind: Call_kind): Promise<{re
             await sleep(backoff_ms(attempt));
             continue;
         }
-        if (res.status === 429 && can_retry)
+        if (res.status === 429 && can_retry && !settles_request(text))
         {
             const wait = parse_retry_after(res.headers.get('Retry-After'));
             if (wait !== null && wait > MAX_WAIT_SECONDS)
