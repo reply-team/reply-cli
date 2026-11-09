@@ -80,7 +80,7 @@ another environment (internal testing only):
 ```sh
 reply profile add dev \
   --authority https://oauth.dev.replyapp.io \
-  --api-base  https://api.dev.reply.io/v3
+  --api-base  https://api.dev.reply.io
 reply --profile dev auth login
 ```
 
@@ -89,7 +89,7 @@ Any field left off is inherited from the default (prod). Profiles live in
 
 ```jsonc
 // ~/.config/reply/config.json
-{ "profiles": { "dev": { "authority": "https://…", "api_base": "https://…/v3" } } }
+{ "profiles": { "dev": { "authority": "https://…", "api_base": "https://…" } } }
 ```
 
 ## Packages: public vs internal

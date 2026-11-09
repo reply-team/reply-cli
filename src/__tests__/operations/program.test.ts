@@ -153,6 +153,15 @@ describe('the program', ()=>{
         expect((mock_fetch.mock.calls[0] as [string, RequestInit])[1].headers).toMatchObject({'Idempotency-Key': 'send-456-1'});
     });
 
+    it('live-data start takes repeated --list-id and inline --filters', async()=>{
+        answer(json({code: 'liveDataSearch.searchInProgress'}, 409));
+        const {code} = await run_program(['--json', '-k', 'key-1', 'live-data', 'start', '--filters', '{"jobTitles":[]}', '--count', '5',
+            '--list-id', '77', '--list-id', '78']);
+        expect(code).toBe(1);
+        expect(requests()).toEqual([{method: 'POST', url: 'https://api.reply.io/v3/live-data/searches',
+            body: {filters: {jobTitles: []}, contactsCountToAdd: 5, listIds: [77, 78]}}]);
+    });
+
     it('a send for later at a moment without its offset exits 2 before any request', async()=>{
         pipe_stdin(JSON.stringify({body: 'Thanks for connecting.'}));
         const {code, err} = await run_program([...LATER_SEND, '--send-after', '2026-11-03T14:00:00']);

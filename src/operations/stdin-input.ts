@@ -1,3 +1,4 @@
+import {PROGRAM_NAME} from '../config';
 import {UsageError} from '../utils/errors';
 import {read_all_stdin} from '../utils/json-arg';
 import {is_object} from './call';
@@ -80,5 +81,18 @@ const stdin_inputs = <K extends string>(
     return Object.fromEntries(names.map(n=>[n, sources[n] === '-' ? ()=>JSON.stringify(input[n]) : read])) as Record<K, () => string>;
 };
 
-export {read_stdin_object, stdin_inputs};
+// A name a person gave (a sequence's, a list's) is read from stdin only, sent as given, never repeated in a message.
+const read_stdin_name = (source: string | undefined, command: string, read_stdin?: () => string): string=>{
+    const raw = read_stdin_object(source, {
+        flag: '--name', what: 'name', fields: ['name'], code: 'usage.name',
+        hint: `Pipe it in: echo '{"name":"…"}' | ${PROGRAM_NAME} ${command} --name -`,
+    }, read_stdin);
+    if (typeof raw.name !== 'string' || raw.name.trim() === '')
+    {
+        throw new UsageError('The name must be a string that is not blank.', {code: 'usage.name'});
+    }
+    return raw.name;
+};
+
+export {read_stdin_object, stdin_inputs, read_stdin_name};
 export type {Stdin_object_opts};

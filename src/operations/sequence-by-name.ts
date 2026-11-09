@@ -1,8 +1,8 @@
 import {PROGRAM_NAME} from '../config';
-import {Operation_error, Unknown_outcome_error, UsageError} from '../utils/errors';
+import {Operation_error, Unknown_outcome_error} from '../utils/errors';
 import {call_reply, expect_object, read_page, is_object, is_reply_id, refusal, unreadable, open_session} from './call';
 import type {Op_globals} from './options';
-import {read_stdin_object} from './stdin-input';
+import {read_stdin_name} from './stdin-input';
 import {print_result} from './result';
 import type {Cli_context} from '../context';
 
@@ -19,19 +19,6 @@ const PLACEHOLDER = {
     description: 'Added because a sequence needs one step to exist; replace it before this sequence is ever started.',
 };
 
-// A sequence's name is a person's text: read from stdin only, sent as given, never repeated in a message.
-const read_name = (source: string | undefined, command: string, read_stdin?: () => string): string=>{
-    const raw = read_stdin_object(source, {
-        flag: '--name', what: 'name', fields: ['name'], code: 'usage.name',
-        hint: `Pipe it in: echo '{"name":"…"}' | ${PROGRAM_NAME} sequence ${command} --name -`,
-    }, read_stdin);
-    if (typeof raw.name !== 'string' || raw.name.trim() === '')
-    {
-        throw new UsageError('The name must be a string that is not blank.', {code: 'usage.name'});
-    }
-    return raw.name;
-};
-
 const words_of = (seq: Record<string, unknown>)=>({
     status: typeof seq.status === 'string' ? seq.status : null,
     is_archived: typeof seq.isArchived === 'boolean' ? seq.isArchived : null,
@@ -45,7 +32,7 @@ const words_of = (seq: Record<string, unknown>)=>({
 const handle_sequence_list = async(
     opts: {name?: string}, ctx: Cli_context, g: Op_globals, read_stdin?: () => string,
 ): Promise<void>=>{
-    const name = read_name(opts.name, 'list', read_stdin);
+    const name = read_stdin_name(opts.name, 'sequence list', read_stdin);
     const wanted = name.toLowerCase();
     const s = await open_session(ctx, g);
     const items: Record<string, unknown>[] = [];
@@ -88,7 +75,7 @@ const handle_sequence_list = async(
 const handle_sequence_create = async(
     opts: {name?: string}, ctx: Cli_context, g: Op_globals, read_stdin?: () => string,
 ): Promise<void>=>{
-    const name = read_name(opts.name, 'create', read_stdin);
+    const name = read_stdin_name(opts.name, 'sequence create', read_stdin);
     const s = await open_session(ctx, g);
     try {
         const a = await call_reply(s, 'POST', '/v3/sequences', 'write', {name, steps: [PLACEHOLDER]});

@@ -11,13 +11,21 @@ import {
     handle_inbox_list, handle_inbox_changes, handle_inbox_get, handle_inbox_categories, handle_inbox_categorize, handle_inbox_mark_read, handle_inbox_mark_unread,
 } from './inbox';
 import {handle_inbox_reply} from './inbox-reply';
-import {handle_contact_list_add_contact} from './contact-list';
+import {
+    handle_contact_list_add_contact, handle_contact_list_create, handle_contact_list_get, handle_contact_list_delete,
+    handle_contact_list_contacts,
+} from './contact-list';
 import {handle_contact_opt_out} from './contact';
 import {handle_contact_find, handle_contact_get, handle_contact_update, handle_contact_delete} from './contact-record';
 import {handle_direct_send, type Direct_send_name} from './direct-send';
 import {handle_account_list} from './accounts';
 import {handle_schedule_list} from './schedules';
 import {handle_direct_send_get, handle_direct_send_cancel} from './direct-sends';
+import {
+    handle_live_data_get, handle_live_data_list, handle_live_data_start, handle_live_data_pause, handle_live_data_resume, handle_live_data_delete,
+    handle_live_data_filter_values, FILTER_VALUE_KINDS,
+} from './live-data';
+import {handle_live_data_preview} from './live-data-preview';
 
 const P = PROGRAM_NAME;
 const COMMON_ERRORS = [
@@ -178,7 +186,61 @@ sequence_command.command('start')
         await handle_sequence_start(cmd.args[0], cmd.opts(), ctx, g);
     }));
 
-const contact_list_command = new Command('contact-list').description('Put contacts on a contact list');
+const contact_list_command = new Command('contact-list').description('Create, read or delete a contact list, read its contacts, put contacts on it');
+
+contact_list_command.command('create')
+    .option('--name <stdin>', 'Only -: {name} as JSON on stdin')
+    .option('--shared', 'Share the list with the team (private unless given)')
+    .description('Make an empty contact list of this name')
+    .addHelpText('after', help([`echo '{"name":"Audience 12"}' | ${P} contact-list create --name -`], ['contact-list.name_taken'], true,
+        'Result: {"status":"created","list_id","name","is_shared"}, name and is_shared as Reply answers them, each null when it\n'
+            + 'gives none. The name is read from stdin only, so it never sits in the argument list. contact-list.name_taken: the\n'
+            + 'account already has a list of that name; nothing is looked up, so pick another name.\n',
+        'the list may have been made; running the command again then answers contact-list.name_taken'))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_contact_list_create(cmd.opts(), ctx, g);
+    }));
+
+contact_list_command.command('get')
+    .argument('<list-id>', 'Contact list id')
+    .description('The contact list as Reply holds it: name and whether it is shared')
+    .addHelpText('after', help([ex('contact-list get 77')], ['contact-list.not_found'], false,
+        'Result: Reply\'s list as it gives it (id, name, isShared). Its contacts: `contact-list contacts`.\n'))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_contact_list_get(cmd.args[0], ctx, g);
+    }));
+
+contact_list_command.command('delete')
+    .argument('<list-id>', 'Contact list id')
+    .description('Delete a contact list; the contacts on it stay in the account')
+    .addHelpText('after', help([ex('contact-list delete 77')], ['contact-list.not_found'], true,
+        'Result: {"status":"deleted","list_id"}. A shared list can be deleted only by the user who made it.\n'
+            + 'After exit 3 the list may already be gone: running the command again is safe, and then answers contact-list.not_found.\n'))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_contact_list_delete(cmd.args[0], ctx, g);
+    }));
+
+contact_list_command.command('contacts')
+    .argument('<list-id>', 'Contact list id')
+    .option('--live-data-only', 'Only contacts Live Data created')
+    .option('--limit <n>', 'Contacts per page, 1-1000 (default 100)')
+    .option('--offset <n>', 'Contacts to skip (default 0)')
+    .description('One page of the contacts on a list, oldest first')
+    .addHelpText('after', help([ex('contact-list contacts 77 --limit 1000'), ex('contact-list contacts 77 --live-data-only --offset 25')], [], false,
+        'Result: {"items","has_more"}, Reply\'s contacts as it gives them (id, email, names, title, company, linkedInUrl,\n'
+            + 'addingDate, …). Oldest first: by the date the contact was added, equal dates by contact id, highest first; the order\n'
+            + 'holds from page to page. A Live Data search adds each batch at the end of that order, so for a list one search fills,\n'
+            + 'an offset kept by the caller (the number already read) only moves forward. A contact deleted in Reply, or taken off the\n'
+            + 'list, moves everyone behind it up by one. Only contacts the caller may see are returned: a team\'s rules can hide a\n'
+            + 'teammate\'s contacts, and Live Data\'s contacts belong to the user who started the search. Reply does not check the\n'
+            + 'list id here, so a list it does not have reads as empty; `contact-list get` tells the two apart.\n'))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_contact_list_contacts(cmd.args[0], cmd.opts(), ctx, g);
+    }));
 
 add_contact_options(contact_list_command.command('add-contact')
     .argument('<list-id>', 'Contact list id'))
@@ -657,4 +719,157 @@ direct_send_command.command('cancel')
         await handle_direct_send_cancel(cmd.args[0], ctx, g);
     }));
 
-export {sequence_command, contact_list_command, contact_command, inbox_command, account_command, schedule_command, direct_send_command};
+const live_data_command = new Command('live-data')
+    .description('Preview a Live Data audience, start a search that puts the people it finds on contact lists, follow, pause, resume or delete it');
+
+const SEARCH_STATUSES = 'Statuses: inProgress, finished (the count asked for was reached), noMoreContacts (the source ran out first),\n'
+    + 'manuallyPaused, pausedDueToInsufficientCredits, pausedDueToContactLimit (the plan\'s contact limit).\n';
+
+const FILTERS_HELP = '--filters is Reply\'s filter object as the API documents it (jobTitles, departments, seniorities, contactLocations,\n'
+    + 'industries, companyLocations, companySizes, accountKeywords, …), passed on untouched: inline JSON, @file, or - for\n'
+    + 'stdin. Reply checks the values, never against the filter-value lists: they are free text.\n';
+
+const collect = (value: string, previous: string[]): string[]=>[...previous, value];
+
+live_data_command.command('preview')
+    .option('--filters <json>', 'Reply\'s filters: inline JSON, @file, or - for stdin')
+    .option('--job-id <id>', 'Go on waiting for a preview already started, by the job id it answered')
+    .option('--max-per-company <n>', 'People per company (Reply\'s default: 1)')
+    .option('--wait-seconds <n>', 'How long to wait for the result, 0-600 (default 120; 0 answers at once)')
+    .description('Size an audience before spending on it: how many people and companies the filters match, and up to ten of them')
+    .addHelpText('after', help(
+        [`echo '{"jobTitles":[{"value":"CTO","type":"include"}]}' | ${P} live-data preview --filters -`,
+            ex('live-data preview --job-id 3f2504e0-4f89-11d3-9a0c-0305e82c3301 --wait-seconds 60')],
+        ['live_data.invalid_filters', 'live_data.search_in_progress', 'live_data.service_failed', 'live_data.preview_failed',
+            'live_data.preview_not_found'], true,
+        'Result: {"status":"done","job_id","contacts_count","companies_count","sample_contacts":[{"first_name","last_name",\n'
+            + '"job_title","location","linkedin_url","company_name","company_domain"}]}, each count null when Reply gives none; or\n'
+            + '{"status":"pending","job_id","progress"} when the wait ran out first (exit 0): run it again with --job-id to go on\n'
+            + 'waiting. Nothing is saved and nothing is charged. Reply works the preview out as a background job, read every two\n'
+            + 'seconds; reading it needs the key\'s other:read scope, without which the read is access.feature_unavailable. Every\n'
+            + 'failure after the start carries the job id in details.job_id. A newer preview by the same user replaces an older one,\n'
+            + 'whose job then never finishes. live_data.preview_failed: the job ended Failed, Cancelled, Expired or Unknown\n'
+            + '(details.job_status). live_data.preview_not_found: Reply has no such job for this user. --max-per-company goes\n'
+            + 'with --filters only. After exit 3 on the start, running the command again is safe.\n' + FILTERS_HELP))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_live_data_preview(cmd.opts(), ctx, g);
+    }));
+
+live_data_command.command('start')
+    .option('--filters <json>', 'Reply\'s filters: inline JSON, @file, or - for stdin')
+    .option('--count <n>', 'The most people the search may add (an upper bound, not a promise)')
+    .option('--list-id <id>', 'A contact list the people found are put on (repeat for more)', collect, [])
+    .option('--max-per-company <n>', 'People per company (Reply\'s default: 1)')
+    .option('--with-phones', 'Also look for phone numbers (3 more credits for each one found)')
+    .description('Start a search that adds the people it finds as contacts and puts them on the lists named')
+    .addHelpText('after', help(
+        [`echo '{"jobTitles":[{"value":"CTO","type":"include"}],"companySizes":["fifty"]}' | ${P} live-data start --filters - --count 25 --list-id 77`],
+        ['live_data.invalid_filters', 'live_data.search_in_progress', 'live_data.insufficient_credits', 'contact-list.not_found',
+            'live_data.service_failed'], true,
+        'Result: {"status":"started","search_id"}. The search runs on at Reply: follow it with `live-data get`, and read the people\n'
+            + 'off its list with `contact-list contacts`. A person Reply already holds is skipped, not added to the list.\n'
+            + FILTERS_HELP
+            + 'live_data.search_in_progress: an unfinished search (running or paused) of the same team with the same filters, both\n'
+            + 'with or both without account lists, blocks a start; the lists, the count, people per company and phones do not count.\n'
+            + 'A deleted search no longer blocks. live_data.insufficient_credits: the team cannot afford a single contact; nothing\n'
+            + 'started. contact-list.not_found: a --list-id the account does not have or cannot reach; nothing started.\n'
+            + 'live_data.invalid_filters: Reply did not accept the request, most often the filters; Reply\'s detail names what.\n'
+            + 'live_data.service_failed: Reply\'s search service failed and Reply saved no search; the call can be made again.\n'
+            + 'A key without the contact permissions gets access.feature_unavailable.\n',
+        'a search may have started; `live-data list` shows the team\'s searches with their lists'))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_live_data_start(cmd.opts(), ctx, g);
+    }));
+
+live_data_command.command('get')
+    .argument('<search-id>', 'Live Data search id')
+    .description('One search as Reply holds it: status, contacts found, credits used, its lists and its filters')
+    .addHelpText('after', help([ex('live-data get 901')], ['live_data.not_found'], false,
+        'Result: Reply\'s search as it gives it (id, status, startedAt, contactsFound, usedCredits, userId, sequenceId,\n'
+            + 'sequenceName, lists [{id, name}], filters). Never the people: read them off the search\'s list with\n'
+            + '`contact-list contacts`. ' + SEARCH_STATUSES
+            + 'A deleted search answers live_data.not_found, so read a search\'s final counts before deleting it.\n'))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_live_data_get(cmd.args[0], ctx, g);
+    }));
+
+live_data_command.command('list')
+    .option('--limit <n>', 'Searches per page, 1-1000 (default 100)')
+    .option('--offset <n>', 'Searches to skip (default 0)')
+    .description('One page of the team\'s searches, newest first')
+    .addHelpText('after', help([ex('live-data list'), ex('live-data list --limit 20 --offset 20')], [], false,
+        'Result: {"items","has_more"}, Reply\'s searches as it gives them (without their filters; `live-data get` has them).\n'
+            + 'Every search of the team is listed, whoever started it (userId); deleted ones are left out. ' + SEARCH_STATUSES))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_live_data_list(cmd.opts(), ctx, g);
+    }));
+
+live_data_command.command('pause')
+    .argument('<search-id>', 'Live Data search id')
+    .description('Pause a running search; resume it later')
+    .addHelpText('after', help([ex('live-data pause 901')], ['live_data.not_found', 'live_data.invalid_status'], true,
+        'Result: {"status":"paused","search_id"}. The search stops at its next step: the batch it is working on is still added,\n'
+            + 'so its counts can grow once more after the call. live_data.invalid_status: pause applies to inProgress searches only;\n'
+            + 'Reply\'s detail names the search\'s current status. A key without the contact permissions gets\n'
+            + 'access.feature_unavailable.\n'))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_live_data_pause(cmd.args[0], ctx, g);
+    }));
+
+live_data_command.command('resume')
+    .argument('<search-id>', 'Live Data search id')
+    .description('Resume a paused search, or finish one that already has everything it was asked for')
+    .addHelpText('after', help([ex('live-data resume 901')],
+        ['live_data.not_found', 'live_data.invalid_status', 'live_data.insufficient_credits', 'live_data.contact_limit_reached',
+            'live_data.service_failed'], true,
+        'Result: {"status":"resumed","search_id"}, or {"status":"finished","search_id","search_status"} when the search had\n'
+            + 'already found everything asked for (search_status finished) or Reply ended it otherwise (noMoreContacts).\n'
+            + 'Resume applies to manuallyPaused, pausedDueToInsufficientCredits and pausedDueToContactLimit; live_data.invalid_status\n'
+            + 'carries Reply\'s detail naming the current status. live_data.insufficient_credits: the team cannot afford a single\n'
+            + 'contact, and the search stays paused. live_data.contact_limit_reached: the search was paused by the plan\'s contact\n'
+            + 'limit and its owner still has no room for another contact; the search stays paused. live_data.service_failed:\n'
+            + 'Reply\'s search service failed and the search stays paused; the call can be made again.\n'))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_live_data_resume(cmd.args[0], ctx, g);
+    }));
+
+live_data_command.command('delete')
+    .argument('<search-id>', 'Live Data search id')
+    .description('Delete a search whatever its status; the contacts it added stay')
+    .addHelpText('after', help([ex('live-data delete 901')], ['live_data.not_found', 'live_data.service_failed'], true,
+        'Result: {"status":"deleted","search_id"}. Read the search\'s final counts first: after a delete, `live-data get` answers\n'
+            + 'live_data.not_found. The search stops and its filters are free for a new search. The batch it was working on is either\n'
+            + 'still added, and charged, right after the delete, or kept for the next search with the same filters, which receives\n'
+            + 'those people first. live_data.service_failed: Reply\'s search service failed and the search is kept.\n'
+            + 'After exit 3 the search may already be gone: running the command again is safe, and then answers live_data.not_found.\n'))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_live_data_delete(cmd.args[0], ctx, g);
+    }));
+
+live_data_command.command('filter-values')
+    .argument('<kind>', FILTER_VALUE_KINDS.join(' | '))
+    .option('--search <text>', 'Only values containing this text, ignoring case')
+    .option('--limit <n>', 'Values per page, 1-1000 (default 100)')
+    .option('--offset <n>', 'Values to skip (default 0)')
+    .description('One page of the values Reply suggests for a filter: industries, departments, seniorities, locations or job titles')
+    .addHelpText('after', help([ex('live-data filter-values job-titles --search "chief tech"'), ex('live-data filter-values locations --search berlin')],
+        ['live_data.service_failed'], false,
+        'Result: {"items","has_more"}, plain strings. They are suggestions only: Reply checks no filter value against these\n'
+            + 'lists, so a filter takes free text. locations mixes countries, regions and cities. seniorities go into the filters as\n'
+            + 'plain strings; the other kinds as {value, type}.\n'))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_live_data_filter_values(cmd.args[0], cmd.opts(), ctx, g);
+    }));
+
+export {
+    sequence_command, contact_list_command, contact_command, inbox_command, account_command, schedule_command, direct_send_command,
+    live_data_command,
+};

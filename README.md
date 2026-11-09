@@ -196,6 +196,14 @@ prints JSON (indented; compact with `--json`) and says what happened in a stable
 | `reply sequence pause <id>` | → `paused` |
 | `reply sequence start <id> [--expect-contacts N]` | → `started` / `already_active` |
 | `reply contact-list add-contact <list-id> <contact> [--refuse-opted-out]` | → `added` |
+| `reply contact-list create --name - [--shared]` | make an empty list of a name → `created` |
+| `reply contact-list get <list-id>` · `reply contact-list delete <list-id>` | the list as Reply holds it · → `deleted` |
+| `reply contact-list contacts <list-id> [--live-data-only] [--limit] [--offset]` | one page of the people on a list, oldest first |
+| `reply live-data preview (--filters … [--max-per-company N] \| --job-id …) [--wait-seconds N]` | how many people and companies the filters match, and up to ten of them → `done` / `pending` |
+| `reply live-data start --filters … --count N [--list-id N]… [--max-per-company N] [--with-phones]` | a search that adds the people it finds and puts them on the lists → `started` |
+| `reply live-data get <id>` · `reply live-data list` | a search's status and counts · the team's searches, newest first |
+| `reply live-data pause <id>` · `resume <id>` · `delete <id>` | → `paused` · `resumed` / `finished` · `deleted` |
+| `reply live-data filter-values <kind> [--search …]` | values Reply suggests for industries, departments, seniorities, locations or job titles |
 | `reply contact find --contact -` | the id of the contact under an email or a LinkedIn URL, or null; never creates one |
 | `reply contact get <id>` | the contact as Reply holds it |
 | `reply contact update (<id> \| <contact>) --fields -` | change some fields and custom fields; null clears one → `updated` |
@@ -447,9 +455,51 @@ reply schedule list --json
 #   "reply_status":"isDefaultForCurrentUser"}]}
 ```
 
-`inbox reply`, `sequence create` and the five direct sends are the work commands that are not safe to
-re-run. On exit 3 (outcome unknown) a reply or a send may already have gone, and running it again may
-send it twice, unless the hint says nothing was sent. A direct send's exit 3 comes from a lost
+Live Data finds people Reply does not hold yet. `reply live-data preview` sizes an audience before
+anything is spent: how many people and companies the filters match, and up to ten of them. Nothing is
+saved or charged. Reply works a preview out as a background job, which the command reads every two
+seconds for up to `--wait-seconds` (default 120). Reading it needs the key's `other:read` scope. When
+the wait runs out first the answer is `pending` with the `job_id`, and `--job-id` goes on waiting.
+The filters are Reply's own object, as the API documents it, passed on untouched; the
+`filter-values` lists are suggestions, not a vocabulary Reply checks.
+
+A search adds the people it finds as contacts and puts them on the lists named, so make a list first
+and read the people off it:
+
+```sh
+echo '{"name":"Audience 12"}' | reply contact-list create --name - --json
+# {"status":"created","list_id":77,"name":"Audience 12","is_shared":false}
+echo '{"jobTitles":[{"value":"CTO","type":"include"}]}' | reply live-data start --filters - --count 25 --list-id 77 --json
+# {"status":"started","search_id":901}
+reply live-data get 901 --json                                  # status, contactsFound, usedCredits, lists
+reply contact-list contacts 77 --limit 1000 --offset 0 --json   # the people found so far, oldest first
+```
+
+`contact-list contacts` reads oldest first by the date a contact was added, equal dates by contact id,
+highest first, an order that holds from page to page. A search adds each batch at the end of it, so for a
+list one search fills, the number of people already read is a cursor that only moves forward: pass it
+as `--offset`. A person Reply already holds is skipped by the search, not put on the list.
+
+Reply refuses a start (`live_data.search_in_progress`) while an unfinished search of the same team has
+the same filters, running or paused; the lists, the count, people per company and phones don't count,
+and searches with different filters run side by side. That refusal holds only while the first search
+is unfinished: one that already finished or was deleted no longer blocks, so after exit 3 a second
+`live-data start` may start, and charge for, a second search. Look in `live-data list` first, where a
+search shows its lists. A `--list-id` the account does not have or cannot reach is `contact-list.not_found`,
+and nothing starts. `pause` applies to a running
+search, `resume` to a paused one (`live_data.invalid_status` otherwise, Reply's detail naming the
+status), and a resume without the credits for one contact is `live_data.insufficient_credits`. A
+search paused by the plan's contact limit stays paused while its owner has no room for another
+contact: that resume is `live_data.contact_limit_reached`. A resume answers `finished`, with Reply's `search_status`,
+when the search already had everything it was asked for.
+`live_data.service_failed` is Reply's search service failing: nothing changed, and the call can be
+made again. Read a search's final counts before `live-data delete`: a deleted search answers
+`live_data.not_found`. The contacts it added stay.
+
+`inbox reply`, `sequence create`, `live-data start` and the five direct sends are the work commands that
+are not safe to re-run. On exit 3 (outcome unknown) a reply or a send may already have gone, and running
+it again may send it twice, unless the hint says nothing was sent; a search may already have started
+(above). A direct send's exit 3 comes from a lost
 answer, a 5xx, or a 400 to the send whose JSON carries neither a `code` nor `errors[]`, which is
 Reply failing while it made the send. On a LinkedIn send, a 400 `directLinkedIn.unknown` is the
 same: Reply failed while making the send or could not map the provider's answer, and its code is
@@ -470,7 +520,7 @@ Reply refused the add. `reply.invalid_request` means Reply didn't accept a field
 
 **Exit codes.** `0` done · `1` failed, and the main effect did not happen · `2` usage error, nothing
 sent · `3` **outcome unknown**: a write may have happened and no answer came back. Re-running the
-same command is safe, except `inbox reply`, `sequence create` and the direct sends (above): each of
+same command is safe, except `inbox reply`, `sequence create`, `live-data start` and the direct sends (above): each of
 the others checks or relies on Reply's own state rather than repeating an effect blindly.
 
 **Retries.** Reads are retried on errors. A write is retried only when it can't have reached Reply:

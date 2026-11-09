@@ -9,6 +9,7 @@ import {skills_command} from './commands/skills';
 import {install_command} from './commands/install';
 import {
     sequence_command, contact_list_command, contact_command, inbox_command, account_command, schedule_command, direct_send_command,
+    live_data_command,
 } from './operations/commands';
 import {update_notice} from './selfupdate/notice';
 import {CliError, format_hint} from './utils/errors';
@@ -49,7 +50,8 @@ const build_program = (): Command=>{
     const WORK = 'Work with your Reply account:';
     const SETUP = 'Setup:';
     for (const c of [
-        sequence_command, contact_list_command, contact_command, inbox_command, account_command, schedule_command, direct_send_command, api_command,
+        sequence_command, contact_list_command, live_data_command, contact_command, inbox_command, account_command, schedule_command,
+        direct_send_command, api_command,
     ])
     {
         program.addCommand(c.helpGroup(WORK));
