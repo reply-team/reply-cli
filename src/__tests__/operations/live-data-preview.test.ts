@@ -1,5 +1,5 @@
 import {describe, it, expect, beforeEach, afterEach} from 'vitest';
-import {mock_fetch, json, ctx, sent, answer, capture, instant_timers, real_timers} from './helpers';
+import {mock_fetch, json, ctx, sent, answer, capture, instant_timers, real_timers, lost_connection} from './helpers';
 import {handle_live_data_preview} from '../../operations/live-data-preview';
 
 const J = '3f2504e0-4f89-11d3-9a0c-0305e82c3301';
@@ -64,6 +64,21 @@ describe('live-data preview', ()=>{
         });
     });
 
+    it('a result given as an object in v3\'s casing, under a status in another case, reads the same', async()=>{
+        answer(job('done', {jsonDataResult: {contactsCount: 5, companiesCount: 2, sampleContacts: [{firstName: 'Ann', companyDomain: 'example.com'}]}}));
+        const {out} = await capture(()=>preview({jobId: J}));
+        expect(JSON.parse(out)).toEqual({status: 'done', job_id: J, contacts_count: 5, companies_count: 2, sample_contacts: [{
+            first_name: 'Ann', last_name: null, job_title: null, location: null, linkedin_url: null, company_name: null,
+            company_domain: 'example.com',
+        }]});
+    });
+
+    it('a status v3 does not name is reply.unavailable with the job id, read once, not a pending after the whole wait', async()=>{
+        answer(job('Paused'));
+        await expect(preview({jobId: J})).rejects.toMatchObject({code: 'reply.unavailable', details: {job_id: J}, exit_code: 1});
+        expect(mock_fetch).toHaveBeenCalledTimes(1);
+    });
+
     it('counts Reply did not give are null', async()=>{
         answer(job('Done', {jsonDataResult: '{"SampleContacts":[]}'}));
         const {out} = await capture(()=>preview({jobId: J}));
@@ -80,9 +95,23 @@ describe('live-data preview', ()=>{
         await expect(preview({filters: FILTERS})).rejects.toMatchObject({code: 'access.feature_unavailable', details: {job_id: J}});
     });
 
-    it('a start answered without a job id is outcome.unknown', async()=>{
-        answer(json({}, 202));
-        await expect(preview({filters: FILTERS})).rejects.toMatchObject({code: 'outcome.unknown', exit_code: 3});
+    it('a start answered without a job id, or lost, is outcome.unknown whose hint says a repeat is safe', async()=>{
+        for (const outcome of [()=>json({}, 202), 'lost'] as const)
+        {
+            mock_fetch.mockReset();
+            if (outcome === 'lost')
+            {
+                mock_fetch.mockRejectedValueOnce(lost_connection());
+            }
+            else
+            {
+                answer(outcome());
+            }
+            const e = await preview({filters: FILTERS}).catch(x=>x);
+            expect(e, String(outcome)).toMatchObject({code: 'outcome.unknown', exit_code: 3});
+            expect(e.hint, String(outcome)).toContain('again is safe');
+            expect(mock_fetch, String(outcome)).toHaveBeenCalledTimes(1);
+        }
     });
 
     it('a --job-id that is not a GUID is a usage error before any call', async()=>{
@@ -90,9 +119,10 @@ describe('live-data preview', ()=>{
         expect(mock_fetch).not.toHaveBeenCalled();
     });
 
-    it('takes exactly one of --filters and --job-id', async()=>{
+    it('takes exactly one of --filters and --job-id, and --max-per-company only with --filters', async()=>{
         await expect(preview({filters: FILTERS, jobId: J})).rejects.toMatchObject({exit_code: 2});
         await expect(preview({})).rejects.toMatchObject({exit_code: 2});
+        await expect(preview({jobId: J, maxPerCompany: '2'})).rejects.toMatchObject({exit_code: 2});
         expect(mock_fetch).not.toHaveBeenCalled();
     });
 });

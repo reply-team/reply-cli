@@ -749,7 +749,8 @@ live_data_command.command('preview')
             + 'seconds; reading it needs the key\'s other:read scope, without which the read is access.feature_unavailable. Every\n'
             + 'failure after the start carries the job id in details.job_id. A newer preview by the same user replaces an older one,\n'
             + 'whose job then never finishes. live_data.preview_failed: the job ended Failed, Cancelled, Expired or Unknown\n'
-            + '(details.job_status). live_data.preview_not_found: Reply has no such job for this user.\n' + FILTERS_HELP))
+            + '(details.job_status). live_data.preview_not_found: Reply has no such job for this user. --max-per-company goes\n'
+            + 'with --filters only. After exit 3 on the start, running the command again is safe.\n' + FILTERS_HELP))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
         await handle_live_data_preview(cmd.opts(), ctx, g);
@@ -764,14 +765,17 @@ live_data_command.command('start')
     .description('Start a search that adds the people it finds as contacts and puts them on the lists named')
     .addHelpText('after', help(
         [`echo '{"jobTitles":[{"value":"CTO","type":"include"}],"companySizes":["fifty"]}' | ${P} live-data start --filters - --count 25 --list-id 77`],
-        ['live_data.invalid_filters', 'live_data.search_in_progress', 'live_data.insufficient_credits', 'live_data.service_failed'], true,
+        ['live_data.invalid_filters', 'live_data.search_in_progress', 'live_data.insufficient_credits', 'contact-list.not_found',
+            'live_data.service_failed'], true,
         'Result: {"status":"started","search_id"}. The search runs on at Reply: follow it with `live-data get`, and read the people\n'
             + 'off its list with `contact-list contacts`. A person Reply already holds is skipped, not added to the list.\n'
             + FILTERS_HELP
             + 'live_data.search_in_progress: an unfinished search (running or paused) of the same team with the same filters, both\n'
             + 'with or both without account lists, blocks a start; the lists, the count, people per company and phones do not count.\n'
             + 'A deleted search no longer blocks. live_data.insufficient_credits: the team cannot afford a single contact; nothing\n'
-            + 'started. live_data.service_failed: Reply\'s search service failed and Reply saved no search; the call can be made again.\n'
+            + 'started. contact-list.not_found: a --list-id the account does not have or cannot reach; nothing started.\n'
+            + 'live_data.invalid_filters: Reply did not accept the request, most often the filters; Reply\'s detail names what.\n'
+            + 'live_data.service_failed: Reply\'s search service failed and Reply saved no search; the call can be made again.\n'
             + 'A key without the contact permissions gets access.feature_unavailable.\n',
         'a search may have started; `live-data list` shows the team\'s searches with their lists'))
     .action(run(async(cmd)=>{
@@ -819,11 +823,12 @@ live_data_command.command('pause')
 
 live_data_command.command('resume')
     .argument('<search-id>', 'Live Data search id')
-    .description('Resume a paused search, or finish one that has nothing left to find')
+    .description('Resume a paused search, or finish one that already has everything it was asked for')
     .addHelpText('after', help([ex('live-data resume 901')],
         ['live_data.not_found', 'live_data.invalid_status', 'live_data.insufficient_credits', 'live_data.contact_limit_reached',
             'live_data.service_failed'], true,
-        'Result: {"status":"resumed"|"finished","search_id"}: finished when the search had already found everything asked for.\n'
+        'Result: {"status":"resumed","search_id"}, or {"status":"finished","search_id","search_status"} when the search had\n'
+            + 'already found everything asked for (search_status finished) or Reply ended it otherwise (noMoreContacts).\n'
             + 'Resume applies to manuallyPaused, pausedDueToInsufficientCredits and pausedDueToContactLimit; live_data.invalid_status\n'
             + 'carries Reply\'s detail naming the current status. live_data.insufficient_credits: the team cannot afford a single\n'
             + 'contact, and the search stays paused. live_data.contact_limit_reached: the search was paused by the plan\'s contact\n'

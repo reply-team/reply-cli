@@ -8,6 +8,7 @@ import {read_contact_input, type Contact_flags} from './contact-input';
 import {ensure_contact, read_opted_out} from './contacts';
 import {read_stdin_name} from './stdin-input';
 import {print_result, with_ids} from './result';
+import {PROGRAM_NAME} from '../config';
 import type {Cli_context} from '../context';
 
 type List_add_opts = Contact_flags & {refuseOptedOut?: boolean};
@@ -65,21 +66,31 @@ const handle_contact_list_create = async(
 ): Promise<void>=>{
     const name = read_stdin_name(opts.name, 'contact-list create', read_stdin);
     const s = await open_session(ctx, g);
-    const a = await call_reply(s, 'POST', '/v3/contact-lists', 'write', {name, isShared: opts.shared === true});
-    if (a.status === 409 && reply_code_of(a) === 'contactsList.duplicateName')
-    {
-        throw new Operation_error('contact-list.name_taken', 'This account already has a contact list of that name.', {
-            status: 409, reply_code: reply_code_of(a),
-        });
-    }
-    if (a.status !== 201 && a.status !== 200)
-    {
-        throw refusal(a, 'write');
-    }
-    const made = expect_object(a, 'write');
-    if (!is_reply_id(made.id))
-    {
-        throw unreadable(a, 'write');
+    let made: Record<string, unknown>;
+    try {
+        const a = await call_reply(s, 'POST', '/v3/contact-lists', 'write', {name, isShared: opts.shared === true});
+        if (a.status === 409 && reply_code_of(a) === 'contactsList.duplicateName')
+        {
+            throw new Operation_error('contact-list.name_taken', 'This account already has a contact list of that name.', {
+                status: 409, reply_code: reply_code_of(a),
+            });
+        }
+        if (a.status !== 201 && a.status !== 200)
+        {
+            throw refusal(a, 'write');
+        }
+        made = expect_object(a, 'write');
+        if (!is_reply_id(made.id))
+        {
+            throw unreadable(a, 'write');
+        }
+    } catch (e) {
+        if (e instanceof Unknown_outcome_error)
+        {
+            e.hint = 'The list may have been made, and a repeat under the same name answers contact-list.name_taken. '
+                + `\`${PROGRAM_NAME} api '/v3/contact-lists?search=<name>'\` finds it by its name.`;
+        }
+        throw e;
     }
     print_result({
         status: 'created', list_id: made.id,

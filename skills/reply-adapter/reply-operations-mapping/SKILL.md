@@ -265,16 +265,19 @@ them wrong:
    the same team has the same filters, running or paused; searches with different filters run side
    by side, and the target lists don't count. This is a Reply fact and it belongs nowhere else. An
    agent that does not know it will read the refusal as a failure and retry it. Before running the
-   same filters again, finish the earlier search: resume it, or delete it once its final counts
-   are read.
+   same filters again, let the earlier search finish, or delete it once its final counts are read;
+   a resumed search is unfinished again and still holds its filters.
 
 Build the filter from the typeahead values — departments, industries, job titles, locations,
 seniorities — rather than guessing accepted ones. Check the existing searches before starting a
-near-identical one: a repeat spends again and returns a different world. Whatever comes back then
-enters the normal path — `contact.create` or `import.apply` into a named list, with the same
-mapping, dedupe policy and approval gate as any other import. Start can optionally drop the found
-people straight into a sequence; treat that as `campaign.enroll` and hold it to the enrolment
-gate rather than letting it ride along.
+near-identical one: a repeat spends again and returns a different world. A start adds the people it
+finds as contacts and puts them on the lists it names itself, so nothing it finds goes through
+`contact.create` or `import.apply`: hold the start to the approval gate of an import before it
+runs, and read the people back off its list. Start can optionally drop the found people straight
+into a sequence; treat that as `campaign.enroll` and hold it to the enrolment gate rather than
+letting it ride along. With reply-cli these are `reply live-data preview`, `start`, `get`, `list`,
+`pause`, `resume`, `delete` and `filter-values`, and `reply contact-list contacts` reads a list's
+people back.
 
 **Contact enrichment is documented as available late August 2026 and is not callable today.**
 `contact.enrich`, `company.enrich` and `phone_number.verify` are `absent` for that reason. Say
@@ -428,8 +431,10 @@ those as irreversible with no window and say so before acting rather than after.
 ## Changelog
 
 - 2.3.1 (2026-11-06): Live Data's limit stated as Reply enforces it: one unfinished search per filter
-  set, not one per team; searches with different filters run side by side, and finishing the earlier
-  search (resume it, or delete it once its final counts are read) frees its filters.
+  set, not one per team; searches with different filters run side by side, and only an earlier
+  search that finished or was deleted frees its filters. A start puts the people it finds on its
+  lists itself, so nothing goes through `contact.create` or `import.apply`; the reply-cli commands
+  are named.
 - 2.3.0 (2026-10-30): `message.send` in the fulfilment register says that a message composed as a
   template goes by the same command and that Reply fills it in, before anything goes or when it
   goes, and points to reply-api's *Templates* for the rest.

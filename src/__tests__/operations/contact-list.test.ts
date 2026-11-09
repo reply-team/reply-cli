@@ -1,5 +1,5 @@
 import {describe, it, expect, beforeEach} from 'vitest';
-import {mock_fetch, json, ctx, sent, answer, capture} from './helpers';
+import {mock_fetch, json, ctx, sent, answer, capture, lost_connection} from './helpers';
 import {
     handle_contact_list_add_contact, handle_contact_list_create, handle_contact_list_get, handle_contact_list_delete,
     handle_contact_list_contacts,
@@ -65,6 +65,27 @@ describe('contact-list create', ()=>{
         answer(json({code: 'contactsList.duplicateName'}, 409));
         await expect(create({})).rejects.toMatchObject({code: 'contact-list.name_taken', reply_code: 'contactsList.duplicateName', exit_code: 1});
         expect(mock_fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('a 5xx or a lost answer is outcome.unknown whose hint finds the list by its name, without repeating the name', async()=>{
+        for (const outcome of [()=>json('', 503), 'lost'] as const)
+        {
+            mock_fetch.mockReset();
+            if (outcome === 'lost')
+            {
+                mock_fetch.mockRejectedValueOnce(lost_connection());
+            }
+            else
+            {
+                answer(outcome());
+            }
+            const e = await create({}).catch(x=>x);
+            expect(e, String(outcome)).toMatchObject({code: 'outcome.unknown', exit_code: 3});
+            expect(e.hint, String(outcome)).toContain('contact-list.name_taken');
+            expect(e.hint, String(outcome)).toContain('/v3/contact-lists?search=');
+            expect(e.hint, String(outcome)).not.toContain('Audience 12');
+            expect(mock_fetch, String(outcome)).toHaveBeenCalledTimes(1);
+        }
     });
 });
 

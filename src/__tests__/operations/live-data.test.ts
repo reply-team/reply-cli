@@ -1,5 +1,5 @@
 import {describe, it, expect, beforeEach} from 'vitest';
-import {mock_fetch, json, ctx, sent, answer, capture} from './helpers';
+import {mock_fetch, json, ctx, sent, answer, capture, lost_connection} from './helpers';
 import {
     handle_live_data_get, handle_live_data_list, handle_live_data_start, handle_live_data_pause, handle_live_data_resume, handle_live_data_delete,
     handle_live_data_filter_values,
@@ -36,6 +36,11 @@ describe('live-data list', ()=>{
         answer(json({items: [], hasMore: false}));
         await capture(()=>handle_live_data_list({}, ctx(), {json: true}));
         expect(sent()[0].url).toBe('https://api/v3/live-data/searches?top=100&skip=0');
+    });
+
+    it('a 404 names no search, so it is Reply\'s refusal and not live_data.not_found', async()=>{
+        answer(json({code: 'liveDataSearch.notFound'}, 404));
+        await expect(handle_live_data_list({}, ctx(), {})).rejects.toMatchObject({code: 'reply.refused', status: 404});
     });
 });
 
@@ -75,19 +80,39 @@ describe('live-data start', ()=>{
         await expect(start({})).rejects.toMatchObject({code: 'live_data.invalid_filters', detail: 'Filters are invalid.'});
     });
 
-    it('Reply\'s 502 upstreamFailure is live_data.service_failed, exit 1, not an unknown outcome', async()=>{
-        answer(json({code: 'liveDataSearch.upstreamFailure'}, 502));
+    it('Reply\'s 502 upstreamFailure is live_data.service_failed, exit 1, not an unknown outcome; a Live Data code at a '
+        + 'status Reply does not answer it with is read by its status', async()=>{
+        answer(json({code: 'liveDataSearch.upstreamFailure'}, 502), json({code: 'liveDataSearch.searchInProgress'}, 500));
         await expect(start({})).rejects.toMatchObject({code: 'live_data.service_failed', exit_code: 1});
-    });
-
-    it('a 502 without Reply\'s code is outcome.unknown', async()=>{
-        answer(json('bad gateway', 502));
         await expect(start({})).rejects.toMatchObject({code: 'outcome.unknown', exit_code: 3});
     });
 
-    it('a 200 without a searchId is outcome.unknown', async()=>{
-        answer(json({}));
-        await expect(start({})).rejects.toMatchObject({code: 'outcome.unknown', exit_code: 3});
+    it('a 404 is contact-list.not_found with Reply\'s detail naming the list, not a search that does not exist', async()=>{
+        answer(json({code: 'liveDataSearch.notFound', detail: 'List(s) not found or not accessible: 78.'}, 404));
+        await expect(start({listId: ['77', '78']})).rejects.toMatchObject({
+            code: 'contact-list.not_found', detail: 'List(s) not found or not accessible: 78.', exit_code: 1,
+        });
+    });
+
+    it('a 5xx without Reply\'s code, a lost answer, or a 2xx without a searchId is outcome.unknown (exit 3), posted once, and the '
+        + 'hint sends the reader to live-data list instead of saying a repeat is safe', async()=>{
+        for (const outcome of [()=>json('bad gateway', 502), ()=>json({}), 'lost'] as const)
+        {
+            mock_fetch.mockReset();
+            if (outcome === 'lost')
+            {
+                mock_fetch.mockRejectedValueOnce(lost_connection());
+            }
+            else
+            {
+                answer(outcome());
+            }
+            const e = await start({}).catch(x=>x);
+            expect(e, String(outcome)).toMatchObject({code: 'outcome.unknown', exit_code: 3});
+            expect(e.hint, String(outcome)).toContain('live-data list');
+            expect(e.hint, String(outcome)).not.toContain('safe to re-run');
+            expect(mock_fetch, String(outcome)).toHaveBeenCalledTimes(1);
+        }
     });
 
     it('filters that are not a JSON object are usage.filters before any call', async()=>{
@@ -121,12 +146,19 @@ describe('live-data pause', ()=>{
 });
 
 describe('live-data resume', ()=>{
-    it('answers resumed, or finished when Reply finished it', async()=>{
-        answer(json({id: 901, status: 'inProgress'}), json({id: 902, status: 'finished'}));
+    it('answers resumed for a running search, finished with Reply\'s status for an ended one, and any other status is '
+        + 'outcome.unknown', async()=>{
+        answer(json({id: 901, status: 'inProgress'}), json({id: 902, status: 'finished'}), json({id: 903, status: 'noMoreContacts'}),
+            json({id: 904, status: 'manuallyPaused'}));
         const resumed = await capture(()=>handle_live_data_resume('901', ctx(), {json: true}));
         const finished = await capture(()=>handle_live_data_resume('902', ctx(), {json: true}));
+        const ran_out = await capture(()=>handle_live_data_resume('903', ctx(), {json: true}));
         expect(JSON.parse(resumed.out)).toEqual({status: 'resumed', search_id: 901});
-        expect(JSON.parse(finished.out)).toEqual({status: 'finished', search_id: 902});
+        expect(JSON.parse(finished.out)).toEqual({status: 'finished', search_id: 902, search_status: 'finished'});
+        expect(JSON.parse(ran_out.out)).toEqual({status: 'finished', search_id: 903, search_status: 'noMoreContacts'});
+        await expect(handle_live_data_resume('904', ctx(), {})).rejects.toMatchObject({
+            code: 'outcome.unknown', exit_code: 3, ids: {search_id: 904},
+        });
         expect(sent()[0]).toMatchObject({method: 'POST', url: 'https://api/v3/live-data/searches/901/resume'});
     });
 

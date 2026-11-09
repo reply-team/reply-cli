@@ -55,4 +55,8 @@ const real_timers = (): void=>{
     vi.stubGlobal('setTimeout', real_set_timeout);
 };
 
-export {mock_fetch, json, ctx, sent, answer, capture, instant_timers, real_timers};
+// A send whose answer never came back: the connection dropped after the request went out.
+const lost_connection = ()=>Object.assign(new TypeError('fetch failed'),
+    {cause: Object.assign(new Error('ECONNRESET'), {code: 'ECONNRESET'})});
+
+export {mock_fetch, json, ctx, sent, answer, capture, instant_timers, real_timers, lost_connection};

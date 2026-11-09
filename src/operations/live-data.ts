@@ -10,12 +10,14 @@ import {parse_id, parse_int_in, parse_choice, LARGEST_REPLY_ID, type Op_globals}
 import {print_result, with_ids} from './result';
 import type {Cli_context} from '../context';
 
-const LIVE_DATA_CODES: Record<string, string> = {
-    'liveDataSearch.searchInProgress': 'live_data.search_in_progress',
-    'liveDataSearch.invalidStatus': 'live_data.invalid_status',
-    'liveDataSearch.insufficientCredits': 'live_data.insufficient_credits',
-    'liveDataSearch.contactLimitReached': 'live_data.contact_limit_reached',
-    'liveDataSearch.invalidParameter': 'live_data.invalid_filters',
+// Each code at the status Reply answers it with: a 5xx that happens to carry one stays an unknown outcome on a write.
+const LIVE_DATA_CODES: Record<string, {status: number; code: string}> = {
+    'liveDataSearch.searchInProgress': {status: 409, code: 'live_data.search_in_progress'},
+    'liveDataSearch.invalidStatus': {status: 409, code: 'live_data.invalid_status'},
+    'liveDataSearch.insufficientCredits': {status: 422, code: 'live_data.insufficient_credits'},
+    'liveDataSearch.contactLimitReached': {status: 422, code: 'live_data.contact_limit_reached'},
+    'liveDataSearch.invalidParameter': {status: 400, code: 'live_data.invalid_filters'},
+    'liveDataSearch.upstreamFailure': {status: 502, code: 'live_data.service_failed'},
 };
 
 const LIVE_DATA_TITLES: Record<string, string> = {
@@ -24,18 +26,19 @@ const LIVE_DATA_TITLES: Record<string, string> = {
     'live_data.invalid_status': 'The search is not in a status this applies to.',
     'live_data.insufficient_credits': 'The team does not have the credits for a single contact.',
     'live_data.contact_limit_reached': 'The search owner\'s plan has no room for another contact.',
-    'live_data.invalid_filters': 'Reply did not accept the filters.',
+    'live_data.invalid_filters': 'Reply did not accept the request, most often the filters; its detail names what.',
     'live_data.service_failed': 'Reply\'s search service failed; nothing changed, and the call can be made again.',
 };
 
-// Live Data's own refusals; any other answer reads as every operation reads it. Reply's 502 with its
-// own upstreamFailure code is definite, even on a write: Reply saved nothing, or kept the search as it was.
+// Live Data's own refusals; any other answer reads as every operation reads it. A 404 means "no such
+// search" only on a call that names one. Reply's 502 with its own upstreamFailure code is definite,
+// even on a write: Reply saved nothing, or kept the search as it was.
 const live_data_error = (a: Answer, kind: Call_kind, search_id?: number): Operation_error=>{
     const reply_code = reply_code_of(a);
-    const by_code = reply_code === undefined ? undefined : LIVE_DATA_CODES[reply_code];
-    const code = a.status === 404 ? 'live_data.not_found'
-        : a.status === 502 && reply_code?.endsWith('.upstreamFailure') ? 'live_data.service_failed'
-            : by_code;
+    const known = reply_code === undefined ? undefined : LIVE_DATA_CODES[reply_code];
+    const code = a.status === 404 && search_id !== undefined ? 'live_data.not_found'
+        : known?.status === a.status ? known.code
+            : undefined;
     if (code === undefined)
     {
         return refusal(a, kind);
@@ -91,7 +94,7 @@ const handle_live_data_start = async(opts: Start_opts, ctx: Cli_context, g: Op_g
     {
         throw new UsageError('No --count was given.', {code: 'usage.range', hint: 'The most people the search may add, e.g. --count 25.'});
     }
-    const body: Record<string, unknown> = {filters, contactsCountToAdd: parse_int_in(opts.count, '--count', 1, LARGEST_REPLY_ID, 0)};
+    const body: Record<string, unknown> = {filters, contactsCountToAdd: parse_int_in(opts.count, '--count', 1, LARGEST_REPLY_ID, 1)};
     if (opts.listId !== undefined && opts.listId.length > 0)
     {
         body.listIds = opts.listId.map(id=>parse_id(id, '--list-id'));
@@ -107,6 +110,12 @@ const handle_live_data_start = async(opts: Start_opts, ctx: Cli_context, g: Op_g
     const s = await open_session(ctx, g);
     try {
         const a = await call_reply(s, 'POST', '/v3/live-data/searches', 'write', body);
+        if (a.status === 404)
+        {
+            throw new Operation_error('contact-list.not_found', 'A list given with --list-id does not exist or is not accessible.', {
+                status: 404, reply_code: reply_code_of(a), detail: detail_of(a),
+            });
+        }
         if (a.status !== 200 && a.status !== 201)
         {
             throw live_data_error(a, 'write');
@@ -154,17 +163,22 @@ const handle_live_data_pause = async(id_arg: string, ctx: Cli_context, g: Op_glo
     print_result({status: 'paused', search_id: id}, g);
 };
 
-// Reply answers the search as it now holds it: running again, or finished when nothing was left to find.
+// Reply answers the search as it now holds it: running again, or ended because it already had everything asked
+// for. Any other status is not what a resume leaves behind.
+const RESUMED: Record<string, 'resumed' | 'finished'> = {inProgress: 'resumed', finished: 'finished', noMoreContacts: 'finished'};
+
 const handle_live_data_resume = async(id_arg: string, ctx: Cli_context, g: Op_globals): Promise<void>=>{
     const {id, result} = await act_on_search(id_arg, 'POST', '/resume', ctx, g, a=>{
         const status = expect_object(a, 'write').status;
-        if (typeof status !== 'string')
+        if (typeof status !== 'string' || RESUMED[status] === undefined)
         {
             throw unreadable(a, 'write');
         }
         return status;
     });
-    print_result({status: result === 'finished' ? 'finished' : 'resumed', search_id: id}, g);
+    print_result(RESUMED[result] === 'resumed'
+        ? {status: 'resumed', search_id: id}
+        : {status: 'finished', search_id: id, search_status: result}, g);
 };
 
 const handle_live_data_delete = async(id_arg: string, ctx: Cli_context, g: Op_globals): Promise<void>=>{

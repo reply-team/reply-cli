@@ -291,5 +291,5 @@ const create_client = (
         get<T>(base_url, token, endpoint, {...opts, headers: {...headers, ...opts?.headers}}),
 });
 
-export {request, get, request_raw, create_client, parse_retry_after};
+export {request, get, request_raw, create_client, parse_retry_after, sleep};
 export type {Request_opts, Client, Raw_response, Call_kind};

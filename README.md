@@ -199,7 +199,7 @@ prints JSON (indented; compact with `--json`) and says what happened in a stable
 | `reply contact-list create --name - [--shared]` | make an empty list of a name → `created` |
 | `reply contact-list get <list-id>` · `reply contact-list delete <list-id>` | the list as Reply holds it · → `deleted` |
 | `reply contact-list contacts <list-id> [--live-data-only] [--limit] [--offset]` | one page of the people on a list, oldest first |
-| `reply live-data preview (--filters … \| --job-id …) [--wait-seconds N]` | how many people and companies the filters match, and up to ten of them → `done` / `pending` |
+| `reply live-data preview (--filters … [--max-per-company N] \| --job-id …) [--wait-seconds N]` | how many people and companies the filters match, and up to ten of them → `done` / `pending` |
 | `reply live-data start --filters … --count N [--list-id N]… [--max-per-company N] [--with-phones]` | a search that adds the people it finds and puts them on the lists → `started` |
 | `reply live-data get <id>` · `reply live-data list` | a search's status and counts · the team's searches, newest first |
 | `reply live-data pause <id>` · `resume <id>` · `delete <id>` | → `paused` · `resumed` / `finished` · `deleted` |
@@ -485,11 +485,13 @@ the same filters, running or paused; the lists, the count, people per company an
 and searches with different filters run side by side. That refusal holds only while the first search
 is unfinished: one that already finished or was deleted no longer blocks, so after exit 3 a second
 `live-data start` may start, and charge for, a second search. Look in `live-data list` first, where a
-search shows its lists. `pause` applies to a running
+search shows its lists. A `--list-id` the account does not have or cannot reach is `contact-list.not_found`,
+and nothing starts. `pause` applies to a running
 search, `resume` to a paused one (`live_data.invalid_status` otherwise, Reply's detail naming the
 status), and a resume without the credits for one contact is `live_data.insufficient_credits`. A
 search paused by the plan's contact limit stays paused while its owner has no room for another
-contact: that resume is `live_data.contact_limit_reached`.
+contact: that resume is `live_data.contact_limit_reached`. A resume answers `finished`, with Reply's `search_status`,
+when the search already had everything it was asked for.
 `live_data.service_failed` is Reply's search service failing: nothing changed, and the call can be
 made again. Read a search's final counts before `live-data delete`: a deleted search answers
 `live_data.not_found`. The contacts it added stay.
