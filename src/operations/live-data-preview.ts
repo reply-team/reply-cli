@@ -20,13 +20,9 @@ type Preview_opts = {filters?: string; jobId?: string; maxPerCompany?: string; w
 const number_or_null = (v: unknown): number | null=>(typeof v === 'number' ? v : null);
 const string_or_null = (v: unknown): string | null=>(typeof v === 'string' ? v : null);
 
-// A field under its PascalCase name or its camelCase one.
-const field = (o: Record<string, unknown>, pascal: string): unknown=>
-    (pascal in o ? o[pascal] : o[pascal[0].toLowerCase() + pascal.slice(1)]);
-
-// INTERIM (API gap): a preview job's result is a JSON string with PascalCase keys, not an object in v3's casing.
-// Needed: jsonDataResult as an object, named as the rest of v3 names its fields.
-// Workaround: parse the string and rename the fields a preview answers; an object, in either casing, reads the same.
+// INTERIM (API gap): a preview job's result is a JSON string, not an object.
+// Needed: jsonDataResult as an object.
+// Workaround: parse the string; an object reads the same.
 const preview_result = (job: Record<string, unknown>, a: Answer): Record<string, unknown>=>{
     let result: unknown = job.jsonDataResult;
     if (typeof result === 'string')
@@ -41,19 +37,18 @@ const preview_result = (job: Record<string, unknown>, a: Answer): Record<string,
     {
         throw unreadable(a, 'read');
     }
-    const sample_list = field(result, 'SampleContacts');
-    const samples = Array.isArray(sample_list) ? sample_list.filter(is_object) : [];
+    const samples = Array.isArray(result.sampleContacts) ? result.sampleContacts.filter(is_object) : [];
     return {
-        contacts_count: number_or_null(field(result, 'ContactsCount')),
-        companies_count: number_or_null(field(result, 'CompaniesCount')),
+        contacts_count: number_or_null(result.contactsCount),
+        companies_count: number_or_null(result.companiesCount),
         sample_contacts: samples.map(c=>({
-            first_name: string_or_null(field(c, 'FirstName')),
-            last_name: string_or_null(field(c, 'LastName')),
-            job_title: string_or_null(field(c, 'JobTitle')),
-            location: string_or_null(field(c, 'Location')),
-            linkedin_url: string_or_null(field(c, 'LinkedInUrl')),
-            company_name: string_or_null(field(c, 'CompanyName')),
-            company_domain: string_or_null(field(c, 'CompanyDomain')),
+            first_name: string_or_null(c.firstName),
+            last_name: string_or_null(c.lastName),
+            job_title: string_or_null(c.jobTitle),
+            location: string_or_null(c.location),
+            linkedin_url: string_or_null(c.linkedInUrl),
+            company_name: string_or_null(c.companyName),
+            company_domain: string_or_null(c.companyDomain),
         })),
     };
 };

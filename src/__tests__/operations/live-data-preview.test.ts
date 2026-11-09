@@ -14,15 +14,16 @@ beforeEach(()=>{
 afterEach(()=>{ real_timers(); });
 
 describe('live-data preview', ()=>{
+    // The job as Reply's dev API answered it on 2026-11-09: the result a JSON string, its counts null
     it('starts, waits for the job and answers the counts and the samples in the CLI\'s names', async()=>{
         answer(json({jobId: J}, 202), job('Processing', {progress: 0.5}), job('Done', {jsonDataResult: JSON.stringify({
-            ContactsCount: 1200, CompaniesCount: 300, SampleContacts: [{
-                FirstName: 'Ann', LastName: 'Example', JobTitle: 'CTO', Location: 'Berlin',
-                LinkedInUrl: 'https://www.linkedin.com/in/ann-example', CompanyName: 'Example GmbH', CompanyDomain: 'example.com',
+            contactsCount: null, companiesCount: null, sampleContacts: [{
+                firstName: 'Ann', lastName: 'Example', jobTitle: 'CTO', location: 'Berlin',
+                linkedInUrl: 'https://www.linkedin.com/in/ann-example', companyName: 'Example GmbH', companyDomain: 'example.com',
             }],
         })}));
         const {out} = await capture(()=>preview({filters: FILTERS}));
-        expect(JSON.parse(out)).toEqual({status: 'done', job_id: J, contacts_count: 1200, companies_count: 300, sample_contacts: [{
+        expect(JSON.parse(out)).toEqual({status: 'done', job_id: J, contacts_count: null, companies_count: null, sample_contacts: [{
             first_name: 'Ann', last_name: 'Example', job_title: 'CTO', location: 'Berlin',
             linkedin_url: 'https://www.linkedin.com/in/ann-example', company_name: 'Example GmbH', company_domain: 'example.com',
         }]});
@@ -46,7 +47,7 @@ describe('live-data preview', ()=>{
     });
 
     it('--job-id goes on waiting for a preview already started, without starting one', async()=>{
-        answer(job('Done', {jsonDataResult: '{"ContactsCount":5,"CompaniesCount":2,"SampleContacts":[]}'}));
+        answer(job('Done', {jsonDataResult: '{"contactsCount":5,"companiesCount":2,"sampleContacts":[]}'}));
         const {out} = await capture(()=>preview({jobId: J}));
         expect(JSON.parse(out)).toMatchObject({status: 'done', contacts_count: 5});
         expect(sent().map(r=>r.url)).toEqual([`https://api/v3/background-jobs/${J}`]);
@@ -64,7 +65,7 @@ describe('live-data preview', ()=>{
         });
     });
 
-    it('a result given as an object in v3\'s casing, under a status in another case, reads the same', async()=>{
+    it('a result given as an object, under a status in another case, reads the same', async()=>{
         answer(job('done', {jsonDataResult: {contactsCount: 5, companiesCount: 2, sampleContacts: [{firstName: 'Ann', companyDomain: 'example.com'}]}}));
         const {out} = await capture(()=>preview({jobId: J}));
         expect(JSON.parse(out)).toEqual({status: 'done', job_id: J, contacts_count: 5, companies_count: 2, sample_contacts: [{
@@ -77,12 +78,6 @@ describe('live-data preview', ()=>{
         answer(job('Paused'));
         await expect(preview({jobId: J})).rejects.toMatchObject({code: 'reply.unavailable', details: {job_id: J}, exit_code: 1});
         expect(mock_fetch).toHaveBeenCalledTimes(1);
-    });
-
-    it('counts Reply did not give are null', async()=>{
-        answer(job('Done', {jsonDataResult: '{"SampleContacts":[]}'}));
-        const {out} = await capture(()=>preview({jobId: J}));
-        expect(JSON.parse(out)).toEqual({status: 'done', job_id: J, contacts_count: null, companies_count: null, sample_contacts: []});
     });
 
     it('a Done job whose result is not JSON is reply.unavailable with the job id', async()=>{

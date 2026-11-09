@@ -64,9 +64,9 @@ describe('live-data start', ()=>{
     });
 
     it('a 409 is live_data.search_in_progress with Reply\'s words', async()=>{
-        answer(json({code: 'liveDataSearch.searchInProgress', detail: 'A live data search is already in progress.'}, 409));
+        answer(json({code: 'liveDataSearch.searchInProgress', detail: 'Cannot start search with unfinished searches: 19465'}, 409));
         await expect(start({})).rejects.toMatchObject({
-            code: 'live_data.search_in_progress', detail: 'A live data search is already in progress.', exit_code: 1,
+            code: 'live_data.search_in_progress', detail: 'Cannot start search with unfinished searches: 19465', exit_code: 1,
         });
     });
 
