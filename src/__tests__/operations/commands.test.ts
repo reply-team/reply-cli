@@ -1,7 +1,7 @@
 import {describe, it, expect} from 'vitest';
 import type {Command} from 'commander';
 import {sequence_command, contact_list_command, contact_command, inbox_command, account_command, schedule_command,
-    direct_send_command} from '../../operations/commands';
+    direct_send_command, live_data_command} from '../../operations/commands';
 
 const sub = (parent: Command, name: string): Command=>{
     const found = parent.commands.find(c=>c.name() === name);
@@ -21,7 +21,9 @@ describe('operations/commands', ()=>{
     it('names the commands in Reply\'s words', ()=>{
         expect(sequence_command.commands.map(c=>c.name())).toEqual(
             ['list', 'create', 'get', 'contacts', 'stats', 'add-contact', 'remove-contact', 'pause', 'start']);
-        expect(contact_list_command.commands.map(c=>c.name())).toEqual(['add-contact']);
+        expect(contact_list_command.commands.map(c=>c.name())).toEqual(['create', 'get', 'delete', 'contacts', 'add-contact']);
+        expect(live_data_command.commands.map(c=>c.name())).toEqual(
+            ['preview', 'start', 'get', 'list', 'pause', 'resume', 'delete', 'filter-values']);
         expect(contact_command.commands.map(c=>c.name())).toEqual(['find', 'get', 'update', 'delete', 'opt-out',
             'send-email', 'linkedin-connect', 'linkedin-message', 'linkedin-inmail', 'linkedin-voice']);
         expect(inbox_command.commands.map(c=>c.name())).toEqual(['list', 'changes', 'get', 'reply', 'categories', 'categorize', 'mark-read', 'mark-unread']);

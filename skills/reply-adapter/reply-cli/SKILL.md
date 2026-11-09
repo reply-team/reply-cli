@@ -6,7 +6,7 @@ description: >
   Use when executing any Reply.io operation from a shell, setting up authentication,
   or when another Reply skill needs commands executed.
 metadata:
-  version: 1.3.1
+  version: 1.3.2
   pack: reply-adapter
   category: execution
   maturity: reviewed
@@ -145,10 +145,10 @@ exit codes with their error `code` slugs.
 - `Not authenticated` → run the auth setup above.
 - `TEAM_REQUIRED` / `TEAM_NOT_ACCESSIBLE` / `USER_REQUIRED` / `USER_NOT_FOUND` → see
   `reply-auth` skill; the CLI's stderr guidance shows the exact fix.
-- Discrete domain commands (e.g. `reply sequences list`) are **not available yet**. The command
-  groups are `auth`, `profile`, `team`, `api`, `skills` and `install` — nothing else exists.
-  Don't invent one: reach the operation through `reply api`, using the endpoint mapping in
-  `reply-operations-mapping`.
+- Work commands exist for the most common operations (`sequence`, `contact-list`, `live-data`,
+  `contact`, `inbox`, `account`, `schedule`, `direct-send`); `reply --help` lists them and each
+  command's `--help` gives its result and error codes. Don't invent one: reach any other operation
+  through `reply api`, using the endpoint mapping in `reply-operations-mapping`.
 
 ## Safety
 
@@ -165,6 +165,9 @@ explicit confirmation its Safety section requires.
 
 ## Changelog
 
+- 1.3.2 (2026-11-06): *Failure modes* no longer says the work commands don't exist: it names the groups
+  (`sequence`, `contact-list`, `live-data`, `contact`, `inbox`, `account`, `schedule`, `direct-send`) and
+  keeps `reply api` for every other operation.
 - 1.3.1 (2026-11-05): `reply api` says that a 429 naming a `reference` or saying a daily or weekly
   limit was reached is never resent and comes back at once as the refusal it is.
 - 1.3.0 (2026-08-10): said plainly that reaching the whole API is not reaching the whole job — the

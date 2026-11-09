@@ -8,7 +8,7 @@ description: >
   interpreting in business terms, or when you need to know whether Reply can do a thing at all
   before promising it to a user.
 metadata:
-  version: 2.3.0
+  version: 2.3.1
   pack: reply-adapter
   category: execution
   maturity: draft
@@ -261,10 +261,12 @@ them wrong:
    and the AI-SDR cluster are documented Beta or Coming soon. That belongs in the sentence where
    the user chooses the route, before they commit to it — not in a caveat after the work. Fetch
    the doc page and confirm the endpoint is callable, exactly as with any other surface.
-3. **One Live Data search runs per team at a time.** This is a Reply fact and it belongs nowhere
-   else. An agent that does not know it will plan several searches in parallel and stall, or read
-   the refusal as a failure and retry it. Plan searches in series, and if one is already running,
-   the honest report is that the queue is occupied and by what.
+3. **One unfinished search per filter set.** Reply refuses a start while an unfinished search of
+   the same team has the same filters, running or paused; searches with different filters run side
+   by side, and the target lists don't count. This is a Reply fact and it belongs nowhere else. An
+   agent that does not know it will read the refusal as a failure and retry it. Before running the
+   same filters again, finish the earlier search: resume it, or delete it once its final counts
+   are read.
 
 Build the filter from the typeahead values — departments, industries, job titles, locations,
 seniorities — rather than guessing accepted ones. Check the existing searches before starting a
@@ -388,7 +390,8 @@ says — never let it disappear from the report because nothing was called.
   what *this credential* may do is `capability.list`, and here that is answered by an
   `insufficient_scope` refusal rather than by a listing.
 - **Parallelising measurement** reads and hitting `429`, then retrying harder.
-- **Planning two Live Data searches at once.** One runs per team at a time; the second stalls.
+- **Running the same Live Data filters twice at once.** The second start is refused while the first
+  search is unfinished, running or paused; searches with different filters run side by side.
 - **Starting a Live Data search without previewing it.** Start spends the user's allowance; the
   mistake is only visible once it is already paid for.
 - **Presenting a beta surface as settled**, or a *coming soon* one as callable. Contact enrichment
@@ -424,6 +427,9 @@ those as irreversible with no window and say so before acting rather than after.
 
 ## Changelog
 
+- 2.3.1 (2026-11-06): Live Data's limit stated as Reply enforces it: one unfinished search per filter
+  set, not one per team; searches with different filters run side by side, and finishing the earlier
+  search (resume it, or delete it once its final counts are read) frees its filters.
 - 2.3.0 (2026-10-30): `message.send` in the fulfilment register says that a message composed as a
   template goes by the same command and that Reply fills it in, before anything goes or when it
   goes, and points to reply-api's *Templates* for the rest.
