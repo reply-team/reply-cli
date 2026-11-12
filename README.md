@@ -549,7 +549,11 @@ reply account pending
 `--daily` and `--set '{"minSendingDelaySeconds":90}'` change, and a LinkedIn account's `limits`,
 which `--set` changes as Reply's limits update does. `account pause` and `account resume` act on a
 LinkedIn account; Reply's only call flips the state, so it is read first and left alone when it is
-already the one asked for. Reply has no way to pause a mailbox through its API. `account delete`
+already the one asked for. The flip turns an enabled account off and any other on, so `pause` flips
+only an enabled account and `resume` only a disabled one. An account at its daily limit is active:
+`resume` leaves it alone, and `pause` refuses it with `account.pause_unavailable` before any write. A
+state the CLI does not know is refused with `account.status_unknown`, also before any write. Reply
+has no way to pause a mailbox through its API. `account delete`
 needs `--yes`, and `--force` deletes a LinkedIn account sequences still use. Reply's refusals come
 under the CLI's codes, as every work command's do (`linkedin.account_in_use`, `email_account.not_found`,
 `linkedin.invalid_cookie`), with Reply's own code in `reply_code`. After exit 3 from `account connect` or `account reconnect`, read

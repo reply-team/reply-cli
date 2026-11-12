@@ -750,7 +750,10 @@ account_command.command('limits')
 
 const PAUSE_RESUME = 'Result: {"channel","id","status","reply_status","changed"}: status is active or inactive, reply_status Reply\'s own\n'
     + 'word, and changed whether a call was made. Reply\'s only call flips the state, so the state is read first and an\n'
-    + 'account already in the state asked for is left alone. A LinkedIn account at its daily limit is active.\n'
+    + 'account already in the state asked for is left alone. The flip turns an enabled account off and any other on, so\n'
+    + 'pause flips only an enabled account and resume only a disabled one. A LinkedIn account at its daily limit is\n'
+    + 'active: resume leaves it alone, and pause refuses it before any write (account.pause_unavailable).\n'
+    + 'account.status_unknown: Reply gave a state the CLI does not know; nothing was changed.\n'
     + 'linkedin.invalid_cookie: the account\'s session is no longer valid; reconnect it first. account.status_changed: the\n'
     + 'state changed between the read and the call; read it again. Reply has no way to pause a mailbox through its API, so\n'
     + '--channel email is refused (usage.unsupported); a mailbox its provider stopped from sending is `account unblock`.\n';
@@ -760,7 +763,8 @@ account_command.command('pause')
     .option('--channel <channel>', 'linkedin (required; email has no pause)')
     .description('Stop a LinkedIn account\'s automation until it is resumed')
     .addHelpText('after', help([ex('account pause 34 --channel linkedin')],
-        ['linkedin.account_not_found', 'linkedin.invalid_cookie', 'account.status_changed', 'account.status_unknown'], true, PAUSE_RESUME))
+        ['linkedin.account_not_found', 'linkedin.invalid_cookie', 'account.pause_unavailable', 'account.status_changed', 'account.status_unknown'],
+        true, PAUSE_RESUME))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
         await handle_account_pause(cmd.args[0], cmd.opts(), ctx, g);

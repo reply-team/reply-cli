@@ -103,6 +103,66 @@ describe('account pause and resume', ()=>{
         expect(sent()).toHaveLength(1);
     });
 
+    // Reply's toggle turns enabled off and any other state on, so each verb may call it from one state only.
+    const TOGGLE = ['POST', 'https://api/v3/linkedin-accounts/34/toggle-status'];
+    const toggles = ()=>sent().filter(r=>r.method === TOGGLE[0] && r.url === TOGGLE[1]).length;
+
+    it('pause, from each state Reply gives: one toggle from enabled, and none from any other', async()=>{
+        const cases: [string, Record<string, unknown>][] = [
+            ['enabled', {status: 'inactive', reply_status: 'disabled', changed: true}],
+            ['disabled', {status: 'inactive', reply_status: 'disabled', changed: false}],
+            ['cookieInvalid', {code: 'linkedin.invalid_cookie'}],
+            ['dailyLimitReached', {code: 'account.pause_unavailable', details: {reply_status: 'dailyLimitReached'}}],
+        ];
+        for (const [status, expected] of cases)
+        {
+            mock_fetch.mockReset();
+            answer(json(linkedin({status})), json({status: 'disabled'}));
+            const outcome = await run(g=>handle_account_pause('34', {channel: 'linkedin'}, ctx(), g)).then(r=>r.result, (e: unknown)=>e);
+            expect(outcome, status).toMatchObject(expected);
+            expect(toggles(), status).toBe(status === 'enabled' ? 1 : 0);
+        }
+    });
+
+    it('pause at the daily limit is refused before any write, never toggled on and then reported as changed by someone else', async()=>{
+        answer(json(linkedin({status: 'dailyLimitReached'})), json({status: 'enabled'}));
+        const e = await fails(()=>handle_account_pause('34', {channel: 'linkedin'}, ctx(), {}));
+        expect(e).toMatchObject({code: 'account.pause_unavailable', status: 200, exit_code: 1, details: {reply_status: 'dailyLimitReached'},
+            title: 'Reply cannot pause the LinkedIn account from its state \'dailyLimitReached\', so nothing was changed.'});
+        expect(sent().map(r=>[r.method, r.url])).toEqual([['GET', 'https://api/v3/linkedin-accounts/34']]);
+    });
+
+    it('resume, from each state Reply gives: one toggle from disabled, and none from any other', async()=>{
+        const cases: [string, Record<string, unknown>][] = [
+            ['enabled', {status: 'active', reply_status: 'enabled', changed: false}],
+            ['disabled', {status: 'active', reply_status: 'enabled', changed: true}],
+            ['cookieInvalid', {code: 'linkedin.invalid_cookie'}],
+            ['dailyLimitReached', {status: 'active', reply_status: 'dailyLimitReached', changed: false}],
+        ];
+        for (const [status, expected] of cases)
+        {
+            mock_fetch.mockReset();
+            answer(json(linkedin({status})), json({status: 'enabled'}));
+            const outcome = await run(g=>handle_account_resume('34', {channel: 'linkedin'}, ctx(), g)).then(r=>r.result, (e: unknown)=>e);
+            expect(outcome, status).toMatchObject(expected);
+            expect(toggles(), status).toBe(status === 'disabled' ? 1 : 0);
+        }
+    });
+
+    it('a state the CLI does not know, or none it can read, is status_unknown for both verbs, before any write', async()=>{
+        for (const status of ['suspended', 'Enabled', 'paused', '', 7, null])
+        {
+            for (const verb of [handle_account_pause, handle_account_resume])
+            {
+                mock_fetch.mockReset();
+                answer(json(linkedin({status})), json({status: 'enabled'}));
+                expect(await fails(()=>verb('34', {channel: 'linkedin'}, ctx(), {})), String(status))
+                    .toMatchObject({code: 'account.status_unknown', details: {reply_status: typeof status === 'string' ? status : null}});
+                expect(toggles(), String(status)).toBe(0);
+            }
+        }
+    });
+
     it('refuse a disconnected account, a state the CLI does not know, and a flip that went the other way', async()=>{
         answer(json(linkedin({status: 'cookieInvalid'})));
         expect(await fails(()=>handle_account_resume('34', {channel: 'linkedin'}, ctx(), {})))

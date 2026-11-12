@@ -121,11 +121,15 @@ const linkedin_only = (channel: Account_channel, verb: 'pause' | 'resume'): void
     }
 };
 
-const status_word = (v: unknown): Account_status=>
-    (typeof v === 'string' && Object.prototype.hasOwnProperty.call(LINKEDIN_STATUSES, v) ? LINKEDIN_STATUSES[v] : 'other');
+const is_known_status = (v: unknown): v is string=>typeof v === 'string' && Object.prototype.hasOwnProperty.call(LINKEDIN_STATUSES, v);
 
-// Reply's only call flips the state, so the state is read first and the call made only when it is not
-// already the one asked for.
+const status_word = (v: unknown): Account_status=>(is_known_status(v) ? LINKEDIN_STATUSES[v] : 'other');
+
+// Reply's only call flips the state: enabled becomes disabled, and every other state becomes enabled. So
+// each verb makes it from the one state it moves the right way, and from no other.
+const TOGGLES_FROM = {pause: 'enabled', resume: 'disabled'} as const;
+
+// The state is read first, and the call made only when the account is in the state the flip starts from.
 const set_linkedin_state = async(id_arg: string, opts: {channel?: string}, verb: 'pause' | 'resume', ctx: Cli_context, g: Op_globals)=>{
     const channel = require_channel(opts.channel);
     linkedin_only(channel, verb);
@@ -133,22 +137,33 @@ const set_linkedin_state = async(id_arg: string, opts: {channel?: string}, verb:
     const wanted: Account_status = verb === 'pause' ? 'inactive' : 'active';
     const s = await open_session(ctx, g);
     const account = await read_linkedin_account(s, g, id);
-    const before = status_word(account.status);
-    if (account.status === 'cookieInvalid')
+    const reply_status = account.status;
+    if (reply_status === 'cookieInvalid')
     {
         throw new Operation_error('linkedin.invalid_cookie', `The LinkedIn account's session is no longer valid, so it cannot be ${verb}d.`, {
             status: 200, hint: `Reconnect it first: account reconnect ${id} --channel linkedin.`,
         });
     }
-    if (before === wanted)
-    {
-        print_result({channel, id, status: before, reply_status: account.status, changed: false}, g);
-        return;
-    }
-    if (before !== 'active' && before !== 'inactive')
+    // Whether the flip would move a state the CLI does not know the right way cannot be told, so it is never made.
+    if (!is_known_status(reply_status))
     {
         throw new Operation_error('account.status_unknown', 'Reply gave the LinkedIn account a state the CLI does not know, so nothing was changed.', {
-            status: 200, details: {reply_status: typeof account.status === 'string' ? account.status : null},
+            status: 200, details: {reply_status: typeof reply_status === 'string' ? reply_status : null},
+        });
+    }
+    const before = LINKEDIN_STATUSES[reply_status];
+    if (before === wanted)
+    {
+        print_result({channel, id, status: before, reply_status, changed: false}, g);
+        return;
+    }
+    // A known state that is neither the one asked for nor the one the flip starts from. At its daily limit an
+    // account is active, and the flip would turn it on, not off. Only pause reaches this with today's states.
+    if (reply_status !== TOGGLES_FROM[verb])
+    {
+        throw new Operation_error(`account.${verb}_unavailable`, `Reply cannot ${verb} the LinkedIn account from its state '${reply_status}', so nothing was changed.`, {
+            status: 200, details: {reply_status},
+            hint: `It can be ${verb}d once its state is ${TOGGLES_FROM[verb]}; \`account list --channel linkedin\` reads it.`,
         });
     }
     const a = await account_call(s, g, 'POST', `/v3/linkedin-accounts/${id}/toggle-status`, 'write');
