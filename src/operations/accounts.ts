@@ -1,4 +1,4 @@
-import {Operation_error} from '../utils/errors';
+import {Operation_error, UsageError} from '../utils/errors';
 import {call_reply, read_page, refusal, unreadable, is_object, open_session, type Op_session} from './call';
 import {parse_choice, type Op_globals} from './options';
 import {print_result} from './result';
@@ -18,6 +18,16 @@ type Account = {
 const EMAIL_STATUSES: Record<string, Account_status> = {connected: 'active', disconnected: 'disconnected', unknown: 'other'};
 const LINKEDIN_STATUSES: Record<string, Account_status> = {
     enabled: 'active', disabled: 'inactive', cookieInvalid: 'disconnected', dailyLimitReached: 'active',
+};
+
+// --channel, where a command acts differently by channel and so cannot guess one.
+const require_channel = (raw: string | undefined): Account_channel=>{
+    const channel = parse_choice(raw, '--channel', ACCOUNT_CHANNELS);
+    if (channel === undefined)
+    {
+        throw new UsageError('--channel is required: email or linkedin.', {code: 'usage.channel'});
+    }
+    return channel;
 };
 
 const PAGE = 1000;          // the most Reply gives in one page of email accounts
@@ -91,4 +101,5 @@ const handle_account_list = async(opts: {channel?: string}, ctx: Cli_context, g:
     print_result({items}, g);
 };
 
-export {handle_account_list};
+export {handle_account_list, require_channel, ACCOUNT_CHANNELS, LINKEDIN_STATUSES};
+export type {Account_channel, Account_status};

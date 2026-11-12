@@ -39,7 +39,7 @@ const build_program = (): Command=>{
         .option('--user-email <email>', 'Act as this user email — organization API keys only (needs a team id)')
         .option('--json', 'Output compact JSON to stdout')
         .option('--pretty', 'Output indented JSON to stdout')
-        .option('--verbose', 'Print the full request/response to stderr, credentials redacted (api)')
+        .option('--verbose', 'Print the full request/response to stderr, credentials and links redacted (api, account)')
         .option('-q, --quiet', 'Suppress progress messages on stderr (warnings and errors still shown)')
         .showHelpAfterError();
 

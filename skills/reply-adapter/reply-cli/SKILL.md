@@ -6,7 +6,7 @@ description: >
   Use when executing any Reply.io operation from a shell, setting up authentication,
   or when another Reply skill needs commands executed.
 metadata:
-  version: 1.3.2
+  version: 1.4.0
   pack: reply-adapter
   category: execution
   maturity: reviewed
@@ -149,6 +149,12 @@ exit codes with their error `code` slugs.
   `contact`, `inbox`, `account`, `schedule`, `direct-send`); `reply --help` lists them and each
   command's `--help` gives its result and error codes. Don't invent one: reach any other operation
   through `reply api`, using the endpoint mapping in `reply-operations-mapping`.
+- `reply account connect` and `reply account reconnect` print a link for the person who signs in to
+  the account to open. The link is a credential: it is in the stdout field `link` once and nowhere
+  else (a `--verbose` trace shows `<link redacted>`). Hand it to that person and do not store, log
+  or repeat it. `email_link.not_available` means this Reply has no one-mailbox email link yet; pass
+  `--allow-shared-page` only when the user accepts the hosted mailbox page, whose address does not
+  expire and lets its holder manage all of that user's mailboxes, deletion included.
 
 ## Safety
 
@@ -165,6 +171,8 @@ explicit confirmation its Safety section requires.
 
 ## Changelog
 
+- 1.4.0 (2026-11-11): *Failure modes* says how to treat the link `account connect` and `account
+  reconnect` print, and when `--allow-shared-page` is right.
 - 1.3.2 (2026-11-06): *Failure modes* no longer says the work commands don't exist: it names the groups
   (`sequence`, `contact-list`, `live-data`, `contact`, `inbox`, `account`, `schedule`, `direct-send`) and
   keeps `reply api` for every other operation.
