@@ -226,6 +226,13 @@ prints JSON (indented; compact with `--json`) and says what happened in a stable
 | `reply inbox mark-read <thread-id>` · `reply inbox mark-unread <thread-id>` | → `read` / `unread` |
 | `reply account list [--channel email\|linkedin]` | the email and LinkedIn accounts a send can go from, whose each is, and the state of each |
 | `reply schedule list` | the sending schedules the account can use, each with its time zone and its windows by weekday |
+| `reply account connect --channel email --provider gmail\|office365 [--name N]` · `--channel linkedin --name N` | a link that connects one new account, for the person who signs in to open → `link`, `expires_at`, `pending_id` |
+| `reply account reconnect <id> --channel email\|linkedin` | a link that reconnects an account that lost its connection → `link` |
+| `reply account pending [--channel email\|linkedin]` | the connection links made and not used yet, without the links |
+| `reply account limits <id> --channel email\|linkedin [--daily N] [--set …]` | read an account's sending limits, or change some of them |
+| `reply account pause <id> --channel linkedin` · `resume <id> --channel linkedin` | → `inactive` / `active`, toggled only when it is not already so |
+| `reply account unblock <id>` | let a mailbox its provider stopped from sending pick its sequences back up → `unblocked` |
+| `reply account delete <id> --channel email\|linkedin --yes [--force]` | → `deleted`; without `--yes` nothing is sent |
 
 `<contact>` is exactly one of `--contact <json>|@file|-`, `--email <address>` (with `--first-name`,
 `--last-name`, `--company`, `--title`), or `--contact-id <id>`. The JSON takes the same fields
@@ -511,6 +518,42 @@ For `inbox reply`, read the thread with `reply inbox get` before trying again. F
 `sequence create`, Reply allows two sequences of one name, so after exit 3 look the name up with
 `sequence list --name -` first. Every other work command can simply be run again; a `contact delete`
 repeated after its first one took effect answers `contact.not_found`.
+
+**Connecting accounts.** `account connect` and `account reconnect` print a link for the person who
+signs in to the account: they open it in a browser and sign in on Google's, Microsoft's or LinkedIn's
+own page, so no password passes through the CLI. The link is a credential for whoever holds it. It is
+printed once, in the stdout field `link`, and never on stderr, in a `--verbose` trace (where it reads
+`<link redacted>`), in an error or in a log. A connection link connects one account, works once and
+expires, and the attempt is listed by `account pending` until the person finishes; then the account
+is in `account list`. An email link needs `--provider`; a reconnect takes the provider from the
+mailbox, and the person must sign in with the same address. A LinkedIn connect needs `--name`, which
+Reply lists the pending account under.
+
+A Reply without one-mailbox email links answers that route with a 404 and no code. The email
+commands then refuse with `email_link.not_available` (exit 1) and print nothing, unless
+`--allow-shared-page` is given: then they print the account user's hosted mailbox page, the
+provider's connect on it with `--provider` and its index without, with `"link_kind":"shared_page"`,
+`"expires_at":null` and a `warning`. That address does not expire and lets its holder manage all of
+this user's mailboxes, deletion included, so ask for it only when that is acceptable.
+`sharedPage.notEnabled` means the plan does not include hosted pages. `account pending` then lists
+no email entries and answers `"supported":false` with `"unsupported_channels":["email"]`.
+
+```sh
+reply account connect --channel email --provider gmail --name "Sales mailbox"
+reply account connect --channel linkedin --name "Dana Example"
+reply account reconnect 34 --channel linkedin
+reply account pending
+```
+
+`account limits` prints the limits in Reply's names: an email account's `safety` section, which
+`--daily` and `--set '{"minSendingDelaySeconds":90}'` change, and a LinkedIn account's `limits`,
+which `--set` changes as Reply's limits update does. `account pause` and `account resume` act on a
+LinkedIn account; Reply's only call flips the state, so it is read first and left alone when it is
+already the one asked for. Reply has no way to pause a mailbox through its API. `account delete`
+needs `--yes`, and `--force` deletes a LinkedIn account sequences still use. A refusal Reply gives a
+code to carries that code as the error's `code`, as Reply gave it (`linkedInAccount.accountInUse`,
+`emailAccount.notFound`). After exit 3 from `account connect` or `account reconnect`, read
+`account pending` before running it again: a link may already have been made.
 
 **Errors.** With `--json`, a failure is one line on stderr:
 `{"error":{"code":"contact.opted_out","title":…,"status":…,"reply_code":…,"ids":{…}}}`. `ids` is

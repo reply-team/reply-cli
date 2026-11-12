@@ -1,4 +1,4 @@
-import {request_raw, parse_retry_after, type Call_kind} from '../utils/client';
+import {request_raw, parse_retry_after, type Call_kind, type Raw_response} from '../utils/client';
 import {Operation_error, RuntimeError, Unknown_outcome_error} from '../utils/errors';
 import {team_error_guidance} from '../teams';
 import {authed} from '../commands/authed';
@@ -6,7 +6,8 @@ import {LARGEST_REPLY_ID, type Op_globals} from './options';
 import type {Cli_context} from '../context';
 
 type Op_session = {api_base: string; token: string; headers: Record<string, string>};
-type Answer = {status: number; data: unknown; headers: Record<string, string>};
+// `request` is the request as sent, its credential already redacted, for a --verbose trace.
+type Answer = {status: number; data: unknown; headers: Record<string, string>; request?: Raw_response['request']};
 type Item_failure = {error: string | null; details: string | null};
 
 const open_session = async(ctx: Cli_context, g: Op_globals): Promise<Op_session>=>{
@@ -44,7 +45,7 @@ const call_reply = async(
 ): Promise<Answer>=>{
     try {
         const r = await request_raw(s.api_base, s.token, method, path, body, {headers: {...s.headers, ...headers}, kind});
-        return {status: r.status, data: r.data, headers: r.response_headers};
+        return {status: r.status, data: r.data, headers: r.response_headers, request: r.request};
     } catch (e) {
         if (e instanceof RuntimeError)
         {

@@ -19,6 +19,8 @@ import {handle_contact_opt_out} from './contact';
 import {handle_contact_find, handle_contact_get, handle_contact_update, handle_contact_delete} from './contact-record';
 import {handle_direct_send, type Direct_send_name} from './direct-send';
 import {handle_account_list} from './accounts';
+import {handle_account_connect, handle_account_reconnect, handle_account_pending} from './account-links';
+import {handle_account_limits, handle_account_pause, handle_account_resume, handle_account_unblock, handle_account_delete} from './account-manage';
 import {handle_schedule_list} from './schedules';
 import {handle_direct_send_get, handle_direct_send_cancel} from './direct-sends';
 import {
@@ -632,7 +634,8 @@ inbox_command.command('mark-unread')
         await handle_inbox_mark_unread(cmd.args[0], ctx, g);
     }));
 
-const account_command = new Command('account').description('List the email and LinkedIn accounts a send can go from');
+const account_command = new Command('account')
+    .description('List, connect, reconnect, limit, pause, resume, unblock or delete the email and LinkedIn accounts a send can go from');
 
 account_command.command('list')
     .option('--channel <channel>', 'email | linkedin: only the accounts of this channel')
@@ -649,6 +652,159 @@ account_command.command('list')
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
         await handle_account_list(cmd.opts(), ctx, g);
+    }));
+
+// What every link command says of the link it prints.
+const LINK_RULE = 'The link is a credential for whoever opens it: it is printed once, in "link", and never on stderr, in a --verbose\n'
+    + 'trace (where it reads <link redacted>), in an error or in a log. Hand it to the person who signs in, and do not keep it.\n';
+
+const ACCOUNT_REFUSALS = 'A refusal Reply gives a code to carries that code as the error\'s code, as Reply gave it (e.g.\n'
+    + 'linkedInAccount.notFound, emailAccount.notFound); one without a code is read like any other command\'s.\n';
+
+const SHARED_PAGE = '--allow-shared-page: on a Reply without one-mailbox email links (its route answers 404 with no code), print the\n'
+    + 'account user\'s hosted mailbox page instead, with "link_kind":"shared_page", "expires_at":null and a "warning". That\n'
+    + 'address does not expire and lets its holder manage all of this user\'s mailboxes, deletion included. With --provider it\n'
+    + 'is that provider\'s connect on the hosted page; without, the hosted index. Without the flag such a Reply is refused,\n'
+    + 'email_link.not_available, and nothing is printed. sharedPage.notEnabled: the plan does not include hosted pages.\n';
+
+account_command.command('connect')
+    .option('--channel <channel>', 'email | linkedin (required)')
+    .option('--provider <provider>', 'gmail | office365: the mailbox\'s provider (email; required unless --allow-shared-page)')
+    .option('--name <name>', 'A label for the pending entry (required for LinkedIn; up to 100 characters for email)')
+    .option('--allow-shared-page', 'Email: on a Reply without one-mailbox links, print the hosted mailbox page instead')
+    .description('Make a link that connects one new account, for the person who signs in to it to open')
+    .addHelpText('after', help([ex('account connect --channel email --provider gmail --name "Sales mailbox"'),
+        ex('account connect --channel linkedin --name "Dana Example"')],
+    ['email_link.not_available', 'email_link.provider_required', 'sharedPage.notEnabled', 'emailAccount.limitReached',
+        'emailAccount.noFreeMailboxSlots', 'linkedInAccount.limitReached'], true,
+    'Result: {"channel","link","expires_at","pending_id","kind":"connect","link_kind":"connection_link"|"shared_page"}.\n'
+        + 'A connection link connects exactly one account, works once and expires: an email link after 7 days, at expires_at; a\n'
+        + 'LinkedIn link\'s expiry is not in Reply\'s answer, so expires_at is null there and `account pending` reads it.\n'
+        + 'pending_id is the entry `account pending` lists until the person finishes. Then the account is in `account list`.\n'
+        + 'Without --provider, an email link is a usage error unless --allow-shared-page is given; then a Reply with one-mailbox\n'
+        + 'links answers email_link.provider_required, and one without them gives the hosted index.\n'
+        + LINK_RULE + SHARED_PAGE + ACCOUNT_REFUSALS,
+    'the link may have been made; it is listed by `account pending`'))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_account_connect(cmd.opts(), ctx, g);
+    }));
+
+account_command.command('reconnect')
+    .argument('<id>', 'The account\'s id, as `account list` gives it')
+    .option('--channel <channel>', 'email | linkedin (required)')
+    .option('--provider <provider>', 'gmail | office365: with --allow-shared-page, which provider\'s hosted connect to print')
+    .option('--allow-shared-page', 'Email: on a Reply without one-mailbox links, print the hosted mailbox page instead')
+    .description('Make a link that reconnects one account that lost its connection, for the person who signs in to it to open')
+    .addHelpText('after', help([ex('account reconnect 12 --channel email'), ex('account reconnect 34 --channel linkedin')],
+        ['email_link.not_available', 'sharedPage.notEnabled', 'emailAccount.notFound', 'emailAccount.reconnectNotSupported',
+            'linkedInAccount.notFound'], true,
+        'Result: {"channel","id","link","expires_at","pending_id","kind":"reconnect","link_kind"}. An email link reconnects\n'
+            + 'only the user\'s own Gmail or Office 365 mailbox, and the person must sign in with the same address; Reply takes\n'
+            + 'the provider from the mailbox. A LinkedIn link has no pending entry and no expiry in Reply\'s answer, so\n'
+            + 'pending_id and expires_at are null; the account\'s status in `account list` says when it is connected again.\n'
+            + 'On the shared page a mailbox is reconnected by connecting the same address again.\n'
+            + LINK_RULE + SHARED_PAGE + ACCOUNT_REFUSALS,
+        'a link may have been made'))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_account_reconnect(cmd.args[0], cmd.opts(), ctx, g);
+    }));
+
+account_command.command('pending')
+    .option('--channel <channel>', 'email | linkedin: only this channel\'s entries')
+    .description('The connection links made and not used yet, recently expired ones included')
+    .addHelpText('after', help([ex('account pending'), ex('account pending --channel linkedin')], [], false,
+        'Result: {"items":[{"channel","id","name","kind","account_id","expires_at","expired"}],"supported",\n'
+            + '"unsupported_channels"}. kind is connect or reconnect, and account_id the email account a reconnect is for (null\n'
+            + 'otherwise). The links themselves are never printed: Reply shows an email link only once, and a LinkedIn one is\n'
+            + 'dropped from the answer. A Reply without one-mailbox email links has no email entries to list: supported is then\n'
+            + 'false and unsupported_channels names email. An entry leaves the list once the person finishes.\n'
+            + ACCOUNT_REFUSALS))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_account_pending(cmd.opts(), ctx, g);
+    }));
+
+account_command.command('limits')
+    .argument('<id>', 'The account\'s id, as `account list` gives it')
+    .option('--channel <channel>', 'email | linkedin (required)')
+    .option('--daily <n>', 'Email: the most emails the mailbox sends in a day')
+    .option('--set <json>', 'The limits to change, in Reply\'s names: inline JSON, @file, or - for stdin')
+    .description('Read an account\'s sending limits, or change some of them')
+    .addHelpText('after', help([ex('account limits 12 --channel email'), ex('account limits 12 --channel email --daily 200'),
+        `${P} account limits 34 --channel linkedin --set '{"fixedMax":{"dailySendMessageCount":50}}'`],
+    ['emailAccount.notFound', 'linkedInAccount.notFound', 'linkedInAccount.invalidInput'], true,
+    'Result: {"channel","id","limits"}: the limits as Reply holds them afterwards, in Reply\'s names. For email they are the\n'
+        + 'safety section (dailyLimit, isEmailsThrottlingEnabled, emailsPerInterval, emailsThrottlingSecondsInterval,\n'
+        + 'isSendingDelayEnabled, minSendingDelaySeconds, maxSendingDelaySeconds), and --set takes those fields. For LinkedIn\n'
+        + 'they are the account\'s limits (limitsMode, rangeMin, rangeMax, fixedMax, actionDelayMinSeconds,\n'
+        + 'actionDelayMaxSeconds), and --set takes them as Reply\'s limits update does: a field left out keeps its value.\n'
+        + 'Without --daily or --set the limits are only read. Reply caps a value above what the plan allows. When a LinkedIn\n'
+        + 'change is saved and reading it back fails, limits is null and stderr says so.\n'
+        + ACCOUNT_REFUSALS))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_account_limits(cmd.args[0], cmd.opts(), ctx, g);
+    }));
+
+const PAUSE_RESUME = 'Result: {"channel","id","status","reply_status","changed"}: status is active or inactive, reply_status Reply\'s own\n'
+    + 'word, and changed whether a call was made. Reply\'s only call flips the state, so the state is read first and an\n'
+    + 'account already in the state asked for is left alone. A LinkedIn account at its daily limit is active.\n'
+    + 'linkedInAccount.cookieInvalid: the account is disconnected and must be reconnected first. account.status_changed: the\n'
+    + 'state changed between the read and the call; read it again. Reply has no way to pause a mailbox through its API, so\n'
+    + '--channel email is refused (usage.unsupported); a mailbox its provider stopped from sending is `account unblock`.\n';
+
+account_command.command('pause')
+    .argument('<id>', 'The LinkedIn account\'s id')
+    .option('--channel <channel>', 'linkedin (required; email has no pause)')
+    .description('Stop a LinkedIn account\'s automation until it is resumed')
+    .addHelpText('after', help([ex('account pause 34 --channel linkedin')],
+        ['linkedInAccount.notFound', 'linkedInAccount.cookieInvalid', 'account.status_changed', 'account.status_unknown'], true, PAUSE_RESUME))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_account_pause(cmd.args[0], cmd.opts(), ctx, g);
+    }));
+
+account_command.command('resume')
+    .argument('<id>', 'The LinkedIn account\'s id')
+    .option('--channel <channel>', 'linkedin (required; email has no pause)')
+    .description('Start a paused LinkedIn account\'s automation again')
+    .addHelpText('after', help([ex('account resume 34 --channel linkedin')],
+        ['linkedInAccount.notFound', 'linkedInAccount.cookieInvalid', 'account.status_changed', 'account.status_unknown'], true, PAUSE_RESUME))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_account_resume(cmd.args[0], cmd.opts(), ctx, g);
+    }));
+
+account_command.command('unblock')
+    .argument('<id>', 'The email account\'s id')
+    .description('Let a mailbox its provider stopped from sending pick its sequences back up')
+    .addHelpText('after', help([ex('account unblock 12')], ['emailAccount.notFound', 'emailAccount.invalidInput'], true,
+        'Result: {"channel":"email","id","unblocked":true}. It clears the block Reply recorded when the provider refused to send\n'
+            + '(sendingLockedByProvider on the account); it does not reconnect a mailbox that lost its connection.\n'
+            + ACCOUNT_REFUSALS))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_account_unblock(cmd.args[0], ctx, g);
+    }));
+
+account_command.command('delete')
+    .argument('<id>', 'The account\'s id, as `account list` gives it')
+    .option('--channel <channel>', 'email | linkedin (required)')
+    .option('--yes', 'Delete it: there is no prompt, and without --yes nothing is sent')
+    .option('--force', 'LinkedIn: delete it even while sequences use it')
+    .description('Remove an account from Reply; it cannot be undone')
+    .addHelpText('after', help([ex('account delete 12 --channel email --yes'), ex('account delete 34 --channel linkedin --yes --force')],
+        ['emailAccount.notFound', 'linkedInAccount.notFound', 'linkedInAccount.accountInUse'], true,
+        'Result: {"channel","id","deleted":true}. Without --yes it is a usage error (usage.confirm, exit 2) and nothing is sent.\n'
+            + 'linkedInAccount.accountInUse: sequences use the LinkedIn account; --force deletes it anyway. --force with --channel\n'
+            + 'email is a usage error.\n'
+            + ACCOUNT_REFUSALS,
+        'the account may have been deleted; `account list` says whether it is still there'))
+    .action(run(async(cmd)=>{
+        const {g, ctx} = ctx_of(cmd);
+        await handle_account_delete(cmd.args[0], cmd.opts(), ctx, g);
     }));
 
 const schedule_command = new Command('schedule').description('List the sending schedules a sequence can send within');

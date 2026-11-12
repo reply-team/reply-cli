@@ -27,7 +27,8 @@ describe('operations/commands', ()=>{
         expect(contact_command.commands.map(c=>c.name())).toEqual(['find', 'get', 'update', 'delete', 'opt-out',
             'send-email', 'linkedin-connect', 'linkedin-message', 'linkedin-inmail', 'linkedin-voice']);
         expect(inbox_command.commands.map(c=>c.name())).toEqual(['list', 'changes', 'get', 'reply', 'categories', 'categorize', 'mark-read', 'mark-unread']);
-        expect(account_command.commands.map(c=>c.name())).toEqual(['list']);
+        expect(account_command.commands.map(c=>c.name())).toEqual(
+            ['list', 'connect', 'reconnect', 'pending', 'limits', 'pause', 'resume', 'unblock', 'delete']);
         expect(schedule_command.commands.map(c=>c.name())).toEqual(['list']);
         expect(direct_send_command.commands.map(c=>c.name())).toEqual(['get', 'cancel']);
     });
@@ -111,6 +112,36 @@ describe('operations/commands', ()=>{
         expect(flat, text).toContain('--channel reads one channel alone');
         expect(text, text).toContain('  account.list_incomplete\n');
         expect(text, text).not.toContain('outcome.unknown');
+    });
+
+    it('the account commands take the flags of their channel, and the link commands state the secret rule', ()=>{
+        const expected: [string, string[]][] = [
+            ['connect', ['--channel', '--provider', '--name', '--allow-shared-page']],
+            ['reconnect', ['--channel', '--provider', '--allow-shared-page']],
+            ['pending', ['--channel']],
+            ['limits', ['--channel', '--daily', '--set']],
+            ['pause', ['--channel']],
+            ['resume', ['--channel']],
+            ['unblock', []],
+            ['delete', ['--channel', '--yes', '--force']],
+        ];
+        for (const [name, names] of expected)
+        {
+            expect(flags(sub(account_command, name)), name).toEqual(names);
+        }
+        for (const name of ['connect', 'reconnect'])
+        {
+            const flat = help_of(sub(account_command, name)).replace(/\s+/g, ' ');
+            expect(flat, name).toContain('it is printed once, in "link", and never on stderr, in a --verbose trace (where it reads <link redacted>)');
+            expect(flat, name).toContain('That address does not expire and lets its holder manage all of this user\'s mailboxes, deletion included');
+            expect(flat, name).toContain('email_link.not_available');
+            expect(flat, name).toContain('outcome.unknown');
+        }
+        const pending = help_of(sub(account_command, 'pending')).replace(/\s+/g, ' ');
+        expect(pending).toContain('The links themselves are never printed');
+        expect(pending).not.toContain('outcome.unknown');
+        expect(help_of(sub(account_command, 'delete')).replace(/\s+/g, ' ')).toContain('Without --yes it is a usage error (usage.confirm, exit 2)');
+        expect(help_of(sub(account_command, 'pause')).replace(/\s+/g, ' ')).toContain('Reply has no way to pause a mailbox through its API');
     });
 
     // The sends and contact update find or import the person as the add commands do.

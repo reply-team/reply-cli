@@ -9,6 +9,7 @@ type Op_globals = {
     userEmail?: string;
     json?: boolean;
     pretty?: boolean;
+    verbose?: boolean;
 };
 
 const read_op_globals = (cmd: Command): Op_globals=>{
@@ -16,7 +17,7 @@ const read_op_globals = (cmd: Command): Op_globals=>{
     return {
         apiKey: o.apiKey, profile: o.profile,
         teamId: o.teamId, userId: o.userId, userEmail: o.userEmail,
-        json: o.json, pretty: o.pretty,
+        json: o.json, pretty: o.pretty, verbose: o.verbose,
     };
 };
 
