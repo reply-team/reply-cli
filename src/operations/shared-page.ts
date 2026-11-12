@@ -40,15 +40,19 @@ const read_shared_page = (url: string): Shared_page | null=>{
     return token === '' ? null : {index: url, token, base: `${parsed.origin}${m[1]}`};
 };
 
-// The page to open: the provider's own connect when one is named, else the index of every mailbox.
-const shared_page_link = (page: Shared_page, provider: Hosted_provider | undefined): string=>{
+// The page to open: the provider's own connect when one is named, else the index of every mailbox. A
+// provider's connect for a reconnect says so: without it the hosted page counts the sign-in as a new
+// mailbox, and a user with no free mailbox slot is sent to that error instead of reconnecting. The index
+// needs nothing: it adds the flag itself when the person reconnects a mailbox already on it.
+const shared_page_link = (page: Shared_page, provider: Hosted_provider | undefined, kind: 'connect' | 'reconnect'): string=>{
     const token = encodeURIComponent(page.token);
+    const reconnect = kind === 'reconnect' ? '&reconnect=true' : '';
     switch (provider)
     {
         case 'gmail':
-            return `${page.base}/hosted/eac/ConnectWithGMail?uidToken=${token}`;
+            return `${page.base}/hosted/eac/ConnectWithGMail?uidToken=${token}${reconnect}`;
         case 'office365':
-            return `${page.base}/hosted/eac/ConnectWithOffice?uidToken=${token}&isExchange=false`;
+            return `${page.base}/hosted/eac/ConnectWithOffice?uidToken=${token}&isExchange=false${reconnect}`;
         default:
             return page.index;
     }

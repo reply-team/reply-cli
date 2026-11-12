@@ -703,7 +703,8 @@ account_command.command('reconnect')
             + 'only the user\'s own Gmail or Office 365 mailbox, and the person must sign in with the same address; Reply takes\n'
             + 'the provider from the mailbox. A LinkedIn link has no pending entry and no expiry in Reply\'s answer, so\n'
             + 'pending_id and expires_at are null; the account\'s status in `account list` says when it is connected again.\n'
-            + 'On the shared page a mailbox is reconnected by connecting the same address again.\n'
+            + 'On the shared page, --provider prints the provider\'s connect marked as a reconnect: the person signs in with\n'
+            + 'the same address. Without it the index is printed: the person opens the mailbox there and reconnects it.\n'
             + LINK_RULE + SHARED_PAGE + ACCOUNT_REFUSALS,
         'a link may have been made'))
     .action(run(async(cmd)=>{

@@ -40,7 +40,7 @@ const CASES: Case[] = [
         answers: t=>[provider === undefined ? json([], 404) : missing(), leaky({url: `${APP}/hosted/eac/index/${t}`}, t)],
         run: g=>handle_account_connect({channel: 'email', provider, allowSharedPage: true}, ctx(), g),
     })),
-    ...(['gmail', undefined] as const).map((provider): Case=>({
+    ...(['gmail', 'office365', undefined] as const).map((provider): Case=>({
         name: `reconnect email, shared page, ${provider ?? 'index'}`, printed: 1, traced_link: true,
         answers: t=>[missing(), json({url: `${APP}/hosted/eac/index/${t}`})],
         run: g=>handle_account_reconnect('12', {channel: 'email', provider, allowSharedPage: true}, ctx(), g),

@@ -26,9 +26,18 @@ describe('the hosted page forms', ()=>{
         const t = token();
         const page = read_shared_page(shared_url(t));
         expect(page).toEqual({index: shared_url(t), token: t, base: APP});
-        expect(shared_page_link(page!, 'gmail')).toBe(`${APP}/hosted/eac/ConnectWithGMail?uidToken=${t}`);
-        expect(shared_page_link(page!, 'office365')).toBe(`${APP}/hosted/eac/ConnectWithOffice?uidToken=${t}&isExchange=false`);
-        expect(shared_page_link(page!, undefined)).toBe(shared_url(t));
+        expect(shared_page_link(page!, 'gmail', 'connect')).toBe(`${APP}/hosted/eac/ConnectWithGMail?uidToken=${t}`);
+        expect(shared_page_link(page!, 'office365', 'connect')).toBe(`${APP}/hosted/eac/ConnectWithOffice?uidToken=${t}&isExchange=false`);
+        expect(shared_page_link(page!, undefined, 'connect')).toBe(shared_url(t));
+    });
+
+    it('marks a provider\'s connect for a reconnect, so the hosted page does not count it as a new mailbox; the index is as Reply gave it', ()=>{
+        const t = token();
+        const page = read_shared_page(shared_url(t));
+        expect(shared_page_link(page!, 'gmail', 'reconnect')).toBe(`${APP}/hosted/eac/ConnectWithGMail?uidToken=${t}&reconnect=true`);
+        expect(shared_page_link(page!, 'office365', 'reconnect'))
+            .toBe(`${APP}/hosted/eac/ConnectWithOffice?uidToken=${t}&isExchange=false&reconnect=true`);
+        expect(shared_page_link(page!, undefined, 'reconnect')).toBe(shared_url(t));
     });
 
     it('keeps a path the app is served under, and reads nothing else as the hosted index', ()=>{
@@ -171,15 +180,23 @@ describe('account reconnect', ()=>{
         expect(sent()).toEqual([{method: 'POST', url: 'https://api/v3/email-accounts/4294967296/reconnect', body: undefined}]);
     });
 
-    it('email: a Reply without the route is refused, and --allow-shared-page gives the hosted page for --provider', async()=>{
+    it('email: a Reply without the route is refused, and --allow-shared-page gives the provider\'s hosted connect, marked as a reconnect', async()=>{
         answer(missing());
         expect(await fails(()=>handle_account_reconnect('12', {channel: 'email'}, ctx(), {}))).toMatchObject({code: 'email_link.not_available'});
-        mock_fetch.mockReset();
-        const t = token();
-        answer(missing(), json({url: shared_url(t)}));
-        const {result} = await run(g=>handle_account_reconnect('12', {channel: 'email', provider: 'gmail', allowSharedPage: true}, ctx(), g));
-        expect(result).toStrictEqual({channel: 'email', id: 12, link: `${APP}/hosted/eac/ConnectWithGMail?uidToken=${t}`, expires_at: null,
-            pending_id: null, kind: 'reconnect', link_kind: 'shared_page', warning: SHARED_PAGE_WARNING});
+        const rows = [
+            ['gmail', (t: string)=>`${APP}/hosted/eac/ConnectWithGMail?uidToken=${t}&reconnect=true`],
+            ['office365', (t: string)=>`${APP}/hosted/eac/ConnectWithOffice?uidToken=${t}&isExchange=false&reconnect=true`],
+            [undefined, shared_url],
+        ] as const;
+        for (const [provider, link] of rows)
+        {
+            mock_fetch.mockReset();
+            const t = token();
+            answer(missing(), json({url: shared_url(t)}));
+            const {result} = await run(g=>handle_account_reconnect('12', {channel: 'email', provider, allowSharedPage: true}, ctx(), g));
+            expect(result, provider).toStrictEqual({channel: 'email', id: 12, link: link(t), expires_at: null,
+                pending_id: null, kind: 'reconnect', link_kind: 'shared_page', warning: SHARED_PAGE_WARNING});
+        }
     });
 
     it('email: a mailbox Reply cannot reconnect by link, or not the user\'s, is Reply\'s refusal, under the CLI\'s code', async()=>{

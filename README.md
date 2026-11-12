@@ -534,7 +534,10 @@ commands then refuse with `email_link.not_available` (exit 1) and print nothing,
 `--allow-shared-page` is given: then they print the account user's hosted mailbox page, the
 provider's connect on it with `--provider` and its index without, with `"link_kind":"shared_page"`,
 `"expires_at":null` and a `warning`. That address does not expire and lets its holder manage all of
-this user's mailboxes, deletion included, so ask for it only when that is acceptable.
+this user's mailboxes, deletion included, so ask for it only when that is acceptable. For
+`account reconnect` the provider's connect is marked as a reconnect, so a user with no free mailbox
+slot reconnects the mailbox rather than being refused a new one; on the index, the person opens the
+mailbox and reconnects it from there.
 `shared_page.not_enabled` means the plan does not include hosted pages. `account pending` then lists
 no email entries and answers `"supported":false` with `"unsupported_channels":["email"]`.
 

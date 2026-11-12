@@ -73,7 +73,7 @@ const shared_page = async(
         throw unreadable(a, 'read');
     }
     return {
-        channel: 'email', ...(id === undefined ? {} : {id}), link: shared_page_link(page, provider),
+        channel: 'email', ...(id === undefined ? {} : {id}), link: shared_page_link(page, provider, kind),
         expires_at: null, pending_id: null, kind, link_kind: 'shared_page', warning: SHARED_PAGE_WARNING,
     };
 };
