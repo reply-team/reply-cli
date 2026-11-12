@@ -1,6 +1,6 @@
 import {Operation_error, UsageError} from '../utils/errors';
 import {is_object, open_session, refusal, unreadable, type Answer, type Op_session} from './call';
-import {account_call, account_refusal, route_missing} from './account-call';
+import {account_call, account_refusal, route_missing, without_secrets} from './account-call';
 import {HOSTED_PROVIDERS, SHARED_PAGE_WARNING, read_shared_page, shared_page_link, type Hosted_provider} from './shared-page';
 import {ACCOUNT_CHANNELS, require_channel, type Account_channel} from './accounts';
 import {parse_choice, parse_id, LARGEST_SAFE_ID, type Op_globals} from './options';
@@ -53,18 +53,20 @@ const connection_link = (channel: Account_channel, kind: 'connect' | 'reconnect'
 const shared_page = async(
     s: Op_session, g: Op_globals, kind: 'connect' | 'reconnect', provider: Hosted_provider | undefined, id?: number,
 ): Promise<Link_result>=>{
-    const a = await account_call(s, g, 'GET', '/v1/SharedPageUrl', 'read');
+    // Its answer is the address, in whatever shape Reply gives it, so the whole body is a secret.
+    const a = await account_call(s, g, 'GET', '/v1/SharedPageUrl', 'read', undefined, {secret_body: true});
     if (a.status === 403 && /shared page is not enabled/i.test(JSON.stringify(a.data ?? '')))
     {
-        throw new Operation_error('sharedPage.notEnabled', 'The account\'s plan does not include hosted pages, so there is no shared page.', {
+        throw new Operation_error('shared_page.not_enabled', 'The account\'s plan does not include hosted pages, so there is no shared page.', {
             status: 403,
         });
     }
     if (a.status !== 200)
     {
-        throw refusal(a, 'read');
+        throw refusal(without_secrets(a), 'read');
     }
-    const url = is_object(a.data) ? a.data.url ?? a.data.Url : undefined;
+    // {"url": …} as Reply's v1 answers it; a bare string is read as the address too.
+    const url = typeof a.data === 'string' ? a.data.trim() : is_object(a.data) ? a.data.url ?? a.data.Url : undefined;
     const page = typeof url === 'string' ? read_shared_page(url) : null;
     if (page === null)
     {

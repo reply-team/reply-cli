@@ -658,14 +658,14 @@ account_command.command('list')
 const LINK_RULE = 'The link is a credential for whoever opens it: it is printed once, in "link", and never on stderr, in a --verbose\n'
     + 'trace (where it reads <link redacted>), in an error or in a log. Hand it to the person who signs in, and do not keep it.\n';
 
-const ACCOUNT_REFUSALS = 'A refusal Reply gives a code to carries that code as the error\'s code, as Reply gave it (e.g.\n'
-    + 'linkedInAccount.notFound, emailAccount.notFound); one without a code is read like any other command\'s.\n';
+const ACCOUNT_REFUSALS = 'Reply\'s own code for a refusal is always in reply_code, as Reply gave it; a refusal not listed here is\n'
+    + 'read like any other command\'s, e.g. reply.refused.\n';
 
 const SHARED_PAGE = '--allow-shared-page: on a Reply without one-mailbox email links (its route answers 404 with no code), print the\n'
     + 'account user\'s hosted mailbox page instead, with "link_kind":"shared_page", "expires_at":null and a "warning". That\n'
     + 'address does not expire and lets its holder manage all of this user\'s mailboxes, deletion included. With --provider it\n'
     + 'is that provider\'s connect on the hosted page; without, the hosted index. Without the flag such a Reply is refused,\n'
-    + 'email_link.not_available, and nothing is printed. sharedPage.notEnabled: the plan does not include hosted pages.\n';
+    + 'email_link.not_available, and nothing is printed. shared_page.not_enabled: the plan does not include hosted pages.\n';
 
 account_command.command('connect')
     .option('--channel <channel>', 'email | linkedin (required)')
@@ -675,8 +675,8 @@ account_command.command('connect')
     .description('Make a link that connects one new account, for the person who signs in to it to open')
     .addHelpText('after', help([ex('account connect --channel email --provider gmail --name "Sales mailbox"'),
         ex('account connect --channel linkedin --name "Dana Example"')],
-    ['email_link.not_available', 'email_link.provider_required', 'sharedPage.notEnabled', 'emailAccount.limitReached',
-        'emailAccount.noFreeMailboxSlots', 'linkedInAccount.limitReached'], true,
+    ['email_link.not_available', 'email_link.provider_required', 'shared_page.not_enabled', 'email_account.limit_reached',
+        'email_account.no_free_mailbox_slots', 'linkedin.account_limit_reached'], true,
     'Result: {"channel","link","expires_at","pending_id","kind":"connect","link_kind":"connection_link"|"shared_page"}.\n'
         + 'A connection link connects exactly one account, works once and expires: an email link after 7 days, at expires_at; a\n'
         + 'LinkedIn link\'s expiry is not in Reply\'s answer, so expires_at is null there and `account pending` reads it.\n'
@@ -697,8 +697,8 @@ account_command.command('reconnect')
     .option('--allow-shared-page', 'Email: on a Reply without one-mailbox links, print the hosted mailbox page instead')
     .description('Make a link that reconnects one account that lost its connection, for the person who signs in to it to open')
     .addHelpText('after', help([ex('account reconnect 12 --channel email'), ex('account reconnect 34 --channel linkedin')],
-        ['email_link.not_available', 'sharedPage.notEnabled', 'emailAccount.notFound', 'emailAccount.reconnectNotSupported',
-            'linkedInAccount.notFound'], true,
+        ['email_link.not_available', 'shared_page.not_enabled', 'email_account.not_found', 'email_account.reconnect_not_supported',
+            'linkedin.account_not_found'], true,
         'Result: {"channel","id","link","expires_at","pending_id","kind":"reconnect","link_kind"}. An email link reconnects\n'
             + 'only the user\'s own Gmail or Office 365 mailbox, and the person must sign in with the same address; Reply takes\n'
             + 'the provider from the mailbox. A LinkedIn link has no pending entry and no expiry in Reply\'s answer, so\n'
@@ -734,7 +734,7 @@ account_command.command('limits')
     .description('Read an account\'s sending limits, or change some of them')
     .addHelpText('after', help([ex('account limits 12 --channel email'), ex('account limits 12 --channel email --daily 200'),
         `${P} account limits 34 --channel linkedin --set '{"fixedMax":{"dailySendMessageCount":50}}'`],
-    ['emailAccount.notFound', 'linkedInAccount.notFound', 'linkedInAccount.invalidInput'], true,
+    ['email_account.not_found', 'linkedin.account_not_found'], true,
     'Result: {"channel","id","limits"}: the limits as Reply holds them afterwards, in Reply\'s names. For email they are the\n'
         + 'safety section (dailyLimit, isEmailsThrottlingEnabled, emailsPerInterval, emailsThrottlingSecondsInterval,\n'
         + 'isSendingDelayEnabled, minSendingDelaySeconds, maxSendingDelaySeconds), and --set takes those fields. For LinkedIn\n'
@@ -751,7 +751,7 @@ account_command.command('limits')
 const PAUSE_RESUME = 'Result: {"channel","id","status","reply_status","changed"}: status is active or inactive, reply_status Reply\'s own\n'
     + 'word, and changed whether a call was made. Reply\'s only call flips the state, so the state is read first and an\n'
     + 'account already in the state asked for is left alone. A LinkedIn account at its daily limit is active.\n'
-    + 'linkedInAccount.cookieInvalid: the account is disconnected and must be reconnected first. account.status_changed: the\n'
+    + 'linkedin.invalid_cookie: the account\'s session is no longer valid; reconnect it first. account.status_changed: the\n'
     + 'state changed between the read and the call; read it again. Reply has no way to pause a mailbox through its API, so\n'
     + '--channel email is refused (usage.unsupported); a mailbox its provider stopped from sending is `account unblock`.\n';
 
@@ -760,7 +760,7 @@ account_command.command('pause')
     .option('--channel <channel>', 'linkedin (required; email has no pause)')
     .description('Stop a LinkedIn account\'s automation until it is resumed')
     .addHelpText('after', help([ex('account pause 34 --channel linkedin')],
-        ['linkedInAccount.notFound', 'linkedInAccount.cookieInvalid', 'account.status_changed', 'account.status_unknown'], true, PAUSE_RESUME))
+        ['linkedin.account_not_found', 'linkedin.invalid_cookie', 'account.status_changed', 'account.status_unknown'], true, PAUSE_RESUME))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
         await handle_account_pause(cmd.args[0], cmd.opts(), ctx, g);
@@ -771,7 +771,7 @@ account_command.command('resume')
     .option('--channel <channel>', 'linkedin (required; email has no pause)')
     .description('Start a paused LinkedIn account\'s automation again')
     .addHelpText('after', help([ex('account resume 34 --channel linkedin')],
-        ['linkedInAccount.notFound', 'linkedInAccount.cookieInvalid', 'account.status_changed', 'account.status_unknown'], true, PAUSE_RESUME))
+        ['linkedin.account_not_found', 'linkedin.invalid_cookie', 'account.status_changed', 'account.status_unknown'], true, PAUSE_RESUME))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
         await handle_account_resume(cmd.args[0], cmd.opts(), ctx, g);
@@ -780,7 +780,7 @@ account_command.command('resume')
 account_command.command('unblock')
     .argument('<id>', 'The email account\'s id')
     .description('Let a mailbox its provider stopped from sending pick its sequences back up')
-    .addHelpText('after', help([ex('account unblock 12')], ['emailAccount.notFound', 'emailAccount.invalidInput'], true,
+    .addHelpText('after', help([ex('account unblock 12')], ['email_account.not_found'], true,
         'Result: {"channel":"email","id","unblocked":true}. It clears the block Reply recorded when the provider refused to send\n'
             + '(sendingLockedByProvider on the account); it does not reconnect a mailbox that lost its connection.\n'
             + ACCOUNT_REFUSALS))
@@ -796,9 +796,9 @@ account_command.command('delete')
     .option('--force', 'LinkedIn: delete it even while sequences use it')
     .description('Remove an account from Reply; it cannot be undone')
     .addHelpText('after', help([ex('account delete 12 --channel email --yes'), ex('account delete 34 --channel linkedin --yes --force')],
-        ['emailAccount.notFound', 'linkedInAccount.notFound', 'linkedInAccount.accountInUse'], true,
+        ['email_account.not_found', 'linkedin.account_not_found', 'linkedin.account_in_use'], true,
         'Result: {"channel","id","deleted":true}. Without --yes it is a usage error (usage.confirm, exit 2) and nothing is sent.\n'
-            + 'linkedInAccount.accountInUse: sequences use the LinkedIn account; --force deletes it anyway. --force with --channel\n'
+            + 'linkedin.account_in_use: sequences use the LinkedIn account; --force deletes it anyway. --force with --channel\n'
             + 'email is a usage error.\n'
             + ACCOUNT_REFUSALS,
         'the account may have been deleted; `account list` says whether it is still there'))

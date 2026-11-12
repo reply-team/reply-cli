@@ -61,7 +61,7 @@ describe('account connect', ()=>{
     it('email: a 404 Reply gives a code to is Reply\'s refusal, never a missing route', async()=>{
         answer(json({code: 'emailAccount.notFound', title: 'Not Found', status: 404}, 404));
         expect(await fails(()=>handle_account_connect({channel: 'email', provider: 'gmail', allowSharedPage: true}, ctx(), {})))
-            .toMatchObject({code: 'emailAccount.notFound', reply_code: 'emailAccount.notFound', status: 404, exit_code: 1});
+            .toMatchObject({code: 'email_account.not_found', reply_code: 'emailAccount.notFound', status: 404, exit_code: 1});
         expect(sent()).toHaveLength(1);
     });
 
@@ -98,7 +98,7 @@ describe('account connect', ()=>{
     it('email: the plan without hosted pages is sharedPage.notEnabled; any other v1 refusal reads as every refusal does', async()=>{
         answer(missing(), json('Shared page is not enabled for your account', 403));
         expect(await fails(()=>handle_account_connect({channel: 'email', provider: 'gmail', allowSharedPage: true}, ctx(), {})))
-            .toMatchObject({code: 'sharedPage.notEnabled', status: 403, exit_code: 1});
+            .toMatchObject({code: 'shared_page.not_enabled', status: 403, exit_code: 1});
         mock_fetch.mockReset();
         answer(missing(), json({message: 'denied due to the organization permissions / payment plan settings'}, 403));
         expect(await fails(()=>handle_account_connect({channel: 'email', provider: 'gmail', allowSharedPage: true}, ctx(), {})))
@@ -111,10 +111,17 @@ describe('account connect', ()=>{
             .toMatchObject({code: 'reply.unavailable', exit_code: 1});
     });
 
-    it('email: Reply\'s refusal carries Reply\'s code', async()=>{
+    it('email: a shared page Reply answers as a bare string is read as the address', async()=>{
+        const t = token();
+        answer(missing(), json(shared_url(t)));
+        const {result} = await run(g=>handle_account_connect({channel: 'email', provider: 'gmail', allowSharedPage: true}, ctx(), g));
+        expect(result).toMatchObject({link: `${APP}/hosted/eac/ConnectWithGMail?uidToken=${t}`, link_kind: 'shared_page'});
+    });
+
+    it('email: Reply\'s refusal comes under the CLI\'s code, with Reply\'s in reply_code', async()=>{
         answer(json({code: 'emailAccount.noFreeMailboxSlots', title: 'Conflict', status: 409, detail: 'One more email account would need a paid seat'}, 409));
         expect(await fails(()=>handle_account_connect({channel: 'email', provider: 'gmail'}, ctx(), {})))
-            .toMatchObject({code: 'emailAccount.noFreeMailboxSlots', status: 409, detail: 'One more email account would need a paid seat', exit_code: 1});
+            .toMatchObject({code: 'email_account.no_free_mailbox_slots', reply_code: 'emailAccount.noFreeMailboxSlots', status: 409, detail: 'One more email account would need a paid seat', exit_code: 1});
     });
 
     it('email: without --provider and without --allow-shared-page, or with a provider it does not know, is a usage error before any call', async()=>{
@@ -143,10 +150,10 @@ describe('account connect', ()=>{
         expect(mock_fetch).not.toHaveBeenCalled();
     });
 
-    it('linkedin: Reply\'s limit is its own code; an answer without the link is outcome.unknown, since a link may exist', async()=>{
+    it('linkedin: Reply\'s limit comes under the CLI\'s code; an answer without the link is outcome.unknown, since a link may exist', async()=>{
         answer(json({code: 'linkedInAccount.limitReached', status: 409}, 409));
         expect(await fails(()=>handle_account_connect({channel: 'linkedin', name: 'D'}, ctx(), {})))
-            .toMatchObject({code: 'linkedInAccount.limitReached', exit_code: 1});
+            .toMatchObject({code: 'linkedin.account_limit_reached', reply_code: 'linkedInAccount.limitReached', exit_code: 1});
         mock_fetch.mockReset();
         answer(json({pendingAccountId: 51}, 201));
         expect(await fails(()=>handle_account_connect({channel: 'linkedin', name: 'D'}, ctx(), {})))
@@ -175,13 +182,14 @@ describe('account reconnect', ()=>{
             pending_id: null, kind: 'reconnect', link_kind: 'shared_page', warning: SHARED_PAGE_WARNING});
     });
 
-    it('email: a mailbox Reply cannot reconnect by link, or not the user\'s, is Reply\'s refusal by its code', async()=>{
-        for (const [status, code] of [[400, 'emailAccount.reconnectNotSupported'], [404, 'emailAccount.notFound']] as const)
+    it('email: a mailbox Reply cannot reconnect by link, or not the user\'s, is Reply\'s refusal, under the CLI\'s code', async()=>{
+        for (const [status, reply_code, code] of [[400, 'emailAccount.reconnectNotSupported', 'email_account.reconnect_not_supported'],
+            [404, 'emailAccount.notFound', 'email_account.not_found']] as const)
         {
             mock_fetch.mockReset();
-            answer(json({code, status}, status));
+            answer(json({code: reply_code, status}, status));
             expect(await fails(()=>handle_account_reconnect('12', {channel: 'email', allowSharedPage: true}, ctx(), {})))
-                .toMatchObject({code, status, exit_code: 1});
+                .toMatchObject({code, reply_code, status, exit_code: 1});
             expect(sent()).toHaveLength(1);
         }
     });
@@ -232,13 +240,13 @@ describe('account pending', ()=>{
         expect((await run(g=>handle_account_pending({}, ctx(), g))).result).toStrictEqual({items: [], supported: false, unsupported_channels: ['email']});
     });
 
-    it('--channel linkedin reads only LinkedIn; a refusal carries Reply\'s code', async()=>{
+    it('--channel linkedin reads only LinkedIn; a refusal comes under the CLI\'s code', async()=>{
         answer(json([]));
         expect((await run(g=>handle_account_pending({channel: 'linkedin'}, ctx(), g))).result).toStrictEqual({items: [], supported: true,
             unsupported_channels: []});
         expect(sent().map(r=>r.url)).toEqual(['https://api/v3/linkedin-accounts/pending']);
         mock_fetch.mockReset();
         answer(json({code: 'linkedInAccount.forbidden', status: 403}, 403));
-        expect(await fails(()=>handle_account_pending({channel: 'linkedin'}, ctx(), {}))).toMatchObject({code: 'linkedInAccount.forbidden'});
+        expect(await fails(()=>handle_account_pending({channel: 'linkedin'}, ctx(), {}))).toMatchObject({code: 'access.feature_unavailable', reply_code: 'linkedInAccount.forbidden'});
     });
 });

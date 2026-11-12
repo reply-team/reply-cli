@@ -136,7 +136,7 @@ const set_linkedin_state = async(id_arg: string, opts: {channel?: string}, verb:
     const before = status_word(account.status);
     if (account.status === 'cookieInvalid')
     {
-        throw new Operation_error('linkedInAccount.cookieInvalid', `The LinkedIn account is disconnected, so it cannot be ${verb}d.`, {
+        throw new Operation_error('linkedin.invalid_cookie', `The LinkedIn account's session is no longer valid, so it cannot be ${verb}d.`, {
             status: 200, hint: `Reconnect it first: account reconnect ${id} --channel linkedin.`,
         });
     }

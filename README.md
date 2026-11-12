@@ -535,7 +535,7 @@ commands then refuse with `email_link.not_available` (exit 1) and print nothing,
 provider's connect on it with `--provider` and its index without, with `"link_kind":"shared_page"`,
 `"expires_at":null` and a `warning`. That address does not expire and lets its holder manage all of
 this user's mailboxes, deletion included, so ask for it only when that is acceptable.
-`sharedPage.notEnabled` means the plan does not include hosted pages. `account pending` then lists
+`shared_page.not_enabled` means the plan does not include hosted pages. `account pending` then lists
 no email entries and answers `"supported":false` with `"unsupported_channels":["email"]`.
 
 ```sh
@@ -550,9 +550,9 @@ reply account pending
 which `--set` changes as Reply's limits update does. `account pause` and `account resume` act on a
 LinkedIn account; Reply's only call flips the state, so it is read first and left alone when it is
 already the one asked for. Reply has no way to pause a mailbox through its API. `account delete`
-needs `--yes`, and `--force` deletes a LinkedIn account sequences still use. A refusal Reply gives a
-code to carries that code as the error's `code`, as Reply gave it (`linkedInAccount.accountInUse`,
-`emailAccount.notFound`). After exit 3 from `account connect` or `account reconnect`, read
+needs `--yes`, and `--force` deletes a LinkedIn account sequences still use. Reply's refusals come
+under the CLI's codes, as every work command's do (`linkedin.account_in_use`, `email_account.not_found`,
+`linkedin.invalid_cookie`), with Reply's own code in `reply_code`. After exit 3 from `account connect` or `account reconnect`, read
 `account pending` before running it again: a link may already have been made.
 
 **Errors.** With `--json`, a failure is one line on stderr:
