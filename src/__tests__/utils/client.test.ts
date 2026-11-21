@@ -307,6 +307,8 @@ describe('utils/client', ()=>{
                 ['the daily allowance in another family', {code: 'supportRequest.dailyLimitReached'}],
                 ['the weekly allowance with no family', {code: 'weeklyLimitReached'}],
                 ['the daily allowance with no family', {code: 'dailyLimitReached'}],
+                ['the active contacts allowance of a direct email', {code: 'contact.activeContactsLimitReached'}],
+                ['the active contacts allowance with no family', {code: 'activeContactsLimitReached'}],
             ])('%s is not resent', async(_name, body)=>{
                 await once_only({title: 'Too Many Requests', ...body});
             });

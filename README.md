@@ -339,6 +339,19 @@ Reply cannot fill is `contact.missing_variables`, with the names under the error
 # {"error":{"code":"contact.missing_variables",…,"details":{"missing_variables":["FirstName","Company"]}}}
 ```
 
+Reply holds a direct email to the mailbox's limits. `email.limit_reached` (`429`) is one of them
+reached, with `details.limit` saying which: `daily`, the mailbox's day, which Reply counts in UTC,
+or `active_contacts`, the contacts the account may email in its billing period. A send for later is
+also refused `daily` when the day it is due already holds as many sends as the mailbox's limit.
+`retry_after` passes on Reply's `Retry-After`, the seconds until the limit clears, and the CLI never
+repeats the send itself. `email.sending_disabled` (`403`) is a mailbox or team that cannot send
+direct emails now: the mailbox's daily limit is 0, or the team's plan does not send; no wait clears
+it. Neither sends anything, and `reply_code` keeps Reply's own code, as on every refusal:
+
+```sh
+# {"error":{"status":429,"code":"email.limit_reached",…,"reply_code":"contact.dailyLimitReached","retry_after":43200,"details":{"limit":"daily"}}}
+```
+
 Every direct send also takes `--send-after <moment>`, `--schedule-id <id>` and
 `--idempotency-key <key>`. Reply holds the send until the moment, given with its offset
 (`2026-11-03T14:00:00Z`, `2026-11-03T16:00:00+02:00`) and sent to Reply in UTC; a moment without an
@@ -406,8 +419,11 @@ reply direct-send cancel linkedin-1042
 Both answer the send under the CLI's names, each null when Reply gives none: `reference`, `channel`,
 `contact_id`, `state`, `send_after`, `sent_at`, `message_id`, `failure_reason` and `cancelled_at`.
 `failure_code`, `missing_variables`, `rendered_subject` and `rendered_body` are added only when
-Reply gives them, and so is `estimated_send_at`, read the same way as on the send but as of the
-read: set in `waitingForSchedule` only and null in every other state, and null there too when the
+Reply gives them, and so are `bounced`, `bounce_type` and `bounced_at`: whether a bounce came back
+for the email after it went out (false until one does, and always false for LinkedIn), Reply's own
+word for the kind of the latest bounce as given (`hard`, `soft`, `mailboxFull`, `unknown`, …), and
+when it came; the last two are null while `bounced` is false. So is `estimated_send_at`, read the
+same way as on the send but as of the read: set in `waitingForSchedule` only and null in every other state, and null there too when the
 schedule does not open within 30 days counted from `--send-after`, or from now once that has passed.
 `failure_reason` is a sentence for a person and never parsed; `failure_code` is Reply's code for the
 failure, the one to branch on. A failed send may carry no `failure_code`: it is then null, and
@@ -575,8 +591,8 @@ the others checks or relies on Reply's own state rather than repeating an effect
 
 **Retries.** Reads are retried on errors. A write is retried only when it can't have reached Reply:
 the connection was never made, or a `429` asked to wait 3 seconds or less. A longer `429` comes back
-as `rate_limited` with `retry_after`. A `429` that names a `reference` or says a daily or weekly limit
-was reached is never resent, whatever it asks to wait: Reply may have recorded the attempt, and a repeat
+as `rate_limited` with `retry_after`. A `429` that names a `reference` or says a daily, weekly or
+active contacts limit was reached is never resent, whatever it asks to wait: Reply may have recorded the attempt, and a repeat
 would record another. Each comes back at once as the refusal it is.
 
 ## Raw API access
@@ -611,7 +627,7 @@ connection that broke after sending. That last case exits 3: the write may have 
 goes by the method alone, so this includes a POST that only reads, such as the `…/filter` calls; run
 it again yourself if it failed. A `429` is waited out only when `Retry-After` asks for 3 seconds or
 less; a longer one is printed as the `429` it is, and so is one whose body names a `reference` or a
-daily or weekly limit.
+daily, weekly or active contacts limit.
 
 ### Windows: Git Bash rewrites the path
 

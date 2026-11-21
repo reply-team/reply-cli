@@ -15,8 +15,9 @@ const RETRY_BASE_MS = 500;
 // The longest Retry-After waited out here. A longer one goes back to the caller as the 429 it
 // is: a wait inside one call spends a time budget the caller may not have.
 const MAX_WAIT_SECONDS = 3;
-// The allowances a 429 can say have run out, as opposed to a pace that was too fast.
-const ALLOWANCE_CODES = ['weeklyLimitReached', 'dailyLimitReached'];
+// The allowances a 429 can say have run out, as opposed to a pace that was too fast: a LinkedIn
+// account's week or day, a mailbox's day, and the contacts an account may email in its billing period.
+const ALLOWANCE_CODES = ['weeklyLimitReached', 'dailyLimitReached', 'activeContactsLimitReached'];
 // Node's fetch reports every transport failure as TypeError('fetch failed') with the system
 // error on `.cause`. These are failures to connect at all, so the request never left: no route,
 // no answer to the connect, a URL that can't be parsed, or a TLS handshake that failed.

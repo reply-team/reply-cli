@@ -299,7 +299,7 @@ describe('operations/commands', ()=>{
     const SENT_AT_AS_GIVEN = 'sentAtUtc as Reply gives them, each null when it gives none; the CLI adds no time of its own';
     const DIRECT_SENDS: [string, string, string[], string][] = [
         ['send-email', '--email-account-id', ['contact.not_found', ...IMPORT, 'contact.already_held', 'email_account.not_found', 'contact.blacklisted',
-            'contact.missing_variables', 'contact.rendering_failed', 'schedule.not_found', 'schedule.no_slot', 'contact.time_zone_missing'],
+            'contact.missing_variables', 'contact.rendering_failed', 'email.limit_reached', 'email.sending_disabled', 'schedule.not_found', 'schedule.no_slot', 'contact.time_zone_missing'],
             'sent_at is always null; the CLI adds none of its own'],
         ['linkedin-connect', '--linkedin-account-id', [...LINKEDIN, 'linkedin.not_connected', 'linkedin.limit_reached',
             'linkedin.message_too_long', 'linkedin.missing_variables'], SENT_AT_AS_GIVEN],
@@ -403,6 +403,17 @@ describe('operations/commands', ()=>{
         expect(flat, flat).toContain('contact.missing_variables names the variables Reply could not fill in details.missing_variables');
         expect(flat, flat).toContain('contact.rendering_failed is a template Reply could not render, its message in detail');
         expect(flat, flat).toContain('An email sent within the request adds rendered_subject and rendered_body');
+        // Reply holds a direct email to the mailbox's limits, so the help names them and no longer says it goes outside them.
+        expect(flat, flat).not.toContain('outside the mailbox\'s daily limit');
+        expect(flat, flat).toContain('email.limit_reached (429) is a limit Reply holds the send to: details.limit is daily');
+        expect(flat, flat).toContain('or active_contacts');
+        expect(flat, flat).toContain('email.sending_disabled (403) is a mailbox or team that cannot send direct emails now');
+    });
+
+    it('direct-send get says when the bounce members are given and what each holds', ()=>{
+        const flat = help_of(sub(direct_send_command, 'get')).replace(/\s+/g, ' ');
+        expect(flat, flat).toContain('bounced, bounce_type and bounced_at are added only when Reply gives them');
+        expect(flat, flat).toContain('bounce_type is Reply\'s own word for the kind of the latest bounce, as given');
     });
 
     it('inbox reply takes its text only through --message, and says a repeat may send it twice', ()=>{

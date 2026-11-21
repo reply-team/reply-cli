@@ -197,7 +197,42 @@ const REFUSALS: Record<string, Refusal> = {
     'contact.contactTimeZoneMissing': TIME_ZONE_MISSING,
 };
 
-const LIMITS: Record<string, string> = {'directLinkedIn.dailyLimitReached': 'daily', 'directLinkedIn.weeklyLimitReached': 'weekly'};
+// The allowances a send can meet, each under the code of the route that answers it, with the CLI code it maps to and the
+// sentence it says. A LinkedIn account has a day and a week; a mailbox has a day, and the account a number of contacts it
+// may email in its billing period. Reply sends a Retry-After with each, passed on as retry_after.
+type Limit = {code: string; limit: string; title: string};
+const LIMITS: Record<Channel, Record<string, Limit>> = {
+    email: {
+        'contact.dailyLimitReached': {
+            code: 'email.limit_reached', limit: 'daily', title: 'The mailbox reached its daily limit, so nothing was sent.',
+        },
+        'contact.activeContactsLimitReached': {
+            code: 'email.limit_reached', limit: 'active_contacts',
+            title: 'The account reached its active contacts limit for the billing period, so nothing was sent.',
+        },
+    },
+    linkedin: {
+        'directLinkedIn.dailyLimitReached': {
+            code: 'linkedin.limit_reached', limit: 'daily', title: 'The LinkedIn account reached its daily limit, so nothing was sent.',
+        },
+        'directLinkedIn.weeklyLimitReached': {
+            code: 'linkedin.limit_reached', limit: 'weekly', title: 'The LinkedIn account reached its weekly limit, so nothing was sent.',
+        },
+    },
+};
+
+// The email route's refusal of a mailbox that cannot send at all: its daily limit is 0, or the team's plan sends nothing.
+// No wait clears it, so Reply sends no Retry-After and none is passed on. Only the email route answers it.
+const SENDING_REFUSALS: Record<Channel, Record<string, Refusal>> = {
+    email: {
+        'contact.emailAccountSendingDisabled': {
+            status: 403, code: 'email.sending_disabled',
+            title: 'The mailbox or its team cannot send direct emails now, so nothing was sent.',
+            hint: 'Reply says the mailbox\'s daily limit is 0, or the team\'s plan does not send; no retry can help until that changes.',
+        },
+    },
+    linkedin: {},
+};
 
 // The codes of a send made for later, each Reply's code with the CLI code it maps to, here and
 // nowhere else. A send route answers a refused Idempotency-Key under its own family: contact for the
@@ -281,15 +316,16 @@ const refusal_of_send = (a: Answer, contact_id: number, by: Channel): Operation_
     {
         return contact_not_found(contact_id, a);
     }
-    if (a.status === 429 && reply_code !== undefined && LIMITS[reply_code] !== undefined)
+    const limit = a.status === 429 && reply_code !== undefined ? LIMITS[by][reply_code] : undefined;
+    if (limit !== undefined)
     {
-        return new Operation_error('linkedin.limit_reached', `The LinkedIn account reached its ${LIMITS[reply_code]} limit, so nothing was sent.`, {
+        return new Operation_error(limit.code, limit.title, {
             status: a.status, reply_code, detail: detail_of(a),
-            retry_after: parse_retry_after(a.headers['retry-after']) ?? undefined, details: {limit: LIMITS[reply_code]},
+            retry_after: parse_retry_after(a.headers['retry-after']) ?? undefined, details: {limit: limit.limit},
         });
     }
-    return known_refusal(a, REFUSALS) ?? known_refusal(a, TEMPLATE_REFUSALS[by]) ?? known_refusal(a, KEY_REFUSALS[by])
-        ?? refusal(a, 'write');
+    return known_refusal(a, REFUSALS) ?? known_refusal(a, TEMPLATE_REFUSALS[by]) ?? known_refusal(a, SENDING_REFUSALS[by])
+        ?? known_refusal(a, KEY_REFUSALS[by]) ?? refusal(a, 'write');
 };
 
 // A send Reply refused after its row existed, or the send a reused key was taken for, comes with

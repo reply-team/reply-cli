@@ -6,7 +6,7 @@ description: >
   Use when executing any Reply.io operation from a shell, setting up authentication,
   or when another Reply skill needs commands executed.
 metadata:
-  version: 1.4.0
+  version: 1.4.1
   pack: reply-adapter
   category: execution
   maturity: reviewed
@@ -117,8 +117,8 @@ Rules: the path is used **exactly as written in the API docs** (starts with `/v3
 goes in the path). `--method GET|POST|PUT|PATCH|DELETE` overrides the default. Output is always
 `{"code": <http status>, "data": <body>}` on stdout — check `code` yourself; stdout stays clean
 for piping. Transient failures (429/5xx) retry automatically honoring `Retry-After`, except a 429
-that names a `reference` or says a daily or weekly limit was reached, which is never resent and
-comes back at once as the refusal it is.
+that names a `reference` or says a daily, weekly or active contacts limit was reached, which is
+never resent and comes back at once as the refusal it is.
 
 ### Exit codes & errors
 
@@ -171,6 +171,8 @@ explicit confirmation its Safety section requires.
 
 ## Changelog
 
+- 1.4.1 (2026-11-21): `reply api` says that a 429 saying an active contacts limit was reached is
+  never resent either, as the CLI now treats it.
 - 1.4.0 (2026-11-11): *Failure modes* says how to treat the link `account connect` and `account
   reconnect` print, and when `--allow-shared-page` is right.
 - 1.3.2 (2026-11-06): *Failure modes* no longer says the work commands don't exist: it names the groups

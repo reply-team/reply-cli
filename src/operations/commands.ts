@@ -431,12 +431,19 @@ time_zone_options(later_options(add_contact_options(contact_command.command('sen
         [`echo '{"subject":"Quick question","body":"<p>Hi Ann, does Tuesday work?</p>"}' | ${P} contact send-email --contact-id 456 --email-account-id 12 --message -`,
             piped_send('send-email', ANN_EMAIL, '{"subject":"Quick question","body":"<p>Hi Ann</p>"}', '--email-account-id 12')],
         ['contact.not_found', ...IMPORT_CODES, 'contact.already_held', 'email_account.not_found', 'contact.blacklisted',
-            'contact.missing_variables', 'contact.rendering_failed', ...SCHEDULE_CODES, ...KEY_CODES], true,
+            'contact.missing_variables', 'contact.rendering_failed', 'email.limit_reached', 'email.sending_disabled',
+            ...SCHEDULE_CODES, ...KEY_CODES], true,
         'Result: {"status":"sent","contact_id","contact_created","message_id","sent_at","reply_status"}: sent means Reply\n'
             + 'accepted the email, and reply_status is Reply\'s own word for it (new or sent). message_id is Reply\'s messageId,\n'
             + 'null when it gives none. Reply\'s answer carries no time, so sent_at is always null; the CLI adds none of its own.\n'
             + 'The email is read from stdin only, so its text never sits in the argument list. The body is HTML. Without\n'
-            + '--send-after, Reply sends a direct email at once, outside the mailbox\'s daily limit and sending delay.\n'
+            + '--send-after, Reply sends a direct email at once.\n'
+            + 'email.limit_reached (429) is a limit Reply holds the send to: details.limit is daily, the mailbox\'s day, which\n'
+            + 'Reply counts in UTC, or active_contacts, the contacts the account may email in its billing period; a send for later\n'
+            + 'is also refused daily when the day it is due already holds as many sends as the mailbox\'s limit. retry_after\n'
+            + 'passes on Reply\'s Retry-After, the seconds until the limit clears, and the CLI never repeats the send itself.\n'
+            + 'email.sending_disabled (403) is a mailbox or team that cannot send direct emails now: the mailbox\'s daily limit\n'
+            + 'is 0, or the team\'s plan does not send. No wait clears it. Neither sends anything, and reply_code keeps Reply\'s code.\n'
             + 'Reply tracks neither links nor opens unless --track-links or --track-opens asks it to. An email sent within the\n'
             + 'request adds rendered_subject and rendered_body, the subject and body as Reply filled them in, when Reply gives\n'
             + 'them; a send held for later has neither. contact.missing_variables names the variables Reply could not fill in\n'
@@ -850,6 +857,10 @@ const DIRECT_SEND = 'Result: {"reference","channel","contact_id","state","send_a
     + 'the moment the send waits from: its --send-after, or now once that has passed. A Reply without this route answers\n'
     + 'reply.refused with status 404 and no reply_code; a reference of any other form never leaves the CLI, so that 404 means\n'
     + 'this Reply has no such route.\n'
+    + 'bounced, bounce_type and bounced_at are added only when Reply gives them: bounced is whether a bounce came back for\n'
+    + 'the email after it went out, false until one does and always false for LinkedIn; bounce_type is Reply\'s own word for\n'
+    + 'the kind of the latest bounce, as given (hard, soft, mailboxFull, unknown, ...), and bounced_at is when it came. Both\n'
+    + 'are null while bounced is false, and bounced_at is null too when the bounce carried no date.\n'
     + 'direct_send.not_found is a reference that Reply has no send for, a send of another team included.\n'
     + 'direct_send.not_owned is an email send made by a teammate this user may not act for.\n';
 

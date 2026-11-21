@@ -237,6 +237,55 @@ describe('direct-send get', ()=>{
                 .toMatchObject({code: 'reply.unavailable', exit_code: 1});
         }
     });
+
+    describe('a bounce', ()=>{
+        const SENT = {...QUEUED, state: 'sent', sentAt: '2026-11-20T10:00:00Z', messageId: '<m1@example.com>'};
+
+        it('prints whether the email bounced, the provider\'s word for the kind as given, and when', async()=>{
+            for (const word of ['hard', 'soft', 'mailboxFull', 'office365LimitWarning', 'unknown', 'Something Else'])
+            {
+                mock_fetch.mockReset();
+                answer(json({...SENT, bounced: true, bounceType: word, bouncedAt: '2026-11-20T10:05:00Z'}));
+                expect(await get('email-1001'), word).toMatchObject({
+                    state: 'sent', bounced: true, bounce_type: word, bounced_at: '2026-11-20T10:05:00Z',
+                });
+            }
+        });
+
+        it('a send that did not bounce, and a LinkedIn send, print bounced false with no kind and no moment', async()=>{
+            answer(json({...SENT, bounced: false, bounceType: null, bouncedAt: null}));
+            expect(await get('email-1001')).toMatchObject({bounced: false, bounce_type: null, bounced_at: null});
+            mock_fetch.mockReset();
+            answer(json({...SENT, reference: 'linkedin-1042', channel: 'linkedin', bounced: false, bounceType: null, bouncedAt: null}));
+            expect(await get('linkedin-1042')).toMatchObject({bounced: false, bounce_type: null, bounced_at: null});
+        });
+
+        it('a bounce with no date keeps bounced_at null', async()=>{
+            answer(json({...SENT, bounced: true, bounceType: 'hard', bouncedAt: null}));
+            expect(await get('email-1001')).toMatchObject({bounced: true, bounce_type: 'hard', bounced_at: null});
+        });
+
+        it('a Reply that gives no bounce member prints as before, and a member of another shape is left out', async()=>{
+            answer(json(SENT));
+            const plain = await get('email-1001');
+            for (const name of ['bounced', 'bounce_type', 'bounced_at'])
+            {
+                expect(plain, name).not.toHaveProperty(name);
+            }
+            mock_fetch.mockReset();
+            answer(json({...SENT, bounced: 'yes', bounceType: 2, bouncedAt: 17}));
+            const odd = await get('email-1001');
+            for (const name of ['bounced', 'bounce_type', 'bounced_at'])
+            {
+                expect(odd, name).not.toHaveProperty(name);
+            }
+        });
+
+        it('cancel prints the same members when Reply gives them', async()=>{
+            answer(json({...CANCELLED, bounced: false, bounceType: null, bouncedAt: null}));
+            expect(await cancel('email-1001')).toMatchObject({state: 'cancelled', bounced: false, bounce_type: null, bounced_at: null});
+        });
+    });
 });
 
 describe('direct-send cancel', ()=>{
