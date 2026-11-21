@@ -420,6 +420,8 @@ describe('operations/commands', ()=>{
         const flat = help_of(sub(direct_send_command, 'get')).replace(/\s+/g, ' ');
         expect(flat, flat).toContain('bounced, bounce_type and bounced_at are added only when Reply gives them');
         expect(flat, flat).toContain('bounce_type is Reply\'s own word for the kind of the latest bounce, as given');
+        expect(flat, flat).toContain('Reply leaves bounce_type and bounced_at null while bounced is false, and bounced_at null when the '
+            + 'bounce carried no date; the CLI passes on what Reply gives and checks neither');
     });
 
     it('inbox reply takes its text only through --message, and says a repeat may send it twice', ()=>{

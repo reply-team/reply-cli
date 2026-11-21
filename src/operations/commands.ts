@@ -860,8 +860,9 @@ const DIRECT_SEND = 'Result: {"reference","channel","contact_id","state","send_a
     + 'this Reply has no such route.\n'
     + 'bounced, bounce_type and bounced_at are added only when Reply gives them: bounced is whether a bounce came back for\n'
     + 'the email after it went out, false until one does and always false for LinkedIn; bounce_type is Reply\'s own word for\n'
-    + 'the kind of the latest bounce, as given (hard, soft, mailboxFull, unknown, ...), and bounced_at is when it came. Both\n'
-    + 'are null while bounced is false, and bounced_at is null too when the bounce carried no date.\n'
+    + 'the kind of the latest bounce, as given (hard, soft, mailboxFull, unknown, ...), and bounced_at is when it came.\n'
+    + 'Reply leaves bounce_type and bounced_at null while bounced is false, and bounced_at null when the bounce carried no\n'
+    + 'date; the CLI passes on what Reply gives and checks neither.\n'
     + 'direct_send.not_found is a reference that Reply has no send for, a send of another team included.\n'
     + 'direct_send.not_owned is an email send made by a teammate this user may not act for.\n';
 
