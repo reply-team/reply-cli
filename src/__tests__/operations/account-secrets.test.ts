@@ -95,8 +95,8 @@ describe('the secret rule, through the program', ()=>{
         fs.rmSync(dir, {recursive: true, force: true});
     });
 
-    it('--allow-shared-page is still accepted, and ignored: a Reply without the route is email_link.not_available, exit 1', async()=>{
-        answer(missing());
+    // Runs `reply` with the arguments given and answers how it exited: a usage refusal is exit 2 before any call.
+    const run_program = async(args: string[]): Promise<{code: number; err: string}>=>{
         let exited!: (code: number) => void;
         const exit = new Promise<number>(resolve=>{ exited = resolve; });
         let first: number | undefined;
@@ -107,17 +107,32 @@ describe('the secret rule, through the program', ()=>{
                 exited(first);
             }
         }) as typeof process.exit);
-        process.argv = ['node', 'reply', '--json', '-k', 'key-1', '--verbose', 'account', 'connect', '--channel', 'email', '--provider', 'gmail',
-            '--allow-shared-page'];
+        process.argv = ['node', 'reply', '--json', '-k', 'key-1', '--verbose', ...args];
         vi.resetModules();
         let code = -1;
         const {err} = await capture(async()=>{
             await import('../../index');
             code = await exit;
         });
+        return {code, err};
+    };
+
+    it('--allow-shared-page is still accepted, and ignored: a Reply without the route is email_link.not_available, exit 1', async()=>{
+        answer(missing());
+        const {code, err} = await run_program(['account', 'connect', '--channel', 'email', '--provider', 'gmail', '--allow-shared-page']);
         expect(code).toBe(1);
         expect(err).toContain('> POST https://api.reply.io/v3/email-accounts/connection-link');
         expect(err).not.toContain('SharedPageUrl');
         expect(err).toContain('"code":"email_link.not_available"');
+    });
+
+    it('an email reconnect still takes --provider and --allow-shared-page: neither is refused, and the reconnect is asked for', async()=>{
+        answer(missing());
+        const {code, err} = await run_program(['account', 'reconnect', '12', '--channel', 'email', '--provider', 'gmail', '--allow-shared-page']);
+        expect(code).toBe(1);
+        expect(err).toContain('> POST https://api.reply.io/v3/email-accounts/12/reconnect');
+        expect(err).not.toContain('SharedPageUrl');
+        expect(err).toContain('"code":"email_link.not_available"');
+        expect(err).not.toContain('"code":"usage.');
     });
 });
