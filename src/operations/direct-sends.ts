@@ -39,6 +39,15 @@ const rendering_of = (body: Record<string, unknown>): Record<string, unknown>=>{
     return out;
 };
 
+// Whether an email bounced after it went out, Reply's word for the kind of the latest bounce, as given and never read
+// here, and when it came, each only when Reply gives it in its shape: bounced as true or false, the kind and the moment
+// as text or null. A Reply before them gives none, and the send prints as it did before them.
+const bounce_of = (body: Record<string, unknown>): Record<string, unknown>=>({
+    ...(typeof body.bounced === 'boolean' ? {bounced: body.bounced} : {}),
+    ...(typeof body.bounceType === 'string' || body.bounceType === null ? {bounce_type: body.bounceType} : {}),
+    ...(typeof body.bouncedAt === 'string' || body.bouncedAt === null ? {bounced_at: body.bouncedAt} : {}),
+});
+
 // A send as Reply holds it, under the CLI's names; one of its first fields that Reply leaves out is null. Its state is Reply's word, passed on as given, so a state the CLI does
 // not know yet reaches the caller instead of failing the read. failure_reason is a sentence for a person and failure_code
 // Reply's code for the same failure: neither is read here.
@@ -52,7 +61,7 @@ const direct_send_of = (a: Answer, kind: 'read' | 'write'): Record<string, unkno
     return {
         reference: body.reference, channel: field('channel'), contact_id: field('contactId'), state: body.state,
         send_after: field('sendAfter'), ...estimated_of(body), sent_at: field('sentAt'), message_id: field('messageId'),
-        failure_reason: field('failureReason'), ...rendering_of(body), cancelled_at: field('cancelledAt'),
+        failure_reason: field('failureReason'), ...rendering_of(body), cancelled_at: field('cancelledAt'), ...bounce_of(body),
     };
 };
 

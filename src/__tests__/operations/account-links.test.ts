@@ -2,7 +2,6 @@ import crypto from 'crypto';
 import {describe, it, expect, beforeEach} from 'vitest';
 import {mock_fetch, json, ctx, sent, answer, capture} from './helpers';
 import {handle_account_connect, handle_account_reconnect, handle_account_pending} from '../../operations/account-links';
-import {read_shared_page, shared_page_link, SHARED_PAGE_WARNING} from '../../operations/shared-page';
 import type {Op_globals} from '../../operations/options';
 
 // Generated for every run: no test holds a real link or token.
@@ -10,7 +9,6 @@ const token = (): string=>crypto.randomBytes(24).toString('hex');
 const APP = 'https://app.example.test';
 const email_link = (t = token())=>`${APP}/email-connect/${t}`;
 const linkedin_link = (t = token())=>`${APP}/linkedin-connect/${t}`;
-const shared_url = (t: string)=>`${APP}/hosted/eac/index/${t}`;
 const missing = ()=>json({type: 'about:blank', title: 'Not Found', status: 404}, 404);
 
 const run = async(fn: (g: Op_globals) => Promise<void>, g: Op_globals = {json: true})=>{
@@ -20,35 +18,6 @@ const run = async(fn: (g: Op_globals) => Promise<void>, g: Op_globals = {json: t
 const fails = (fn: () => Promise<void>)=>fn().catch((x: unknown)=>x);
 
 beforeEach(()=>{ mock_fetch.mockReset(); });
-
-describe('the hosted page forms', ()=>{
-    it('builds each provider\'s connect from the token of the index Reply answers, and the index without a provider', ()=>{
-        const t = token();
-        const page = read_shared_page(shared_url(t));
-        expect(page).toEqual({index: shared_url(t), token: t, base: APP});
-        expect(shared_page_link(page!, 'gmail', 'connect')).toBe(`${APP}/hosted/eac/ConnectWithGMail?uidToken=${t}`);
-        expect(shared_page_link(page!, 'office365', 'connect')).toBe(`${APP}/hosted/eac/ConnectWithOffice?uidToken=${t}&isExchange=false`);
-        expect(shared_page_link(page!, undefined, 'connect')).toBe(shared_url(t));
-    });
-
-    it('marks a provider\'s connect for a reconnect, so the hosted page does not count it as a new mailbox; the index is as Reply gave it', ()=>{
-        const t = token();
-        const page = read_shared_page(shared_url(t));
-        expect(shared_page_link(page!, 'gmail', 'reconnect')).toBe(`${APP}/hosted/eac/ConnectWithGMail?uidToken=${t}&reconnect=true`);
-        expect(shared_page_link(page!, 'office365', 'reconnect'))
-            .toBe(`${APP}/hosted/eac/ConnectWithOffice?uidToken=${t}&isExchange=false&reconnect=true`);
-        expect(shared_page_link(page!, undefined, 'reconnect')).toBe(shared_url(t));
-    });
-
-    it('keeps a path the app is served under, and reads nothing else as the hosted index', ()=>{
-        const t = token();
-        expect(read_shared_page(`${APP}/app/hosted/eac/index/${t}/`)).toMatchObject({base: `${APP}/app`, token: t});
-        for (const url of ['not a url', `${APP}/hosted/eac/${t}`, `ftp://app.example.test/hosted/eac/index/${t}`, `${APP}/hosted/eac/index/`])
-        {
-            expect(read_shared_page(url), url).toBeNull();
-        }
-    });
-});
 
 describe('account connect', ()=>{
     it('email: asks Reply for a one-mailbox link and prints it with its expiry and pending entry', async()=>{
@@ -60,71 +29,32 @@ describe('account connect', ()=>{
         expect(sent()).toEqual([{method: 'POST', url: 'https://api/v3/email-accounts/connection-link', body: {provider: 'gmail', name: 'Sales'}}]);
     });
 
-    it('email: a Reply without the route is refused, email_link.not_available, and the shared page is never asked for', async()=>{
-        answer(missing());
-        expect(await fails(()=>handle_account_connect({channel: 'email', provider: 'office365'}, ctx(), {})))
-            .toMatchObject({code: 'email_link.not_available', exit_code: 1});
-        expect(sent().map(r=>r.url)).toEqual(['https://api/v3/email-accounts/connection-link']);
+    it('email: a Reply without the route is email_link.not_available, offering nothing, with or without --allow-shared-page', async()=>{
+        for (const allowSharedPage of [undefined, true])
+        {
+            mock_fetch.mockReset();
+            answer(missing());
+            const e = await fails(()=>handle_account_connect({channel: 'email', provider: 'office365', allowSharedPage}, ctx(), {}));
+            expect(e, String(allowSharedPage)).toMatchObject({code: 'email_link.not_available', status: 404, exit_code: 1, title: 'This Reply does not issue one-mailbox email connection links, so no link was made.'});
+            expect((e as {hint?: string}).hint, String(allowSharedPage)).toBeUndefined();
+            expect(sent().map(r=>r.url), String(allowSharedPage)).toEqual(['https://api/v3/email-accounts/connection-link']);
+        }
     });
 
     it('email: a 404 Reply gives a code to is Reply\'s refusal, never a missing route', async()=>{
         answer(json({code: 'emailAccount.notFound', title: 'Not Found', status: 404}, 404));
-        expect(await fails(()=>handle_account_connect({channel: 'email', provider: 'gmail', allowSharedPage: true}, ctx(), {})))
+        expect(await fails(()=>handle_account_connect({channel: 'email', provider: 'gmail'}, ctx(), {})))
             .toMatchObject({code: 'email_account.not_found', reply_code: 'emailAccount.notFound', status: 404, exit_code: 1});
         expect(sent()).toHaveLength(1);
     });
 
-    it('email --allow-shared-page: on a Reply without the route, prints the provider\'s hosted connect, with no expiry and the warning', async()=>{
-        for (const [provider, path] of [['gmail', 'ConnectWithGMail?uidToken='], ['office365', 'ConnectWithOffice?uidToken=']] as const)
-        {
-            mock_fetch.mockReset();
-            const t = token();
-            answer(missing(), json({url: shared_url(t)}));
-            const {result} = await run(g=>handle_account_connect({channel: 'email', provider, allowSharedPage: true}, ctx(), g));
-            expect(result).toStrictEqual({channel: 'email', link: `${APP}/hosted/eac/${path}${t}${provider === 'office365' ? '&isExchange=false' : ''}`,
-                expires_at: null, pending_id: null, kind: 'connect', link_kind: 'shared_page', warning: SHARED_PAGE_WARNING});
-            expect(sent().map(r=>[r.method, r.url])).toEqual([
-                ['POST', 'https://api/v3/email-accounts/connection-link'], ['GET', 'https://api/v1/SharedPageUrl'],
-            ]);
-        }
-    });
-
-    it('email --allow-shared-page without --provider: a Reply without one-mailbox links gives the hosted index', async()=>{
-        const t = token();
-        answer(missing(), json({url: shared_url(t)}));
-        const {result} = await run(g=>handle_account_connect({channel: 'email', allowSharedPage: true}, ctx(), g));
-        expect(result).toMatchObject({link: shared_url(t), link_kind: 'shared_page'});
-        expect(sent().map(r=>[r.method, r.url])).toEqual([['GET', 'https://api/v3/email-accounts/pending'], ['GET', 'https://api/v1/SharedPageUrl']]);
-    });
-
-    it('email --allow-shared-page without --provider: a Reply with them is refused, and no shared page is asked for', async()=>{
-        answer(json([]));
-        expect(await fails(()=>handle_account_connect({channel: 'email', allowSharedPage: true}, ctx(), {})))
-            .toMatchObject({code: 'email_link.provider_required', exit_code: 1});
-        expect(sent()).toHaveLength(1);
-    });
-
-    it('email: the plan without hosted pages is sharedPage.notEnabled; any other v1 refusal reads as every refusal does', async()=>{
-        answer(missing(), json('Shared page is not enabled for your account', 403));
-        expect(await fails(()=>handle_account_connect({channel: 'email', provider: 'gmail', allowSharedPage: true}, ctx(), {})))
-            .toMatchObject({code: 'shared_page.not_enabled', status: 403, exit_code: 1});
-        mock_fetch.mockReset();
-        answer(missing(), json({message: 'denied due to the organization permissions / payment plan settings'}, 403));
-        expect(await fails(()=>handle_account_connect({channel: 'email', provider: 'gmail', allowSharedPage: true}, ctx(), {})))
-            .toMatchObject({code: 'access.feature_unavailable', exit_code: 1});
-    });
-
-    it('email: a shared page in a form the CLI cannot read is reply.unavailable', async()=>{
-        answer(missing(), json({url: `${APP}/somewhere/else/${token()}`}));
-        expect(await fails(()=>handle_account_connect({channel: 'email', provider: 'gmail', allowSharedPage: true}, ctx(), {})))
-            .toMatchObject({code: 'reply.unavailable', exit_code: 1});
-    });
-
-    it('email: a shared page Reply answers as a bare string is read as the address', async()=>{
-        const t = token();
-        answer(missing(), json(shared_url(t)));
+    it('email --allow-shared-page is accepted and ignored: the one-mailbox link is made as without it', async()=>{
+        const link = email_link();
+        answer(json({connectionLink: link, pendingAccountId: 50, provider: 'gmail', expiresAtUtc: '2026-11-18T12:00:00Z'}, 201));
         const {result} = await run(g=>handle_account_connect({channel: 'email', provider: 'gmail', allowSharedPage: true}, ctx(), g));
-        expect(result).toMatchObject({link: `${APP}/hosted/eac/ConnectWithGMail?uidToken=${t}`, link_kind: 'shared_page'});
+        expect(result).toStrictEqual({channel: 'email', link, expires_at: '2026-11-18T12:00:00Z', pending_id: 50, kind: 'connect',
+            link_kind: 'connection_link'});
+        expect(sent().map(r=>[r.method, r.url])).toEqual([['POST', 'https://api/v3/email-accounts/connection-link']]);
     });
 
     it('email: Reply\'s refusal comes under the CLI\'s code, with Reply\'s in reply_code', async()=>{
@@ -133,8 +63,10 @@ describe('account connect', ()=>{
             .toMatchObject({code: 'email_account.no_free_mailbox_slots', reply_code: 'emailAccount.noFreeMailboxSlots', status: 409, detail: 'One more email account would need a paid seat', exit_code: 1});
     });
 
-    it('email: without --provider and without --allow-shared-page, or with a provider it does not know, is a usage error before any call', async()=>{
+    it('email: without --provider, --allow-shared-page or not, or with a provider it does not know, is a usage error before any call', async()=>{
         expect(await fails(()=>handle_account_connect({channel: 'email'}, ctx(), {}))).toMatchObject({code: 'usage.provider', exit_code: 2});
+        expect(await fails(()=>handle_account_connect({channel: 'email', allowSharedPage: true}, ctx(), {})))
+            .toMatchObject({code: 'usage.provider', exit_code: 2});
         expect(await fails(()=>handle_account_connect({channel: 'email', provider: 'yahoo'}, ctx(), {}))).toMatchObject({code: 'usage.choice', exit_code: 2});
         expect(await fails(()=>handle_account_connect({channel: 'email', provider: 'gmail', name: 'x'.repeat(101)}, ctx(), {})))
             .toMatchObject({code: 'usage.name', exit_code: 2});
@@ -150,13 +82,15 @@ describe('account connect', ()=>{
         expect(sent()).toEqual([{method: 'POST', url: 'https://api/v3/linkedin-accounts/connection-link', body: {name: 'Dana Example'}}]);
     });
 
-    it('linkedin: needs --name, and takes neither --provider nor --allow-shared-page', async()=>{
+    it('linkedin: needs --name, and takes no --provider; --allow-shared-page is ignored there too', async()=>{
         expect(await fails(()=>handle_account_connect({channel: 'linkedin'}, ctx(), {}))).toMatchObject({code: 'usage.name', exit_code: 2});
         expect(await fails(()=>handle_account_connect({channel: 'linkedin', name: 'D', provider: 'gmail'}, ctx(), {})))
             .toMatchObject({code: 'usage.channel', exit_code: 2});
-        expect(await fails(()=>handle_account_connect({channel: 'linkedin', name: 'D', allowSharedPage: true}, ctx(), {})))
-            .toMatchObject({code: 'usage.channel', exit_code: 2});
         expect(mock_fetch).not.toHaveBeenCalled();
+        const link = linkedin_link();
+        answer(json({connectionLink: link, pendingAccountId: 51}, 201));
+        const {result} = await run(g=>handle_account_connect({channel: 'linkedin', name: 'D', allowSharedPage: true}, ctx(), g));
+        expect(result).toMatchObject({channel: 'linkedin', link, link_kind: 'connection_link'});
     });
 
     it('linkedin: Reply\'s limit comes under the CLI\'s code; an answer without the link is outcome.unknown, since a link may exist', async()=>{
@@ -180,22 +114,15 @@ describe('account reconnect', ()=>{
         expect(sent()).toEqual([{method: 'POST', url: 'https://api/v3/email-accounts/4294967296/reconnect', body: undefined}]);
     });
 
-    it('email: a Reply without the route is refused, and --allow-shared-page gives the provider\'s hosted connect, marked as a reconnect', async()=>{
-        answer(missing());
-        expect(await fails(()=>handle_account_reconnect('12', {channel: 'email'}, ctx(), {}))).toMatchObject({code: 'email_link.not_available'});
-        const rows = [
-            ['gmail', (t: string)=>`${APP}/hosted/eac/ConnectWithGMail?uidToken=${t}&reconnect=true`],
-            ['office365', (t: string)=>`${APP}/hosted/eac/ConnectWithOffice?uidToken=${t}&isExchange=false&reconnect=true`],
-            [undefined, shared_url],
-        ] as const;
-        for (const [provider, link] of rows)
+    it('email: a Reply without the route is email_link.not_available, offering nothing; --allow-shared-page and --provider are ignored', async()=>{
+        for (const opts of [{channel: 'email'}, {channel: 'email', allowSharedPage: true}, {channel: 'email', provider: 'gmail', allowSharedPage: true}])
         {
             mock_fetch.mockReset();
-            const t = token();
-            answer(missing(), json({url: shared_url(t)}));
-            const {result} = await run(g=>handle_account_reconnect('12', {channel: 'email', provider, allowSharedPage: true}, ctx(), g));
-            expect(result, provider).toStrictEqual({channel: 'email', id: 12, link: link(t), expires_at: null,
-                pending_id: null, kind: 'reconnect', link_kind: 'shared_page', warning: SHARED_PAGE_WARNING});
+            answer(missing());
+            const e = await fails(()=>handle_account_reconnect('12', opts, ctx(), {}));
+            expect(e, JSON.stringify(opts)).toMatchObject({code: 'email_link.not_available', status: 404, exit_code: 1, title: 'This Reply does not issue one-mailbox email connection links, so no link was made.'});
+            expect((e as {hint?: string}).hint, JSON.stringify(opts)).toBeUndefined();
+            expect(sent().map(r=>r.url), JSON.stringify(opts)).toEqual(['https://api/v3/email-accounts/12/reconnect']);
         }
     });
 
@@ -248,13 +175,16 @@ describe('account pending', ()=>{
         expect(sent().map(r=>r.url)).toEqual(['https://api/v3/email-accounts/pending', 'https://api/v3/linkedin-accounts/pending']);
     });
 
-    it('a Reply without one-mailbox email links: email lists nothing and says it is not supported', async()=>{
-        answer(missing());
-        expect((await run(g=>handle_account_pending({channel: 'email'}, ctx(), g))).result)
-            .toStrictEqual({items: [], supported: false, unsupported_channels: ['email']});
-        mock_fetch.mockReset();
-        answer(missing(), json([]));
-        expect((await run(g=>handle_account_pending({}, ctx(), g))).result).toStrictEqual({items: [], supported: false, unsupported_channels: ['email']});
+    it('a Reply without one-mailbox email links is email_link.not_available, offering nothing, with or without --channel email', async()=>{
+        for (const opts of [{channel: 'email'}, {}])
+        {
+            mock_fetch.mockReset();
+            answer(missing(), json([]));
+            const e = await fails(()=>handle_account_pending(opts, ctx(), {}));
+            expect(e, JSON.stringify(opts)).toMatchObject({code: 'email_link.not_available', status: 404, exit_code: 1, title: 'This Reply does not issue one-mailbox email connection links, so no link was made.'});
+            expect((e as {hint?: string}).hint, JSON.stringify(opts)).toBeUndefined();
+            expect(sent().map(r=>r.url), JSON.stringify(opts)).toEqual(['https://api/v3/email-accounts/pending']);
+        }
     });
 
     it('--channel linkedin reads only LinkedIn; a refusal comes under the CLI\'s code', async()=>{

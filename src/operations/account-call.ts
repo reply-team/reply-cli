@@ -4,20 +4,18 @@ import {call_reply, detail_of, is_object, refusal, reply_code_of, type Answer, t
 import type {Call_kind} from '../utils/client';
 import type {Op_globals} from './options';
 
-// The calls of the account commands, and what they write to stderr under --verbose. A connection link,
-// the shared page's address and any token in them are handed over once, in the stdout field `link`: in a
-// trace each is replaced by LINK_REDACTED, wherever it appears.
+// The calls of the account commands, and what they write to stderr under --verbose. A connection link
+// and any token in it are handed over once, in the stdout field `link`: in a trace each is replaced by
+// LINK_REDACTED, wherever it appears.
 
 const LINK_REDACTED = '<link redacted>';
 
-// The fields Reply hands a link in: v3's connectionLink and the v1 shared page's url.
-const LINK_FIELDS = ['connectionlink', 'url'];
+// The field Reply hands a link in: v3's connectionLink.
+const LINK_FIELDS = ['connectionlink'];
 
 // Too short to be a token, and short enough to be an ordinary word of a URL.
 const SHORTEST_TOKEN = 8;
 const SHORTEST_INNER_TOKEN = 16;
-
-const URL_IN_TEXT = /https?:\/\/[^\s"'<>]+/gi;
 
 const safe_decode = (part: string): string=>{
     try {
@@ -85,47 +83,11 @@ const links_in = (data: unknown, found: Set<string> = new Set()): Set<string>=>{
     return found;
 };
 
-// Every string of a body at any depth, the body itself when it is one.
-const strings_of = (data: unknown, found: string[] = []): string[]=>{
-    if (typeof data === 'string')
-    {
-        found.push(data);
-    }
-    else if (Array.isArray(data))
-    {
-        data.forEach(d=>strings_of(d, found));
-    }
-    else if (is_object(data))
-    {
-        Object.values(data).forEach(v=>strings_of(v, found));
-    }
-    return found;
-};
-
-// The secrets of a body that is secret whatever its shape: every address inside any of its strings,
-// with its tokens, and every string that is wholly one value, such as a bare token.
-const body_secrets = (data: unknown): Set<string>=>{
-    const found = links_in(data);
-    for (const text of strings_of(data))
-    {
-        for (const url of text.match(URL_IN_TEXT) ?? [])
-        {
-            add_link(url, found);
-        }
-        if (!/\s/.test(text.trim()) && text.trim().length >= SHORTEST_TOKEN)
-        {
-            add_link(text.trim(), found);
-        }
-    }
-    return found;
-};
-
 const redact_links = (text: string, secrets: Iterable<string>): string=>
     [...secrets].sort((a, b)=>b.length - a.length).reduce((t, s)=>t.split(s).join(LINK_REDACTED), text);
 
-// curl -v style, as `reply api --verbose` writes it, with the answer's body after its headers. A secret
-// body is never shown, only that there was one.
-const trace_lines = (a: Answer, secret_body: boolean): string[]=>{
+// curl -v style, as `reply api --verbose` writes it, with the answer's body after its headers.
+const trace_lines = (a: Answer): string[]=>{
     const lines: string[] = [];
     if (a.request)
     {
@@ -146,44 +108,22 @@ const trace_lines = (a: Answer, secret_body: boolean): string[]=>{
     }
     if (a.data !== null && a.data !== '')
     {
-        const shown = secret_body ? LINK_REDACTED : typeof a.data === 'string' ? a.data : JSON.stringify(a.data);
+        const shown = typeof a.data === 'string' ? a.data : JSON.stringify(a.data);
         lines.push('<', `< ${shown}`);
     }
     return lines;
 };
 
-const secrets_of = (a: Answer, secret_body: boolean): Set<string>=>(secret_body ? body_secrets(a.data) : links_in(a.data));
-
-// One call of an account command. The links in its answer never reach the trace. With `secret_body`
-// (the shared page, whose answer is the address in whatever shape Reply gives it) the trace shows none
-// of the body, and nothing of it appears anywhere else in the trace either.
+// One call of an account command. The links in its answer never reach the trace.
 const account_call = async(
-    s: Op_session, g: Op_globals, method: string, path: string, kind: Call_kind, body?: unknown, opts: {secret_body?: boolean} = {},
+    s: Op_session, g: Op_globals, method: string, path: string, kind: Call_kind, body?: unknown,
 ): Promise<Answer>=>{
     const a = await call_reply(s, method, path, kind, body);
     if (g.verbose)
     {
-        const secret_body = opts.secret_body === true;
-        console.error(redact_links(trace_lines(a, secret_body).join('\n'), secrets_of(a, secret_body)));
+        console.error(redact_links(trace_lines(a).join('\n'), links_in(a.data)));
     }
     return a;
-};
-
-// The same answer with every secret of its body replaced, for an error built from a secret body.
-const without_secrets = (a: Answer): Answer=>{
-    const secrets = body_secrets(a.data);
-    const clean = (v: unknown): unknown=>{
-        if (typeof v === 'string')
-        {
-            return redact_links(v, secrets);
-        }
-        if (Array.isArray(v))
-        {
-            return v.map(clean);
-        }
-        return is_object(v) ? Object.fromEntries(Object.entries(v).map(([k, x])=>[k, clean(x)])) : v;
-    };
-    return {...a, data: clean(a.data)};
 };
 
 // Reply's refusals of the account routes, each at the status Reply answers it with, under the CLI's
@@ -229,4 +169,4 @@ const account_refusal = (a: Answer, kind: Call_kind): Operation_error=>{
 // A route this Reply does not have answers 404 with no code of Reply's; one it has answers its own.
 const route_missing = (a: Answer): boolean=>a.status === 404 && reply_code_of(a) === undefined;
 
-export {LINK_REDACTED, ACCOUNT_REFUSALS, account_call, account_refusal, route_missing, links_in, redact_links, add_link, without_secrets};
+export {LINK_REDACTED, ACCOUNT_REFUSALS, account_call, account_refusal, route_missing, links_in, redact_links, add_link};

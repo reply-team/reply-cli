@@ -1,4 +1,4 @@
-import {Command} from 'commander';
+import {Command, Option} from 'commander';
 import {PROGRAM_NAME} from '../config';
 import {build_context} from '../context';
 import {read_op_globals} from './options';
@@ -431,12 +431,19 @@ time_zone_options(later_options(add_contact_options(contact_command.command('sen
         [`echo '{"subject":"Quick question","body":"<p>Hi Ann, does Tuesday work?</p>"}' | ${P} contact send-email --contact-id 456 --email-account-id 12 --message -`,
             piped_send('send-email', ANN_EMAIL, '{"subject":"Quick question","body":"<p>Hi Ann</p>"}', '--email-account-id 12')],
         ['contact.not_found', ...IMPORT_CODES, 'contact.already_held', 'email_account.not_found', 'contact.blacklisted',
-            'contact.missing_variables', 'contact.rendering_failed', ...SCHEDULE_CODES, ...KEY_CODES], true,
+            'contact.missing_variables', 'contact.rendering_failed', 'email.limit_reached', 'email.sending_disabled',
+            ...SCHEDULE_CODES, ...KEY_CODES], true,
         'Result: {"status":"sent","contact_id","contact_created","message_id","sent_at","reply_status"}: sent means Reply\n'
             + 'accepted the email, and reply_status is Reply\'s own word for it (new or sent). message_id is Reply\'s messageId,\n'
             + 'null when it gives none. Reply\'s answer carries no time, so sent_at is always null; the CLI adds none of its own.\n'
             + 'The email is read from stdin only, so its text never sits in the argument list. The body is HTML. Without\n'
-            + '--send-after, Reply sends a direct email at once, outside the mailbox\'s daily limit and sending delay.\n'
+            + '--send-after, Reply sends a direct email at once.\n'
+            + 'email.limit_reached (429) is a limit Reply holds the send to: details.limit is daily, the mailbox\'s day, which\n'
+            + 'Reply counts in UTC, or active_contacts, the contacts the account may email in its billing period; a send for later\n'
+            + 'is also refused daily when the day it is due already holds as many sends as the mailbox\'s limit. retry_after\n'
+            + 'passes on Reply\'s Retry-After, the seconds until the limit clears, and the CLI never repeats the send itself.\n'
+            + 'email.sending_disabled (403) is a mailbox or team that cannot send direct emails now: the mailbox\'s daily limit\n'
+            + 'is 0, or the team\'s plan does not send. No wait clears it. Neither sends anything, and reply_code keeps Reply\'s code.\n'
             + 'Reply tracks neither links nor opens unless --track-links or --track-opens asks it to. An email sent within the\n'
             + 'request adds rendered_subject and rendered_body, the subject and body as Reply filled them in, when Reply gives\n'
             + 'them; a send held for later has neither. contact.missing_variables names the variables Reply could not fill in\n'
@@ -661,29 +668,30 @@ const LINK_RULE = 'The link is a credential for whoever opens it: it is printed 
 const ACCOUNT_REFUSALS = 'Reply\'s own code for a refusal is always in reply_code, as Reply gave it; a refusal not listed here is\n'
     + 'read like any other command\'s, e.g. reply.refused.\n';
 
-const SHARED_PAGE = '--allow-shared-page: on a Reply without one-mailbox email links (its route answers 404 with no code), print the\n'
-    + 'account user\'s hosted mailbox page instead, with "link_kind":"shared_page", "expires_at":null and a "warning". That\n'
-    + 'address does not expire and lets its holder manage all of this user\'s mailboxes, deletion included. With --provider it\n'
-    + 'is that provider\'s connect on the hosted page; without, the hosted index. Without the flag such a Reply is refused,\n'
-    + 'email_link.not_available, and nothing is printed. shared_page.not_enabled: the plan does not include hosted pages.\n';
+// --allow-shared-page is still taken, hidden, and does nothing: the hosted mailbox page is no longer printed, and a
+// caller that passes the flag is not refused for it. Deprecated, to be removed in a later release.
+const ignored_shared_page = (): Option=>new Option('--allow-shared-page', 'Deprecated and ignored').hideHelp();
+
+// What a link command says of a Reply that has no one-mailbox email links.
+const NOT_AVAILABLE = 'email_link.not_available: this Reply\'s one-mailbox email route answers 404 with no code of Reply\'s, so it does\n'
+    + 'not issue such links; no link was made, and nothing else is offered.\n';
 
 account_command.command('connect')
     .option('--channel <channel>', 'email | linkedin (required)')
-    .option('--provider <provider>', 'gmail | office365: the mailbox\'s provider (email; required unless --allow-shared-page)')
+    .option('--provider <provider>', 'gmail | office365: the mailbox\'s provider (required for email)')
     .option('--name <name>', 'A label for the pending entry (required for LinkedIn; up to 100 characters for email)')
-    .option('--allow-shared-page', 'Email: on a Reply without one-mailbox links, print the hosted mailbox page instead')
+    .addOption(ignored_shared_page())
     .description('Make a link that connects one new account, for the person who signs in to it to open')
     .addHelpText('after', help([ex('account connect --channel email --provider gmail --name "Sales mailbox"'),
         ex('account connect --channel linkedin --name "Dana Example"')],
-    ['email_link.not_available', 'email_link.provider_required', 'shared_page.not_enabled', 'email_account.limit_reached',
-        'email_account.no_free_mailbox_slots', 'linkedin.account_limit_reached'], true,
-    'Result: {"channel","link","expires_at","pending_id","kind":"connect","link_kind":"connection_link"|"shared_page"}.\n'
+    ['email_link.not_available', 'email_account.limit_reached', 'email_account.no_free_mailbox_slots',
+        'linkedin.account_limit_reached'], true,
+    'Result: {"channel","link","expires_at","pending_id","kind":"connect","link_kind":"connection_link"}.\n'
         + 'A connection link connects exactly one account, works once and expires: an email link after 7 days, at expires_at; a\n'
         + 'LinkedIn link\'s expiry is not in Reply\'s answer, so expires_at is null there and `account pending` reads it.\n'
         + 'pending_id is the entry `account pending` lists until the person finishes. Then the account is in `account list`.\n'
-        + 'Without --provider, an email link is a usage error unless --allow-shared-page is given; then a Reply with one-mailbox\n'
-        + 'links answers email_link.provider_required, and one without them gives the hosted index.\n'
-        + LINK_RULE + SHARED_PAGE + ACCOUNT_REFUSALS,
+        + 'Without --provider, an email link is a usage error (usage.provider, exit 2).\n'
+        + LINK_RULE + NOT_AVAILABLE + ACCOUNT_REFUSALS,
     'the link may have been made; it is listed by `account pending`'))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
@@ -693,19 +701,18 @@ account_command.command('connect')
 account_command.command('reconnect')
     .argument('<id>', 'The account\'s id, as `account list` gives it')
     .option('--channel <channel>', 'email | linkedin (required)')
-    .option('--provider <provider>', 'gmail | office365: with --allow-shared-page, which provider\'s hosted connect to print')
-    .option('--allow-shared-page', 'Email: on a Reply without one-mailbox links, print the hosted mailbox page instead')
+    // Reply takes the provider from the mailbox: --provider is still taken on an email reconnect, hidden, and does nothing.
+    .addOption(new Option('--provider <provider>', 'Ignored: Reply takes the provider from the mailbox').hideHelp())
+    .addOption(ignored_shared_page())
     .description('Make a link that reconnects one account that lost its connection, for the person who signs in to it to open')
     .addHelpText('after', help([ex('account reconnect 12 --channel email'), ex('account reconnect 34 --channel linkedin')],
-        ['email_link.not_available', 'shared_page.not_enabled', 'email_account.not_found', 'email_account.reconnect_not_supported',
+        ['email_link.not_available', 'email_account.not_found', 'email_account.reconnect_not_supported',
             'linkedin.account_not_found'], true,
         'Result: {"channel","id","link","expires_at","pending_id","kind":"reconnect","link_kind"}. An email link reconnects\n'
             + 'only the user\'s own Gmail or Office 365 mailbox, and the person must sign in with the same address; Reply takes\n'
             + 'the provider from the mailbox. A LinkedIn link has no pending entry and no expiry in Reply\'s answer, so\n'
             + 'pending_id and expires_at are null; the account\'s status in `account list` says when it is connected again.\n'
-            + 'On the shared page, --provider prints the provider\'s connect marked as a reconnect: the person signs in with\n'
-            + 'the same address. Without it the index is printed: the person opens the mailbox there and reconnects it.\n'
-            + LINK_RULE + SHARED_PAGE + ACCOUNT_REFUSALS,
+            + LINK_RULE + NOT_AVAILABLE + ACCOUNT_REFUSALS,
         'a link may have been made'))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
@@ -715,12 +722,13 @@ account_command.command('reconnect')
 account_command.command('pending')
     .option('--channel <channel>', 'email | linkedin: only this channel\'s entries')
     .description('The connection links made and not used yet, recently expired ones included')
-    .addHelpText('after', help([ex('account pending'), ex('account pending --channel linkedin')], [], false,
+    .addHelpText('after', help([ex('account pending'), ex('account pending --channel linkedin')], ['email_link.not_available'], false,
         'Result: {"items":[{"channel","id","name","kind","account_id","expires_at","expired"}],"supported",\n'
             + '"unsupported_channels"}. kind is connect or reconnect, and account_id the email account a reconnect is for (null\n'
             + 'otherwise). The links themselves are never printed: Reply shows an email link only once, and a LinkedIn one is\n'
-            + 'dropped from the answer. A Reply without one-mailbox email links has no email entries to list: supported is then\n'
-            + 'false and unsupported_channels names email. An entry leaves the list once the person finishes.\n'
+            + 'dropped from the answer. An entry leaves the list once the person finishes. A Reply without one-mailbox email links\n'
+            + 'answers email_link.not_available whenever email is read, and nothing is listed; so supported is always true and\n'
+            + 'unsupported_channels always empty, both kept for callers that read them.\n'
             + ACCOUNT_REFUSALS))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
@@ -850,6 +858,11 @@ const DIRECT_SEND = 'Result: {"reference","channel","contact_id","state","send_a
     + 'the moment the send waits from: its --send-after, or now once that has passed. A Reply without this route answers\n'
     + 'reply.refused with status 404 and no reply_code; a reference of any other form never leaves the CLI, so that 404 means\n'
     + 'this Reply has no such route.\n'
+    + 'bounced, bounce_type and bounced_at are added only when Reply gives them: bounced is whether a bounce came back for\n'
+    + 'the email after it went out, false until one does and always false for LinkedIn; bounce_type is Reply\'s own word for\n'
+    + 'the kind of the latest bounce, as given (hard, soft, mailboxFull, unknown, ...), and bounced_at is when it came.\n'
+    + 'Reply leaves bounce_type and bounced_at null while bounced is false, and bounced_at null when the bounce carried no\n'
+    + 'date; the CLI passes on what Reply gives and checks neither.\n'
     + 'direct_send.not_found is a reference that Reply has no send for, a send of another team included.\n'
     + 'direct_send.not_owned is an email send made by a teammate this user may not act for.\n';
 

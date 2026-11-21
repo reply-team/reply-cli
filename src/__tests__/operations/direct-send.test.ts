@@ -1230,3 +1230,98 @@ describe('a 400 directLinkedIn.unknown on the send call', ()=>{
         }
     });
 });
+
+describe('a direct email Reply refuses for its limits', ()=>{
+    beforeEach(()=>{ instant_timers(); });
+    afterEach(()=>{ real_timers(); });
+
+    const always = (body: Record<string, unknown>, status: number, headers: Record<string, string> = {})=>{
+        mock_fetch.mockImplementation(async()=>json(body, status, headers));
+    };
+    const LIMITED = {title: 'Too Many Requests', status: 429};
+    const EMAIL = {subject: SUBJECT, body: BODY};
+
+    it('the daily limit and the active contacts limit are one code, email.limit_reached, with which one and Reply\'s wait', async()=>{
+        const cases: [string, string, string][] = [
+            ['contact.dailyLimitReached', 'daily', 'The mailbox reached its daily limit, so nothing was sent.'],
+            ['contact.activeContactsLimitReached', 'active_contacts',
+                'The account reached its active contacts limit for the billing period, so nothing was sent.'],
+        ];
+        for (const [reply_code, limit, title] of cases)
+        {
+            mock_fetch.mockReset();
+            always({...LIMITED, code: reply_code, detail: 'Limit reached. The Retry-After header says when to try again.'}, 429,
+                {'Retry-After': '86400'});
+            const e = await failure('send-email', EMAIL, EMAIL_OPTS);
+            expect(e, reply_code).toMatchObject({
+                code: 'email.limit_reached', title, exit_code: 1, status: 429, reply_code, retry_after: 86400,
+                detail: 'Limit reached. The Retry-After header says when to try again.',
+                ids: {contact_id: 456, email_account_id: 12},
+            });
+            expect((e as {details?: unknown}).details, reply_code).toStrictEqual({limit});
+            expect(shown(e), reply_code).not.toContain('Marta');
+            expect(mock_fetch, reply_code).toHaveBeenCalledTimes(1);
+        }
+    });
+
+    it('each limit is one call, also with no Retry-After or a short one to go by', async()=>{
+        for (const [reply_code, headers] of [
+            ['contact.dailyLimitReached', {}], ['contact.activeContactsLimitReached', {}],
+            ['contact.dailyLimitReached', {'Retry-After': '2'}], ['contact.activeContactsLimitReached', {'Retry-After': '2'}],
+        ] as [string, Record<string, string>][])
+        {
+            mock_fetch.mockReset();
+            always({...LIMITED, code: reply_code}, 429, headers);
+            const e = await failure('send-email', EMAIL, EMAIL_OPTS);
+            expect(e, reply_code).toMatchObject({code: 'email.limit_reached'});
+            expect(mock_fetch, reply_code).toHaveBeenCalledTimes(1);
+        }
+    });
+
+    it('a limit that recorded a failed send names that send beside which limit it was', async()=>{
+        always({...LIMITED, code: 'contact.dailyLimitReached', reference: 'email-1001', state: 'failed', sendAfter: '2026-11-21T00:00:00Z'}, 429,
+            {'Retry-After': '3600'});
+        const e = await failure('send-email', EMAIL, EMAIL_OPTS);
+        expect(e).toMatchObject({code: 'email.limit_reached', retry_after: 3600});
+        expect((e as {details?: unknown}).details).toStrictEqual({
+            limit: 'daily', reference: 'email-1001', state: 'failed', send_after: '2026-11-21T00:00:00Z',
+        });
+    });
+
+    it('a mailbox or team that cannot send is email.sending_disabled, with no wait and no word of access', async()=>{
+        always({title: 'Forbidden', status: 403, code: 'contact.emailAccountSendingDisabled',
+            detail: 'The daily limit of this email account is 0, so it cannot send direct emails.'}, 403, {'Retry-After': '60'});
+        const e = await failure('send-email', EMAIL, EMAIL_OPTS);
+        expect(e).toMatchObject({
+            code: 'email.sending_disabled', exit_code: 1, status: 403, reply_code: 'contact.emailAccountSendingDisabled',
+            detail: 'The daily limit of this email account is 0, so it cannot send direct emails.',
+        });
+        expect((e as {retry_after?: unknown}).retry_after).toBeUndefined();
+        expect((e as {title: string}).title).not.toMatch(/access/i);
+        expect((e as {title: string}).title).toMatch(/cannot send/);
+        expect(mock_fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('reads each code only under the status Reply publishes it with', async()=>{
+        const cases: [string, number, string][] = [
+            ['contact.dailyLimitReached', 400, 'reply.refused'],
+            ['contact.activeContactsLimitReached', 403, 'access.denied'],
+            ['contact.emailAccountSendingDisabled', 429, 'rate_limited'],
+            ['contact.emailAccountSendingDisabled', 400, 'reply.refused'],
+        ];
+        for (const [reply_code, status, code] of cases)
+        {
+            mock_fetch.mockReset();
+            always({title: 'Refused', status, code: reply_code}, status, {'Retry-After': '3600'});
+            expect(await failure('send-email', EMAIL, EMAIL_OPTS), `${reply_code} ${status}`).toMatchObject({code, reply_code});
+        }
+    });
+
+    it('a LinkedIn send answering an email code falls to the usual mapping', async()=>{
+        always({...LIMITED, code: 'contact.dailyLimitReached'}, 429, {'Retry-After': '3600'});
+        expect(await failure('linkedin-message', {body: TEXT}, LINKEDIN_OPTS)).toMatchObject({code: 'rate_limited'});
+        mock_fetch.mockReset();
+        always({title: 'Forbidden', status: 403, code: 'contact.emailAccountSendingDisabled'}, 403);
+        expect(await failure('linkedin-message', {body: TEXT}, LINKEDIN_OPTS)).toMatchObject({code: 'access.denied'});
+    });
+});
