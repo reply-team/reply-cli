@@ -422,9 +422,11 @@ Both answer the send under the CLI's names, each null when Reply gives none: `re
 Reply gives them, and so are `bounced`, `bounce_type` and `bounced_at`: whether a bounce came back
 for the email after it went out (false until one does, and always false for LinkedIn), Reply's own
 word for the kind of the latest bounce as given (`hard`, `soft`, `mailboxFull`, `unknown`, …), and
-when it came; the last two are null while `bounced` is false. So is `estimated_send_at`, read the
-same way as on the send but as of the read: set in `waitingForSchedule` only and null in every other state, and null there too when the
-schedule does not open within 30 days counted from `--send-after`, or from now once that has passed.
+when it came. Reply leaves `bounce_type` and `bounced_at` null while `bounced` is false, and
+`bounced_at` null when the bounce carried no date; the CLI passes on what Reply gives and checks
+neither. So is `estimated_send_at`, read the same way as on the send but as of the read: set in
+`waitingForSchedule` only and null in every other state, and null there too when the schedule does
+not open within 30 days counted from `--send-after`, or from now once that has passed.
 `failure_reason` is a sentence for a person and never parsed; `failure_code` is Reply's code for the
 failure, the one to branch on. A failed send may carry no `failure_code`: it is then null, and
 `failure_reason` is all Reply says of it. `direct-send cancel` of a send already cancelled answers
@@ -592,8 +594,9 @@ the others checks or relies on Reply's own state rather than repeating an effect
 **Retries.** Reads are retried on errors. A write is retried only when it can't have reached Reply:
 the connection was never made, or a `429` asked to wait 3 seconds or less. A longer `429` comes back
 as `rate_limited` with `retry_after`. A `429` that names a `reference` or says a daily, weekly or
-active contacts limit was reached is never resent, whatever it asks to wait: Reply may have recorded the attempt, and a repeat
-would record another. Each comes back at once as the refusal it is.
+active contacts limit was reached is never resent, whatever it asks to wait: Reply may have
+recorded the attempt, and a repeat would record another. Each comes back at once as the refusal it
+is.
 
 ## Raw API access
 
