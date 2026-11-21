@@ -6,7 +6,7 @@ description: >
   Use when executing any Reply.io operation from a shell, setting up authentication,
   or when another Reply skill needs commands executed.
 metadata:
-  version: 1.4.1
+  version: 1.5.0
   pack: reply-adapter
   category: execution
   maturity: reviewed
@@ -152,9 +152,8 @@ exit codes with their error `code` slugs.
 - `reply account connect` and `reply account reconnect` print a link for the person who signs in to
   the account to open. The link is a credential: it is in the stdout field `link` once and nowhere
   else (a `--verbose` trace shows `<link redacted>`). Hand it to that person and do not store, log
-  or repeat it. `email_link.not_available` means this Reply has no one-mailbox email link yet; pass
-  `--allow-shared-page` only when the user accepts the hosted mailbox page, whose address does not
-  expire and lets its holder manage all of that user's mailboxes, deletion included.
+  or repeat it. `email_link.not_available` means this Reply has no one-mailbox email links, and
+  nothing else is offered. Do not pass `--allow-shared-page`: it is deprecated and does nothing.
 
 ## Safety
 
@@ -171,6 +170,8 @@ explicit confirmation its Safety section requires.
 
 ## Changelog
 
+- 1.5.0 (2026-11-21): *Failure modes* no longer offers the hosted mailbox page: the CLI prints only
+  one-mailbox connection links, and `--allow-shared-page` is deprecated and does nothing.
 - 1.4.1 (2026-11-21): `reply api` says that a 429 saying an active contacts limit was reached is
   never resent either, as the CLI now treats it.
 - 1.4.0 (2026-11-11): *Failure modes* says how to treat the link `account connect` and `account

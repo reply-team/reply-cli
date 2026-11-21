@@ -1,4 +1,4 @@
-import {Command} from 'commander';
+import {Command, Option} from 'commander';
 import {PROGRAM_NAME} from '../config';
 import {build_context} from '../context';
 import {read_op_globals} from './options';
@@ -668,29 +668,30 @@ const LINK_RULE = 'The link is a credential for whoever opens it: it is printed 
 const ACCOUNT_REFUSALS = 'Reply\'s own code for a refusal is always in reply_code, as Reply gave it; a refusal not listed here is\n'
     + 'read like any other command\'s, e.g. reply.refused.\n';
 
-const SHARED_PAGE = '--allow-shared-page: on a Reply without one-mailbox email links (its route answers 404 with no code), print the\n'
-    + 'account user\'s hosted mailbox page instead, with "link_kind":"shared_page", "expires_at":null and a "warning". That\n'
-    + 'address does not expire and lets its holder manage all of this user\'s mailboxes, deletion included. With --provider it\n'
-    + 'is that provider\'s connect on the hosted page; without, the hosted index. Without the flag such a Reply is refused,\n'
-    + 'email_link.not_available, and nothing is printed. shared_page.not_enabled: the plan does not include hosted pages.\n';
+// --allow-shared-page is still taken, hidden, and does nothing: the hosted mailbox page is no longer printed, and a
+// caller that passes the flag is not refused for it. Deprecated, to be removed in a later release.
+const ignored_shared_page = (): Option=>new Option('--allow-shared-page', 'Deprecated and ignored').hideHelp();
+
+// What a link command says of a Reply that has no one-mailbox email links.
+const NOT_AVAILABLE = 'email_link.not_available: this Reply\'s one-mailbox email route answers 404 with no code of Reply\'s, so it does\n'
+    + 'not issue such links; no link was made, and nothing else is offered.\n';
 
 account_command.command('connect')
     .option('--channel <channel>', 'email | linkedin (required)')
-    .option('--provider <provider>', 'gmail | office365: the mailbox\'s provider (email; required unless --allow-shared-page)')
+    .option('--provider <provider>', 'gmail | office365: the mailbox\'s provider (required for email)')
     .option('--name <name>', 'A label for the pending entry (required for LinkedIn; up to 100 characters for email)')
-    .option('--allow-shared-page', 'Email: on a Reply without one-mailbox links, print the hosted mailbox page instead')
+    .addOption(ignored_shared_page())
     .description('Make a link that connects one new account, for the person who signs in to it to open')
     .addHelpText('after', help([ex('account connect --channel email --provider gmail --name "Sales mailbox"'),
         ex('account connect --channel linkedin --name "Dana Example"')],
-    ['email_link.not_available', 'email_link.provider_required', 'shared_page.not_enabled', 'email_account.limit_reached',
-        'email_account.no_free_mailbox_slots', 'linkedin.account_limit_reached'], true,
-    'Result: {"channel","link","expires_at","pending_id","kind":"connect","link_kind":"connection_link"|"shared_page"}.\n'
+    ['email_link.not_available', 'email_account.limit_reached', 'email_account.no_free_mailbox_slots',
+        'linkedin.account_limit_reached'], true,
+    'Result: {"channel","link","expires_at","pending_id","kind":"connect","link_kind":"connection_link"}.\n'
         + 'A connection link connects exactly one account, works once and expires: an email link after 7 days, at expires_at; a\n'
         + 'LinkedIn link\'s expiry is not in Reply\'s answer, so expires_at is null there and `account pending` reads it.\n'
         + 'pending_id is the entry `account pending` lists until the person finishes. Then the account is in `account list`.\n'
-        + 'Without --provider, an email link is a usage error unless --allow-shared-page is given; then a Reply with one-mailbox\n'
-        + 'links answers email_link.provider_required, and one without them gives the hosted index.\n'
-        + LINK_RULE + SHARED_PAGE + ACCOUNT_REFUSALS,
+        + 'Without --provider, an email link is a usage error (usage.provider, exit 2).\n'
+        + LINK_RULE + NOT_AVAILABLE + ACCOUNT_REFUSALS,
     'the link may have been made; it is listed by `account pending`'))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
@@ -700,19 +701,18 @@ account_command.command('connect')
 account_command.command('reconnect')
     .argument('<id>', 'The account\'s id, as `account list` gives it')
     .option('--channel <channel>', 'email | linkedin (required)')
-    .option('--provider <provider>', 'gmail | office365: with --allow-shared-page, which provider\'s hosted connect to print')
-    .option('--allow-shared-page', 'Email: on a Reply without one-mailbox links, print the hosted mailbox page instead')
+    // Reply takes the provider from the mailbox: --provider is still taken on an email reconnect, hidden, and does nothing.
+    .addOption(new Option('--provider <provider>', 'Ignored: Reply takes the provider from the mailbox').hideHelp())
+    .addOption(ignored_shared_page())
     .description('Make a link that reconnects one account that lost its connection, for the person who signs in to it to open')
     .addHelpText('after', help([ex('account reconnect 12 --channel email'), ex('account reconnect 34 --channel linkedin')],
-        ['email_link.not_available', 'shared_page.not_enabled', 'email_account.not_found', 'email_account.reconnect_not_supported',
+        ['email_link.not_available', 'email_account.not_found', 'email_account.reconnect_not_supported',
             'linkedin.account_not_found'], true,
         'Result: {"channel","id","link","expires_at","pending_id","kind":"reconnect","link_kind"}. An email link reconnects\n'
             + 'only the user\'s own Gmail or Office 365 mailbox, and the person must sign in with the same address; Reply takes\n'
             + 'the provider from the mailbox. A LinkedIn link has no pending entry and no expiry in Reply\'s answer, so\n'
             + 'pending_id and expires_at are null; the account\'s status in `account list` says when it is connected again.\n'
-            + 'On the shared page, --provider prints the provider\'s connect marked as a reconnect: the person signs in with\n'
-            + 'the same address. Without it the index is printed: the person opens the mailbox there and reconnects it.\n'
-            + LINK_RULE + SHARED_PAGE + ACCOUNT_REFUSALS,
+            + LINK_RULE + NOT_AVAILABLE + ACCOUNT_REFUSALS,
         'a link may have been made'))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
@@ -722,12 +722,13 @@ account_command.command('reconnect')
 account_command.command('pending')
     .option('--channel <channel>', 'email | linkedin: only this channel\'s entries')
     .description('The connection links made and not used yet, recently expired ones included')
-    .addHelpText('after', help([ex('account pending'), ex('account pending --channel linkedin')], [], false,
+    .addHelpText('after', help([ex('account pending'), ex('account pending --channel linkedin')], ['email_link.not_available'], false,
         'Result: {"items":[{"channel","id","name","kind","account_id","expires_at","expired"}],"supported",\n'
             + '"unsupported_channels"}. kind is connect or reconnect, and account_id the email account a reconnect is for (null\n'
             + 'otherwise). The links themselves are never printed: Reply shows an email link only once, and a LinkedIn one is\n'
-            + 'dropped from the answer. A Reply without one-mailbox email links has no email entries to list: supported is then\n'
-            + 'false and unsupported_channels names email. An entry leaves the list once the person finishes.\n'
+            + 'dropped from the answer. An entry leaves the list once the person finishes. A Reply without one-mailbox email links\n'
+            + 'answers email_link.not_available whenever email is read, and nothing is listed; so supported is always true and\n'
+            + 'unsupported_channels always empty, both kept for callers that read them.\n'
             + ACCOUNT_REFUSALS))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);

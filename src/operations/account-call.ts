@@ -4,13 +4,13 @@ import {call_reply, detail_of, is_object, refusal, reply_code_of, type Answer, t
 import type {Call_kind} from '../utils/client';
 import type {Op_globals} from './options';
 
-// The calls of the account commands, and what they write to stderr under --verbose. A connection link,
-// the shared page's address and any token in them are handed over once, in the stdout field `link`: in a
-// trace each is replaced by LINK_REDACTED, wherever it appears.
+// The calls of the account commands, and what they write to stderr under --verbose. A connection link
+// and any token in it are handed over once, in the stdout field `link`: in a trace each is replaced by
+// LINK_REDACTED, wherever it appears.
 
 const LINK_REDACTED = '<link redacted>';
 
-// The fields Reply hands a link in: v3's connectionLink and the v1 shared page's url.
+// The fields a link can come in: v3's connectionLink, and any url, which is redacted as one too.
 const LINK_FIELDS = ['connectionlink', 'url'];
 
 // Too short to be a token, and short enough to be an ordinary word of a URL.
@@ -155,8 +155,8 @@ const trace_lines = (a: Answer, secret_body: boolean): string[]=>{
 const secrets_of = (a: Answer, secret_body: boolean): Set<string>=>(secret_body ? body_secrets(a.data) : links_in(a.data));
 
 // One call of an account command. The links in its answer never reach the trace. With `secret_body`
-// (the shared page, whose answer is the address in whatever shape Reply gives it) the trace shows none
-// of the body, and nothing of it appears anywhere else in the trace either.
+// (an answer that is a secret in whatever shape Reply gives it) the trace shows none of the body, and
+// nothing of it appears anywhere else in the trace either.
 const account_call = async(
     s: Op_session, g: Op_globals, method: string, path: string, kind: Call_kind, body?: unknown, opts: {secret_body?: boolean} = {},
 ): Promise<Answer>=>{

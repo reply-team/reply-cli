@@ -8,7 +8,7 @@ import {handle_account_connect, handle_account_reconnect, handle_account_pending
 import {CliError} from '../../utils/errors';
 import type {Op_globals} from '../../operations/options';
 
-// The secret rule: a link, the shared page's address and any token in them are printed once, in the stdout
+// The secret rule: a link and any token in it are printed once, in the stdout
 // field `link`, and nowhere else. Every link command runs here with --verbose against a stubbed Reply; the
 // whole of stderr, the trace and any error are searched for the token and the link.
 
@@ -35,16 +35,6 @@ const CASES: Case[] = [
         answers: t=>[leaky({connectionLink: `${APP}/email-connect/${t}`, pendingAccountId: 52, provider: 'office365',
             expiresAtUtc: '2026-11-18T12:00:00Z'}, t)],
         run: g=>handle_account_reconnect('12', {channel: 'email'}, ctx(), g)},
-    ...(['gmail', 'office365', undefined] as const).map((provider): Case=>({
-        name: `connect email, shared page, ${provider ?? 'index'}`, printed: 1, traced_link: true,
-        answers: t=>[provider === undefined ? json([], 404) : missing(), leaky({url: `${APP}/hosted/eac/index/${t}`}, t)],
-        run: g=>handle_account_connect({channel: 'email', provider, allowSharedPage: true}, ctx(), g),
-    })),
-    ...(['gmail', 'office365', undefined] as const).map((provider): Case=>({
-        name: `reconnect email, shared page, ${provider ?? 'index'}`, printed: 1, traced_link: true,
-        answers: t=>[missing(), json({url: `${APP}/hosted/eac/index/${t}`})],
-        run: g=>handle_account_reconnect('12', {channel: 'email', provider, allowSharedPage: true}, ctx(), g),
-    })),
     {name: 'connect linkedin', printed: 1, traced_link: true,
         answers: t=>[json({connectionLink: `${APP}/linkedin-connect/${t}`, pendingAccountId: 51}, 201)],
         run: g=>handle_account_connect({channel: 'linkedin', name: 'Dana Example'}, ctx(), g)},
@@ -54,28 +44,6 @@ const CASES: Case[] = [
     {name: 'pending, a LinkedIn entry with its link', printed: 0, traced_link: true,
         answers: t=>[json([]), json([{id: 7, name: 'Dana', connectionLink: `${APP}/linkedin-connect/${t}`, expiresAtUtc: null, isExpired: false}])],
         run: g=>handle_account_pending({}, ctx(), g)},
-    {name: 'a shared page in a form the CLI cannot read, so an error', printed: 0, traced_link: true,
-        answers: t=>[missing(), json({url: `${APP}/hosted/elsewhere/${t}`})],
-        run: g=>handle_account_connect({channel: 'email', provider: 'gmail', allowSharedPage: true}, ctx(), g)},
-    // The shared page's answer is a secret whatever its shape: a bare string, or a body with no address in it.
-    {name: 'connect email, shared page answered as a bare string', printed: 1, traced_link: true,
-        answers: t=>[missing(), leaky(`${APP}/hosted/eac/index/${t}`, t)],
-        run: g=>handle_account_connect({channel: 'email', provider: 'office365', allowSharedPage: true}, ctx(), g)},
-    {name: 'reconnect email, shared page answered as a bare string, the index', printed: 1, traced_link: true,
-        answers: t=>[missing(), json(`${APP}/hosted/eac/index/${t}`)],
-        run: g=>handle_account_reconnect('12', {channel: 'email', allowSharedPage: true}, ctx(), g)},
-    {name: 'a shared page answered as a bare token, not an address, so an error', printed: 0, traced_link: true,
-        answers: t=>[missing(), json(t)],
-        run: g=>handle_account_connect({channel: 'email', provider: 'gmail', allowSharedPage: true}, ctx(), g)},
-    {name: 'a shared page answered as text that is not an address, so an error', printed: 0, traced_link: true,
-        answers: t=>[missing(), json(`hosted token ${t} for this user`)],
-        run: g=>handle_account_connect({channel: 'email', provider: 'gmail', allowSharedPage: true}, ctx(), g)},
-    {name: 'a shared page answered as an object holding no address, so an error', printed: 0, traced_link: true,
-        answers: t=>[missing(), json({hostedToken: t})],
-        run: g=>handle_account_connect({channel: 'email', provider: 'gmail', allowSharedPage: true}, ctx(), g)},
-    {name: 'a shared page refused with the address in the refusal, so an error', printed: 0, traced_link: true,
-        answers: t=>[missing(), json({title: 'Bad Request', detail: `open ${APP}/hosted/eac/index/${t} instead`}, 400)],
-        run: g=>handle_account_connect({channel: 'email', provider: 'gmail', allowSharedPage: true}, ctx(), g)},
     {name: 'an answer without a usable link, so outcome unknown', printed: 0, traced_link: true,
         answers: t=>[json({connectionLink: 42, pendingAccountId: 51, debug: {url: `${APP}/linkedin-connect/${t}`}}, 201)],
         run: g=>handle_account_connect({channel: 'linkedin', name: 'Dana'}, ctx(), g)},
@@ -127,9 +95,8 @@ describe('the secret rule, through the program', ()=>{
         fs.rmSync(dir, {recursive: true, force: true});
     });
 
-    it('a shared page the CLI cannot read: exit 1, a trace on stderr, the token nowhere', async()=>{
-        const t = crypto.randomBytes(24).toString('base64url');
-        answer(missing(), json({url: `${APP}/hosted/elsewhere/${t}`}));
+    it('--allow-shared-page is still accepted, and ignored: a Reply without the route is email_link.not_available, exit 1', async()=>{
+        answer(missing());
         let exited!: (code: number) => void;
         const exit = new Promise<number>(resolve=>{ exited = resolve; });
         let first: number | undefined;
@@ -144,14 +111,13 @@ describe('the secret rule, through the program', ()=>{
             '--allow-shared-page'];
         vi.resetModules();
         let code = -1;
-        const {out, err} = await capture(async()=>{
+        const {err} = await capture(async()=>{
             await import('../../index');
             code = await exit;
         });
         expect(code).toBe(1);
-        expect(err).toContain('> GET https://api.reply.io/v1/SharedPageUrl');
-        expect(err).toContain('<link redacted>');
-        expect(err).toContain('"code":"reply.unavailable"');
-        expect(occurrences(err + out, t), err).toBe(0);
+        expect(err).toContain('> POST https://api.reply.io/v3/email-accounts/connection-link');
+        expect(err).not.toContain('SharedPageUrl');
+        expect(err).toContain('"code":"email_link.not_available"');
     });
 });

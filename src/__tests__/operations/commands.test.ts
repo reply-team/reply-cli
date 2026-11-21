@@ -133,10 +133,16 @@ describe('operations/commands', ()=>{
         {
             const flat = help_of(sub(account_command, name)).replace(/\s+/g, ' ');
             expect(flat, name).toContain('it is printed once, in "link", and never on stderr, in a --verbose trace (where it reads <link redacted>)');
-            expect(flat, name).toContain('That address does not expire and lets its holder manage all of this user\'s mailboxes, deletion included');
             expect(flat, name).toContain('email_link.not_available');
             expect(flat, name).toContain('outcome.unknown');
+            // --allow-shared-page is still taken, so a caller passing it is not refused, and it is hidden: it does nothing.
+            expect(flat, name).not.toContain('--allow-shared-page');
+            expect(flat, name).not.toMatch(/shared|hosted/i);
+            expect(flat, name).not.toContain('shared_page.not_enabled');
         }
+        expect(help_of(sub(account_command, 'reconnect')), 'reconnect').not.toContain('--provider');
+        expect(help_of(sub(account_command, 'pending')).replace(/\s+/g, ' '))
+            .toContain('A Reply without one-mailbox email links answers email_link.not_available');
         const pending = help_of(sub(account_command, 'pending')).replace(/\s+/g, ' ');
         expect(pending).toContain('The links themselves are never printed');
         expect(pending).not.toContain('outcome.unknown');
