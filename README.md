@@ -547,17 +547,13 @@ is in `account list`. An email link needs `--provider`; a reconnect takes the pr
 mailbox, and the person must sign in with the same address. A LinkedIn connect needs `--name`, which
 Reply lists the pending account under.
 
-A Reply without one-mailbox email links answers that route with a 404 and no code. The email
-commands then refuse with `email_link.not_available` (exit 1) and print nothing, unless
-`--allow-shared-page` is given: then they print the account user's hosted mailbox page, the
-provider's connect on it with `--provider` and its index without, with `"link_kind":"shared_page"`,
-`"expires_at":null` and a `warning`. That address does not expire and lets its holder manage all of
-this user's mailboxes, deletion included, so ask for it only when that is acceptable. For
-`account reconnect` the provider's connect is marked as a reconnect, so a user with no free mailbox
-slot reconnects the mailbox rather than being refused a new one; on the index, the person opens the
-mailbox and reconnects it from there.
-`shared_page.not_enabled` means the plan does not include hosted pages. `account pending` then lists
-no email entries and answers `"supported":false` with `"unsupported_channels":["email"]`.
+A Reply without one-mailbox email links answers that route with a 404 and no code. `account
+connect`, `account reconnect` and `account pending` then refuse with `email_link.not_available`
+(exit 1), print nothing and offer nothing else. `"link_kind"` is always `"connection_link"`, and
+`account pending` always answers `"supported":true` with `"unsupported_channels":[]`; the fields are
+kept for callers that read them. `--allow-shared-page`, which printed the account user's hosted
+mailbox page on such a Reply, is deprecated: it is still accepted, does nothing and is hidden from
+the help, and a later release removes it. So is `--provider` on `account reconnect`.
 
 ```sh
 reply account connect --channel email --provider gmail --name "Sales mailbox"

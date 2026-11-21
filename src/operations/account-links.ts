@@ -1,7 +1,6 @@
 import {Operation_error, UsageError} from '../utils/errors';
-import {is_object, open_session, refusal, unreadable, type Answer, type Op_session} from './call';
-import {account_call, account_refusal, route_missing, without_secrets} from './account-call';
-import {HOSTED_PROVIDERS, SHARED_PAGE_WARNING, read_shared_page, shared_page_link, type Hosted_provider} from './shared-page';
+import {is_object, open_session, unreadable, type Answer, type Op_session} from './call';
+import {account_call, account_refusal, route_missing} from './account-call';
 import {ACCOUNT_CHANNELS, require_channel, type Account_channel} from './accounts';
 import {parse_choice, parse_id, LARGEST_SAFE_ID, type Op_globals} from './options';
 import {print_result} from './result';
@@ -10,21 +9,25 @@ import type {Cli_context} from '../context';
 // connect, reconnect and pending. A link is a credential for whoever opens it: it is printed once, in the
 // stdout field `link`, and nowhere else (see account-call.ts for the trace).
 
-type Link_kind = 'connection_link' | 'shared_page';
+// The providers a one-mailbox email link is made for.
+const EMAIL_PROVIDERS = ['gmail', 'office365'] as const;
+type Email_provider = typeof EMAIL_PROVIDERS[number];
+
+// link_kind is always connection_link: the field is kept so a caller that reads it reads what it always read.
 type Link_result = {
     channel: Account_channel; id?: number; link: string; expires_at: string | null; pending_id: number | null;
-    kind: 'connect' | 'reconnect'; link_kind: Link_kind; warning?: string;
+    kind: 'connect' | 'reconnect'; link_kind: 'connection_link';
 };
+// allowSharedPage is accepted and ignored: the hosted mailbox page is no longer printed, and a caller that still passes
+// the flag is not refused for it. Deprecated, to be removed in a later release. provider on a reconnect is ignored the
+// same way: Reply takes the provider from the mailbox.
 type Link_opts = {channel?: string; provider?: string; name?: string; allowSharedPage?: boolean};
 
 const EMAIL_NAME_MAX = 100;     // Reply's limit on a connection link's label
 
+// A Reply without one-mailbox email links: its route answers 404 with no code of Reply's own. Nothing else is offered.
 const email_link_not_available = (): Operation_error=>new Operation_error('email_link.not_available',
-    'This Reply does not issue one-mailbox email connection links yet, so no link was made.', {
-        status: 404,
-        hint: 'With --allow-shared-page the account\'s hosted mailbox page is printed instead; '
-            + `${SHARED_PAGE_WARNING}.`,
-    });
+    'This Reply does not issue one-mailbox email connection links, so no link was made.', {status: 404});
 
 const text_or_null = (v: unknown): string | null=>(typeof v === 'string' && v.trim() !== '' ? v : null);
 const positive_or_null = (v: unknown): number | null=>(typeof v === 'number' && Number.isSafeInteger(v) && v > 0 ? v : null);
@@ -48,45 +51,12 @@ const connection_link = (channel: Account_channel, kind: 'connect' | 'reconnect'
     };
 };
 
-// The account user's hosted mailbox page, from Reply's v1 route: the provider's connect when one is named,
-// else the index. Reply's v1 gives no code, so the plan's refusal is named here.
-const shared_page = async(
-    s: Op_session, g: Op_globals, kind: 'connect' | 'reconnect', provider: Hosted_provider | undefined, id?: number,
-): Promise<Link_result>=>{
-    // Its answer is the address, in whatever shape Reply gives it, so the whole body is a secret.
-    const a = await account_call(s, g, 'GET', '/v1/SharedPageUrl', 'read', undefined, {secret_body: true});
-    if (a.status === 403 && /shared page is not enabled/i.test(JSON.stringify(a.data ?? '')))
-    {
-        throw new Operation_error('shared_page.not_enabled', 'The account\'s plan does not include hosted pages, so there is no shared page.', {
-            status: 403,
-        });
-    }
-    if (a.status !== 200)
-    {
-        throw refusal(without_secrets(a), 'read');
-    }
-    // {"url": …} as Reply's v1 answers it; a bare string is read as the address too.
-    const url = typeof a.data === 'string' ? a.data.trim() : is_object(a.data) ? a.data.url ?? a.data.Url : undefined;
-    const page = typeof url === 'string' ? read_shared_page(url) : null;
-    if (page === null)
-    {
-        throw unreadable(a, 'read');
-    }
-    return {
-        channel: 'email', ...(id === undefined ? {} : {id}), link: shared_page_link(page, provider, kind),
-        expires_at: null, pending_id: null, kind, link_kind: 'shared_page', warning: SHARED_PAGE_WARNING,
-    };
-};
-
-const parse_provider = (raw: string | undefined): Hosted_provider | undefined=>parse_choice(raw, '--provider', HOSTED_PROVIDERS);
+const parse_provider = (raw: string | undefined): Email_provider | undefined=>parse_choice(raw, '--provider', EMAIL_PROVIDERS);
 
 const email_only = (opts: Link_opts): void=>{
-    for (const [value, flag] of [[opts.provider, '--provider'], [opts.allowSharedPage, '--allow-shared-page']] as const)
+    if (opts.provider !== undefined)
     {
-        if (value !== undefined && value !== false)
-        {
-            throw new UsageError(`${flag} applies to --channel email only.`, {code: 'usage.channel'});
-        }
+        throw new UsageError('--provider applies to --channel email only.', {code: 'usage.channel'});
     }
 };
 
@@ -100,41 +70,13 @@ const connect_linkedin = async(s: Op_session, g: Op_globals, name: string): Prom
     return connection_link('linkedin', 'connect', a);
 };
 
-const connect_email = async(
-    s: Op_session, g: Op_globals, provider: Hosted_provider | undefined, name: string | undefined, allow_shared_page: boolean,
-): Promise<Link_result>=>{
-    if (provider === undefined)
-    {
-        // Reply's one-mailbox link is made for one provider. The shared page's index needs none, and is
-        // given only by a Reply without those links: a read of their list says which Reply this is.
-        const probe = await account_call(s, g, 'GET', '/v3/email-accounts/pending', 'read');
-        if (!route_missing(probe))
-        {
-            if (probe.status === 401 || probe.status === 429 || probe.status >= 500)
-            {
-                throw refusal(probe, 'read');
-            }
-            throw new Operation_error('email_link.provider_required',
-                'This Reply issues one-mailbox connection links, and each is made for one provider, so none was made.', {
-                    status: probe.status, hint: 'Name the mailbox\'s provider: --provider gmail or --provider office365.',
-                });
-        }
-        return shared_page(s, g, 'connect', undefined);
-    }
+const connect_email = async(s: Op_session, g: Op_globals, provider: Email_provider, name: string | undefined): Promise<Link_result>=>{
     const a = await account_call(s, g, 'POST', '/v3/email-accounts/connection-link', 'write', {provider, ...(name === undefined ? {} : {name})});
     if (a.status === 201 || a.status === 200)
     {
         return connection_link('email', 'connect', a);
     }
-    if (!route_missing(a))
-    {
-        throw account_refusal(a, 'write');
-    }
-    if (!allow_shared_page)
-    {
-        throw email_link_not_available();
-    }
-    return shared_page(s, g, 'connect', provider);
+    throw route_missing(a) ? email_link_not_available() : account_refusal(a, 'write');
 };
 
 const handle_account_connect = async(opts: Link_opts, ctx: Cli_context, g: Op_globals): Promise<void>=>{
@@ -158,16 +100,12 @@ const handle_account_connect = async(opts: Link_opts, ctx: Cli_context, g: Op_gl
     {
         throw new UsageError(`--name must be at most ${EMAIL_NAME_MAX} characters.`, {code: 'usage.name'});
     }
-    if (provider === undefined && opts.allowSharedPage !== true)
+    if (provider === undefined)
     {
-        throw new UsageError('--provider is required for an email connection link: gmail or office365.', {
-            code: 'usage.provider',
-            hint: 'Only with --allow-shared-page, and only on a Reply without one-mailbox links, does the CLI print the hosted '
-                + 'mailbox page without a provider.',
-        });
+        throw new UsageError('--provider is required for an email connection link: gmail or office365.', {code: 'usage.provider'});
     }
     const s = await open_session(ctx, g);
-    print_result(await connect_email(s, g, provider, name, opts.allowSharedPage === true), g);
+    print_result(await connect_email(s, g, provider, name), g);
 };
 
 const handle_account_reconnect = async(id_arg: string, opts: Link_opts, ctx: Cli_context, g: Op_globals): Promise<void>=>{
@@ -190,24 +128,15 @@ const handle_account_reconnect = async(id_arg: string, opts: Link_opts, ctx: Cli
         return;
     }
     const id = parse_id(id_arg, 'Email account id', LARGEST_SAFE_ID);
-    const provider = parse_provider(opts.provider);
     const s = await open_session(ctx, g);
-    // Reply takes the provider from the mailbox itself; --provider picks only the shared page's address.
+    // Reply takes the provider from the mailbox itself.
     const a = await account_call(s, g, 'POST', `/v3/email-accounts/${id}/reconnect`, 'write');
     if (a.status === 200 || a.status === 201)
     {
         print_result(connection_link('email', 'reconnect', a, id), g);
         return;
     }
-    if (!route_missing(a))
-    {
-        throw account_refusal(a, 'write');
-    }
-    if (opts.allowSharedPage !== true)
-    {
-        throw email_link_not_available();
-    }
-    print_result(await shared_page(s, g, 'reconnect', provider, id), g);
+    throw route_missing(a) ? email_link_not_available() : account_refusal(a, 'write');
 };
 
 type Pending_item = {
@@ -239,22 +168,14 @@ const handle_account_pending = async(opts: {channel?: string}, ctx: Cli_context,
     const only = parse_choice(opts.channel, '--channel', ACCOUNT_CHANNELS);
     const s = await open_session(ctx, g);
     const items: Pending_item[] = [];
-    const unsupported: Account_channel[] = [];
     if (only !== 'linkedin')
     {
         const a = await account_call(s, g, 'GET', '/v3/email-accounts/pending', 'read');
-        if (route_missing(a))
+        if (a.status !== 200)
         {
-            unsupported.push('email');
+            throw route_missing(a) ? email_link_not_available() : account_refusal(a, 'read');
         }
-        else if (a.status === 200)
-        {
-            items.push(...pending_items(a, 'email'));
-        }
-        else
-        {
-            throw account_refusal(a, 'read');
-        }
+        items.push(...pending_items(a, 'email'));
     }
     if (only !== 'email')
     {
@@ -265,7 +186,9 @@ const handle_account_pending = async(opts: {channel?: string}, ctx: Cli_context,
         }
         items.push(...pending_items(a, 'linkedin'));
     }
-    print_result({items, supported: unsupported.length === 0, unsupported_channels: unsupported}, g);
+    // supported and unsupported_channels are kept so a caller that reads them reads what it always read; a Reply
+    // without one-mailbox email links is refused above, so every channel listed is supported.
+    print_result({items, supported: true, unsupported_channels: []}, g);
 };
 
 export {handle_account_connect, handle_account_reconnect, handle_account_pending};
