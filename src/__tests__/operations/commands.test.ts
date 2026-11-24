@@ -305,7 +305,9 @@ describe('operations/commands', ()=>{
     const SENT_AT_AS_GIVEN = 'sentAtUtc as Reply gives them, each null when it gives none; the CLI adds no time of its own';
     const DIRECT_SENDS: [string, string, string[], string][] = [
         ['send-email', '--email-account-id', ['contact.not_found', ...IMPORT, 'contact.already_held', 'email_account.not_found', 'contact.blacklisted',
-            'contact.missing_variables', 'contact.rendering_failed', 'email.limit_reached', 'email.sending_disabled', 'schedule.not_found', 'schedule.no_slot', 'contact.time_zone_missing'],
+            'contact.missing_variables', 'contact.rendering_failed', 'email.limit_reached', 'email.sending_disabled', 'follows.not_available',
+            'follows.not_found', 'follows.not_owned', 'follows.other_contact', 'follows.other_mailbox', 'follows.never_sent', 'follows.not_sent',
+            'follows.too_early', 'follows.not_placed', 'schedule.not_found', 'schedule.no_slot', 'contact.time_zone_missing'],
             'sent_at is always null; the CLI adds none of its own'],
         ['linkedin-connect', '--linkedin-account-id', [...LINKEDIN, 'linkedin.not_connected', 'linkedin.limit_reached',
             'linkedin.message_too_long', 'linkedin.missing_variables'], SENT_AT_AS_GIVEN],
@@ -331,7 +333,7 @@ describe('operations/commands', ()=>{
         {
             const c = sub(contact_command, name);
             expect(flags(c), name).toEqual([...CONTACT_FLAGS, account_flag, '--message',
-                ...(name === 'send-email' ? ['--track-links', '--track-opens'] : []), '--send-after', '--schedule-id', '--idempotency-key',
+                ...(name === 'send-email' ? ['--track-links', '--track-opens', '--follows'] : []), '--send-after', '--schedule-id', '--idempotency-key',
                 '--use-contact-time-zone', '--no-use-contact-time-zone', ...(name === 'send-email' ? [] : ['--retry-window-minutes'])]);
             const text = help_of(c);
             const flat = text.replace(/\s+/g, ' ');
@@ -414,6 +416,44 @@ describe('operations/commands', ()=>{
         expect(flat, flat).toContain('email.limit_reached (429) is a limit Reply holds the send to: details.limit is daily');
         expect(flat, flat).toContain('or active_contacts');
         expect(flat, flat).toContain('email.sending_disabled (403) is a mailbox or team that cannot send direct emails now');
+    });
+
+    it('send-email takes --follows, shows it in an example, and says what a follow-up takes and how each of its refusals reads', ()=>{
+        const c = sub(contact_command, 'send-email');
+        const text = help_of(c);
+        const flat = text.replace(/\s+/g, ' ');
+        const follows = c.options.find(o=>o.long === '--follows');
+        expect(follows?.flags).toBe('--follows <reference>');
+        expect(follows?.description).toContain('a follow-up in the thread of this earlier direct email');
+        expect(c.options.find(o=>o.long === '--message')?.description).toContain('with --follows, {body} alone');
+        expect(text, text).toContain('contact send-email --contact-id 456 --email-account-id 12 --follows email-1001 --message -');
+        expect(flat, flat).toContain('--follows <reference> sends the email as a follow-up in the thread of an earlier direct email');
+        expect(flat, flat).toContain('email-<n> with n from 1 and no leading zero; any other form is refused before any call (usage.reference, exit 2)');
+        expect(flat, flat).toContain('The follow-up goes under its thread\'s subject, so its message is {body} alone: a message with a subject is '
+            + 'refused (usage.message, exit 2) and nothing is sent');
+        expect(flat, flat).toContain('It goes to the contact and from the mailbox of the email it follows, and its answer always carries Reply\'s reference');
+        for (const code of ['follows.not_found', 'follows.not_owned', 'follows.other_contact', 'follows.other_mailbox', 'follows.never_sent',
+            'follows.not_sent', 'follows.too_early', 'follows.not_placed'])
+        {
+            expect(text, code).toContain(`  ${code}\n`);
+            expect(flat.split('Errors')[0], code).toContain(code);
+        }
+        expect(flat, flat).toContain('follows.not_available: this Reply\'s follow-up route answers 404 with no code of Reply\'s, so it does not offer '
+            + 'follow-ups; nothing else is tried in its place');
+        expect(flat, flat).toContain('None of them sends anything, and each of the others keeps Reply\'s code in reply_code');
+        expect(c.description(), c.description()).toContain('with --follows, in an earlier direct email\'s thread');
+    });
+
+    it('direct-send get says when follows is given and which failure codes a follow-up may carry', ()=>{
+        for (const name of ['get', 'cancel'])
+        {
+            const flat = help_of(sub(direct_send_command, name)).replace(/\s+/g, ' ');
+            expect(flat, name).toContain('follows is added only when Reply gives it: the reference of the earlier direct email a follow-up went in '
+                + 'the thread of (send-email --follows), or null for a send that follows none');
+            expect(flat, name).toContain('contact.followedSendNotSent (that email had not gone out when the follow-up was due), '
+                + 'contact.followedSendNeverSent (it was cancelled or failed for good) or contact.followUpNotPlaced');
+            expect(flat, name).toContain('like every failure_code, each is passed on as Reply gives it');
+        }
     });
 
     it('direct-send get says when the bounce members are given and what each holds', ()=>{

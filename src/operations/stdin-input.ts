@@ -9,6 +9,7 @@ type Stdin_object_opts = {
     fields: readonly string[];  // the names the object may carry
     code: string;               // the UsageError code
     hint: string;               // how to pipe it in
+    refused?: Record<string, string>;   // a name the object may not carry here, with the sentence that says why
 };
 
 // A person's text is read from stdin only, never from the argument list, which may be logged where
@@ -31,6 +32,13 @@ const read_stdin_object = (source: string | undefined, o: Stdin_object_opts, rea
     if (!is_object(value))
     {
         throw new UsageError(`The ${o.what} must be a JSON object: ${shape}.`, {code: o.code});
+    }
+    // A name refused here says why, rather than reading as unknown.
+    const refused = o.refused ?? {};
+    const refused_field = Object.keys(value).find(k=>Object.prototype.hasOwnProperty.call(refused, k));
+    if (refused_field !== undefined)
+    {
+        throw new UsageError(refused[refused_field], {code: o.code, hint: `Fields: ${o.fields.join(', ')}.`});
     }
     const unknown_field = Object.keys(value).find(k=>!o.fields.includes(k));
     if (unknown_field !== undefined)

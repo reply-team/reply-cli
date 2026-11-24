@@ -2,6 +2,7 @@ import {PROGRAM_NAME} from '../config';
 import {Operation_error, Unknown_outcome_error, UsageError, type Ids} from '../utils/errors';
 import {parse_retry_after} from '../utils/client';
 import {call_reply, expect_object, refusal, is_object, reply_code_of, detail_of, open_session, type Answer} from './call';
+import {route_missing} from './account-call';
 import {parse_id, parse_int_in, parse_moment, parse_idempotency_key, LARGEST_SAFE_ID, type Op_globals} from './options';
 import {read_contact_input, type Contact_flags, type Contact_ref} from './contact-input';
 import {contact_not_found, find_contact_by_address, import_contact, type Channel, type Ensured} from './contacts';
@@ -13,7 +14,7 @@ type Direct_send_name = 'send-email' | 'linkedin-connect' | 'linkedin-message' |
 type Direct_send_opts = Contact_flags & {
     emailAccountId?: string; linkedinAccountId?: string; message?: string;
     sendAfter?: string; scheduleId?: string; idempotencyKey?: string; trackLinks?: boolean; trackOpens?: boolean;
-    useContactTimeZone?: boolean; retryWindowMinutes?: string;
+    useContactTimeZone?: boolean; retryWindowMinutes?: string; follows?: string;
 };
 type Text = Record<string, string>;
 
@@ -23,6 +24,7 @@ type Direct_send = {
     fields: readonly string[];          // the text on stdin, every field required
     longest: Record<string, number>;    // the longest each field may be, where Reply publishes it
     text_optional?: boolean;            // without --message nothing is read (an invitation without a note)
+    refused?: Record<string, string>;   // a field the text may not carry on this route, with the sentence that says why
     body: (account_id: number, text: Text | undefined) => Record<string, unknown>;
 };
 
@@ -53,6 +55,29 @@ const DIRECT_SENDS: Record<Direct_send_name, Direct_send> = {
 
 const CODE = 'usage.message';
 
+// send-email --follows: the email goes as a follow-up in the thread of an earlier direct email, through a route of its own.
+// It goes under its thread's subject, so it takes a body alone, and Reply refuses a subject (400 at /subject); one given is
+// refused here first, saying why, rather than read as an unknown field.
+const EMAIL_FOLLOW_UP: Direct_send = {
+    path: 'send-direct-email-follow-up', what: 'follow-up', fields: ['body'], longest: {},
+    refused: {subject: 'A follow-up takes no subject: it goes under its thread\'s subject, so the message is {body} alone.'},
+    body: (id, t)=>({emailAccountId: id, body: t?.body}),
+};
+
+// The reference of an earlier direct email, spelled as Reply gives it and as direct-send get takes it: email-<n>, n from 1,
+// with no leading zero and at most ten digits. Nothing else is read from it.
+const FOLLOWS = /^email-[1-9]\d{0,9}$/;
+
+const parse_follows = (raw: string): string=>{
+    if (!FOLLOWS.test(raw))
+    {
+        throw new UsageError('--follows must be the reference of an earlier direct email: email-<n>, n from 1.', {
+            code: 'usage.reference', hint: 'The send-email that sent that email answered it as reference.',
+        });
+    }
+    return raw;
+};
+
 const required_id = (raw: string | undefined, flag: string, largest?: number): number=>{
     if (raw === undefined)
     {
@@ -71,7 +96,7 @@ const read_text = (name: Direct_send_name, send: Direct_send, source: string | u
     }
     const shape = `{${send.fields.map(f=>`"${f}":"…"`).join(',')}}`;
     const raw = read_stdin_object(source, {
-        flag: '--message', what: 'message', fields: send.fields, code: CODE,
+        flag: '--message', what: 'message', fields: send.fields, code: CODE, refused: send.refused,
         hint: `Pipe it in: echo '${shape}' | ${PROGRAM_NAME} contact ${name} … --message -`,
     }, read_stdin);
     const text: Text = {};
@@ -251,6 +276,43 @@ const KEY_REFUSALS: Record<Channel, Record<string, Refusal>> = {
     email: {'contact.idempotencyKeyInUse': KEY_IN_USE, 'contact.idempotencyKeyReused': KEY_REUSED},
     linkedin: {'directLinkedIn.idempotencyKeyInUse': KEY_IN_USE, 'directLinkedIn.idempotencyKeyReused': KEY_REUSED},
 };
+// The follow-up route's refusals of the email it names in follows. Only that route answers them, so a plain send answering
+// one of these codes falls to the usual mapping. Each one is definite: nothing was sent.
+const FOLLOW_UP_REFUSALS: Record<string, Refusal> = {
+    'contact.followedSendNotFound': {
+        status: 404, code: 'follows.not_found', title: 'Reply has no direct email under the --follows reference that this account can see, so nothing was sent.',
+    },
+    'contact.followedSendNotOwned': {
+        status: 403, code: 'follows.not_owned', title: 'The email --follows names is a teammate\'s send this user may not act for, so nothing was sent.',
+    },
+    'contact.followedSendOtherContact': {
+        status: 400, code: 'follows.other_contact', title: 'The email --follows names went to another contact, so nothing was sent.',
+        hint: 'A follow-up goes to the contact of the email it follows.',
+    },
+    'contact.followedSendOtherMailbox': {
+        status: 400, code: 'follows.other_mailbox', title: 'The email --follows names goes from another mailbox, so nothing was sent.',
+        hint: 'A follow-up goes from the mailbox of the email it follows: give that one in --email-account-id.',
+    },
+    'contact.followedSendNeverSent': {
+        status: 409, code: 'follows.never_sent', title: 'The email --follows names was cancelled or failed for good, so it has no thread; nothing was sent.',
+    },
+    'contact.followedSendNotSent': {
+        status: 409, code: 'follows.not_sent', title: 'The email --follows names has not gone out yet, so the follow-up cannot go at once; nothing was sent.',
+        hint: 'Give it a --send-after later than that email\'s own moment, or a --schedule-id; direct-send get reads where that email stands.',
+    },
+    'contact.followUpBeforeFollowedSend': {
+        status: 409, code: 'follows.too_early', title: 'The follow-up\'s --send-after is not later than the moment of the email it follows, so nothing was sent.',
+        hint: 'Give a --send-after later than that email\'s send_after.',
+    },
+    'contact.followUpNotPlaced': {
+        status: 409, code: 'follows.not_placed',
+        title: 'The email --follows names went out, but Reply can no longer find it to place the follow-up in its thread; nothing was sent.',
+    },
+};
+// A Reply without follow-ups: its route answers 404 with no code of Reply's own. Nothing else is tried in its place, a plain
+// send included, so nothing was sent.
+const follows_not_available = (): Operation_error=>new Operation_error('follows.not_available',
+    'This Reply does not offer follow-ups in an earlier email\'s thread, so nothing was sent.', {status: 404});
 // The routes that read and cancel a send by its reference answer under directSend: a reference this
 // account has no send for, a send it may not act on, and, to a cancel, a send already gone out or failed.
 const DIRECT_SEND_REFUSALS: Record<string, Refusal> = {
@@ -304,13 +366,17 @@ const exception_of_send = (a: Answer): boolean=>
 const linkedin_exception = (a: Answer, by: Channel): boolean=>
     by === 'linkedin' && a.status === 400 && reply_code_of(a) === 'directLinkedIn.unknown';
 
-const refusal_of_send = (a: Answer, contact_id: number, by: Channel): Operation_error=>{
+const refusal_of_send = (a: Answer, contact_id: number, by: Channel, follow_up: boolean): Operation_error=>{
     const reply_code = reply_code_of(a);
     if (exception_of_send(a) || linkedin_exception(a, by))
     {
         return new Unknown_outcome_error('Reply failed while handling the send; it may or may not have been made.', {
             status: a.status, reply_code, detail: detail_of(a),
         });
+    }
+    if (follow_up && route_missing(a))
+    {
+        return follows_not_available();
     }
     if (a.status === 404 && (reply_code === 'contact.notFound' || reply_code === 'directLinkedIn.contactNotFound'))
     {
@@ -324,15 +390,16 @@ const refusal_of_send = (a: Answer, contact_id: number, by: Channel): Operation_
             retry_after: parse_retry_after(a.headers['retry-after']) ?? undefined, details: {limit: limit.limit},
         });
     }
-    return known_refusal(a, REFUSALS) ?? known_refusal(a, TEMPLATE_REFUSALS[by]) ?? known_refusal(a, SENDING_REFUSALS[by])
+    return (follow_up ? known_refusal(a, FOLLOW_UP_REFUSALS) : undefined)
+        ?? known_refusal(a, REFUSALS) ?? known_refusal(a, TEMPLATE_REFUSALS[by]) ?? known_refusal(a, SENDING_REFUSALS[by])
         ?? known_refusal(a, KEY_REFUSALS[by]) ?? refusal(a, 'write');
 };
 
 // A send Reply refused after its row existed, or the send a reused key was taken for, comes with
 // Reply's reference, state and sendAfter: each one it gives as a string goes under details, beside
 // the refusal's own. The refusal's code and class are its own either way.
-const send_refusal = (a: Answer, contact_id: number, by: Channel): Operation_error=>{
-    const e = refusal_of_send(a, contact_id, by);
+const send_refusal = (a: Answer, contact_id: number, by: Channel, follow_up: boolean): Operation_error=>{
+    const e = refusal_of_send(a, contact_id, by, follow_up);
     const held = is_object(a.data) ? picked(HELD_KEYS, a.data) : {};
     if (Object.keys(held).length > 0)
     {
@@ -406,7 +473,10 @@ const already_held = (contact_id: number): Operation_error=>
 const handle_direct_send = async(
     name: Direct_send_name, opts: Direct_send_opts, ctx: Cli_context, g: Op_globals, read_stdin?: () => string,
 ): Promise<void>=>{
-    const send = DIRECT_SENDS[name];
+    // Only send-email takes --follows; with it the email goes through the follow-up route instead of send-direct-email.
+    const follows = name === 'send-email' && opts.follows !== undefined ? parse_follows(opts.follows) : undefined;
+    const follow_up = follows !== undefined;
+    const send = follow_up ? EMAIL_FOLLOW_UP : DIRECT_SENDS[name];
     const stdin = stdin_inputs({contact: opts.contact, message: opts.message}, {
         code: 'usage.stdin', hint: `Pipe both in one object: echo '{"contact":{…},"message":{…}}' | ${PROGRAM_NAME} contact ${name} --contact - … --message -`,
     }, read_stdin);
@@ -488,7 +558,7 @@ const handle_direct_send = async(
             ids.contact_id = ensured.id;
         }
         sending = true;
-        const body = {...send.body(account_id, text), ...later};
+        const body = {...send.body(account_id, text), ...(follow_up ? {follows} : {}), ...later};
         const a = await call_reply(s, 'POST', `/v3/contacts/${ensured.id}/${send.path}`, 'write', body, headers);
         if (name === 'linkedin-connect' && a.status === 409 && reply_code_of(a) === 'directLinkedIn.alreadyConnected')
         {
@@ -498,7 +568,7 @@ const handle_direct_send = async(
         }
         if (a.status !== 200)
         {
-            throw send_refusal(a, ensured.id, by);
+            throw send_refusal(a, ensured.id, by, follow_up);
         }
         print_result(result_of(name, ensured, expect_object(a, 'write')), g);
     } catch (e) {

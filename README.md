@@ -210,6 +210,7 @@ prints JSON (indented; compact with `--json`) and says what happened in a stable
 | `reply contact delete <id>` | → `deleted` |
 | `reply contact opt-out <contact>` | → `opted_out` |
 | `reply contact send-email <contact> --email-account-id N --message - [--track-links] [--track-opens]` | one email outside any sequence → `sent` |
+| `reply contact send-email <contact> --email-account-id N --follows email-<n> --message -` | a follow-up in an earlier direct email's thread, its `{body}` alone → `sent`, with its `reference` |
 | `reply contact linkedin-connect <contact> --linkedin-account-id N [--message -]` | a LinkedIn invitation, with or without a note → `sent` / `already_connected` |
 | `reply contact linkedin-message …` · `linkedin-inmail …` · `linkedin-voice …` | a LinkedIn message, an InMail, or an AI voice message spoken from a script → `sent` |
 | any direct send `… [--send-after <moment>] [--schedule-id N] [--idempotency-key K]` | the send held until a moment, timed by a schedule, under a key of yours → `sent`, with its `reference` and `state` |
@@ -352,6 +353,26 @@ it. Neither sends anything, and `reply_code` keeps Reply's own code, as on every
 # {"error":{"status":429,"code":"email.limit_reached",…,"reply_code":"contact.dailyLimitReached","retry_after":43200,"details":{"limit":"daily"}}}
 ```
 
+`contact send-email --follows <reference>` sends the email as a follow-up in the thread of an earlier
+direct email, named by the `reference` that send answered: `email-<n>`, `n` from 1 with no leading
+zero; any other form is refused before any call (`usage.reference`). The follow-up goes under its
+thread's subject, so its message is `{body}` alone, and one carrying a `subject` is refused
+(`usage.message`, exit 2). It goes to the contact and from the mailbox of the email it follows, takes
+every other flag of a plain send, and its answer always carries Reply's `reference`. Reply refuses it,
+and nothing is sent, when that email is none this account can see (`follows.not_found`) or a
+teammate's this user may not act for (`follows.not_owned`), went to another contact or goes from
+another mailbox (`follows.other_contact`, `follows.other_mailbox`), was cancelled or failed for good
+(`follows.never_sent`), has not gone out yet while the follow-up would go at once (`follows.not_sent`:
+give it a later `--send-after` or a `--schedule-id`), is due no earlier than the follow-up's
+`--send-after` (`follows.too_early`), or went out but can no longer be found (`follows.not_placed`).
+A Reply without follow-ups answers the route with a `404` and no code of its own: that is
+`follows.not_available`, and nothing else is tried in its place.
+
+```sh
+echo '{"body":"<p>Hi Ann, just bringing this back up.</p>"}' | reply contact send-email --contact-id 456 --email-account-id 12 --follows email-1001 --message - --send-after 2026-11-06T14:00:00Z
+# {"status":"sent",…,"reference":"email-1002","send_after":"2026-11-06T14:00:00Z","state":"queued"}
+```
+
 Every direct send also takes `--send-after <moment>`, `--schedule-id <id>` and
 `--idempotency-key <key>`. Reply holds the send until the moment, given with its offset
 (`2026-11-03T14:00:00Z`, `2026-11-03T16:00:00+02:00`) and sent to Reply in UTC; a moment without an
@@ -429,7 +450,12 @@ neither. So is `estimated_send_at`, read the same way as on the send but as of t
 not open within 30 days counted from `--send-after`, or from now once that has passed.
 `failure_reason` is a sentence for a person and never parsed; `failure_code` is Reply's code for the
 failure, the one to branch on. A failed send may carry no `failure_code`: it is then null, and
-`failure_reason` is all Reply says of it. `direct-send cancel` of a send already cancelled answers
+`failure_reason` is all Reply says of it. `follows` is added only when Reply gives it: the reference
+of the email a follow-up went in the thread of, or null for a send that follows none. A follow-up
+that failed may carry the `failure_code` `contact.followedSendNotSent` (that email had not gone out
+when the follow-up was due), `contact.followedSendNeverSent` (it was cancelled or failed for good) or
+`contact.followUpNotPlaced` (Reply could not find it to answer in its thread), passed on as given.
+`direct-send cancel` of a send already cancelled answers
 it again. A send already gone out, failed or going out is `direct_send.already_sent`,
 `direct_send.already_failed` or `direct_send.already_sending`; the last is a LinkedIn send made for
 later that Reply is handing to the account's queue or that waits or runs there, even while

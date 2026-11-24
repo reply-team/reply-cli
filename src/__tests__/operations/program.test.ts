@@ -139,6 +139,33 @@ describe('the program', ()=>{
         ]);
     });
 
+    const FOLLOW_UP = ['--json', '-k', 'key-1', 'contact', 'send-email', '--contact-id', '456', '--email-account-id', '12', '--message', '-'];
+
+    it('send-email --follows sends the body alone to the follow-up route; a Reply without that route exits 1 with '
+        + 'follows.not_available, and nothing else is called', async()=>{
+        pipe_stdin(JSON.stringify({body: 'Tuesday still works'}));
+        answer(new Response(null, {status: 404}), json({status: 'sent', messageId: '<m1@example.com>'}));
+        const {code, err} = await run_program([...FOLLOW_UP, '--follows', 'email-1001']);
+        expect(code).toBe(1);
+        expect(JSON.parse(err)).toMatchObject({error: {code: 'follows.not_available', status: 404, ids: {contact_id: 456, email_account_id: 12}}});
+        expect(requests()).toEqual([{method: 'POST', url: 'https://api.reply.io/v3/contacts/456/send-direct-email-follow-up',
+            body: {emailAccountId: 12, body: 'Tuesday still works', follows: 'email-1001'}}]);
+    });
+
+    it('send-email --follows refuses a malformed reference, and a message with a subject, exit 2 before any request', async()=>{
+        pipe_stdin(JSON.stringify({body: 'Tuesday still works'}));
+        const bad = await run_program([...FOLLOW_UP, '--follows', 'email-01']);
+        expect(bad.code).toBe(2);
+        expect(JSON.parse(bad.err)).toMatchObject({error: {code: 'usage.reference'}});
+        vi.restoreAllMocks();
+        pipe_stdin(JSON.stringify({subject: 'Hi Marta', body: 'Tuesday still works'}));
+        const {code, err} = await run_program([...FOLLOW_UP, '--follows', 'email-1001']);
+        expect(code).toBe(2);
+        expect(JSON.parse(err)).toMatchObject({error: {code: 'usage.message'}});
+        expect(err, err).not.toMatch(PERSONAL);
+        expect(mock_fetch).not.toHaveBeenCalled();
+    });
+
     const LATER_SEND = ['--json', '-k', 'key-1', 'contact', 'linkedin-message', '--contact-id', '456', '--linkedin-account-id', '34',
         '--message', '-'];
 

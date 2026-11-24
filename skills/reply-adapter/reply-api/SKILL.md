@@ -6,7 +6,7 @@ description: >
   Use before calling any non-trivial v3 endpoint, when choosing an endpoint for a task,
   or when an API call fails and needs interpretation.
 metadata:
-  version: 1.5.1
+  version: 1.6.0
   pack: reply-adapter
   category: execution
   maturity: reviewed
@@ -124,6 +124,11 @@ per-page `.md` fetches; the spec is large.
     "Nothing went out; sending again is safe" - while `directSend.dispatchInterrupted` is to be
     read as `unknown`, not `failed`: it may have gone out - "check before sending again" - so read
     the person's thread before any new send.
+  - **A follow-up in the thread:** `reply contact send-email --follows <reference>` sends the email
+    in the thread of an earlier direct email, named by the `reference` that send answered
+    (`email-<n>`), to its contact and from its mailbox; the message is `{body}` alone, since it goes
+    under the thread's subject. Its refusals are the `follows.*` codes its `--help` lists, and
+    `follows.not_available` says the account's Reply does not offer follow-ups: nothing was sent.
   - **A lost answer:** where an earlier try returned a `reference`, read it first with `reply
     direct-send get <reference>` (from reply-cli 0.17.0), and let its state decide; repeat only
     when the read says nothing of the send. Reply keeps a key for a day, so a repeat goes under
@@ -209,6 +214,8 @@ skill's confirmation rules — especially anything that sends messages or starts
 
 ## Changelog
 
+- 1.6.0 (2026-11-23): *Direct sends* says how to send an email as a follow-up in an earlier direct
+  email's thread with `--follows`, and what `follows.not_available` means.
 - 1.5.1 (2026-11-05): *Conventions* and the error table say that a 429 naming a `reference` or
   saying a daily or weekly limit was reached is never resent and comes back at once as the refusal
   it is.

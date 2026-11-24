@@ -421,18 +421,40 @@ const LINKEDIN_SCHEDULED = '--retry-window-minutes <n> is how long Reply keeps t
     + 'direct sends but not yet the LinkedIn scheduler answers --schedule-id or --use-contact-time-zone on a LinkedIn send\n'
     + 'with errors[] naming the field (reply.invalid_request), and one that knows neither sends at once, as without them.\n';
 
+// The refusals of a follow-up sent with --follows, after Reply's own of the email it names.
+const FOLLOWS_CODES = [
+    'follows.not_available', 'follows.not_found', 'follows.not_owned', 'follows.other_contact', 'follows.other_mailbox',
+    'follows.never_sent', 'follows.not_sent', 'follows.too_early', 'follows.not_placed',
+];
+
+const FOLLOWS = '--follows <reference> sends the email as a follow-up in the thread of an earlier direct email: the reference\n'
+    + 'that send answered, email-<n> with n from 1 and no leading zero; any other form is refused before any call\n'
+    + '(usage.reference, exit 2). The follow-up goes under its thread\'s subject, so its message is {body} alone: a message\n'
+    + 'with a subject is refused (usage.message, exit 2) and nothing is sent. It goes to the contact and from the mailbox of\n'
+    + 'the email it follows, and its answer always carries Reply\'s reference. follows.not_found is a reference Reply has no\n'
+    + 'direct email under that this account can see, and follows.not_owned a teammate\'s send this user may not act for.\n'
+    + 'follows.other_contact and follows.other_mailbox: that email went to another contact, or goes from another mailbox.\n'
+    + 'follows.never_sent: it was cancelled or failed for good. follows.not_sent: it has not gone out yet, so the follow-up\n'
+    + 'cannot go at once; give it a later --send-after or a --schedule-id. follows.too_early: --send-after is not later\n'
+    + 'than that email\'s own moment. follows.not_placed: that email went out, but Reply can no longer find it to answer in\n'
+    + 'its thread. follows.not_available: this Reply\'s follow-up route answers 404 with no code of Reply\'s, so it does not\n'
+    + 'offer follow-ups; nothing else is tried in its place. None of them sends anything, and each of the others keeps\n'
+    + 'Reply\'s code in reply_code.\n';
+
 time_zone_options(later_options(add_contact_options(contact_command.command('send-email'), true)
     .option('--email-account-id <id>', 'The mailbox to send from (see `account list`)')
-    .option('--message <stdin>', 'Only -: the email {subject, body} as JSON on stdin')
+    .option('--message <stdin>', 'Only -: the email {subject, body} as JSON on stdin; with --follows, {body} alone')
     .option('--track-links', 'Track the links in the email (off unless given)')
-    .option('--track-opens', 'Track the opens of the email (off unless given)')))
-    .description('Send one email to a contact now, outside any sequence, from the mailbox you name')
+    .option('--track-opens', 'Track the opens of the email (off unless given)')
+    .option('--follows <reference>', 'Send it as a follow-up in the thread of this earlier direct email (its reference, email-<n>)')))
+    .description('Send one email to a contact now, outside any sequence, from the mailbox you name; with --follows, in an earlier direct email\'s thread')
     .addHelpText('after', help(
         [`echo '{"subject":"Quick question","body":"<p>Hi Ann, does Tuesday work?</p>"}' | ${P} contact send-email --contact-id 456 --email-account-id 12 --message -`,
-            piped_send('send-email', ANN_EMAIL, '{"subject":"Quick question","body":"<p>Hi Ann</p>"}', '--email-account-id 12')],
+            piped_send('send-email', ANN_EMAIL, '{"subject":"Quick question","body":"<p>Hi Ann</p>"}', '--email-account-id 12'),
+            `echo '{"body":"<p>Hi Ann, just bringing this back up.</p>"}' | ${P} contact send-email --contact-id 456 --email-account-id 12 --follows email-1001 --message - --send-after 2026-11-06T14:00:00Z`],
         ['contact.not_found', ...IMPORT_CODES, 'contact.already_held', 'email_account.not_found', 'contact.blacklisted',
             'contact.missing_variables', 'contact.rendering_failed', 'email.limit_reached', 'email.sending_disabled',
-            ...SCHEDULE_CODES, ...KEY_CODES], true,
+            ...FOLLOWS_CODES, ...SCHEDULE_CODES, ...KEY_CODES], true,
         'Result: {"status":"sent","contact_id","contact_created","message_id","sent_at","reply_status"}: sent means Reply\n'
             + 'accepted the email, and reply_status is Reply\'s own word for it (new or sent). message_id is Reply\'s messageId,\n'
             + 'null when it gives none. Reply\'s answer carries no time, so sent_at is always null; the CLI adds none of its own.\n'
@@ -449,7 +471,7 @@ time_zone_options(later_options(add_contact_options(contact_command.command('sen
             + 'them; a send held for later has neither. contact.missing_variables names the variables Reply could not fill in\n'
             + 'details.missing_variables when Reply lists them, and contact.rendering_failed is a template Reply could not\n'
             + 'render, its message in detail. Neither sends anything.\n'
-            + LATER + SCHEDULED + SENT_TO('email', 'email'),
+            + FOLLOWS + LATER + SCHEDULED + SENT_TO('email', 'email'),
         SEND_TWICE('email')))
     .action(run(async(cmd)=>{
         const {g, ctx} = ctx_of(cmd);
@@ -863,6 +885,11 @@ const DIRECT_SEND = 'Result: {"reference","channel","contact_id","state","send_a
     + 'the kind of the latest bounce, as given (hard, soft, mailboxFull, unknown, ...), and bounced_at is when it came.\n'
     + 'Reply leaves bounce_type and bounced_at null while bounced is false, and bounced_at null when the bounce carried no\n'
     + 'date; the CLI passes on what Reply gives and checks neither.\n'
+    + 'follows is added only when Reply gives it: the reference of the earlier direct email a follow-up went in the thread of\n'
+    + '(send-email --follows), or null for a send that follows none. A follow-up that failed may carry failure_code\n'
+    + 'contact.followedSendNotSent (that email had not gone out when the follow-up was due), contact.followedSendNeverSent\n'
+    + '(it was cancelled or failed for good) or contact.followUpNotPlaced (Reply could not find it to answer in its thread);\n'
+    + 'like every failure_code, each is passed on as Reply gives it.\n'
     + 'direct_send.not_found is a reference that Reply has no send for, a send of another team included.\n'
     + 'direct_send.not_owned is an email send made by a teammate this user may not act for.\n';
 

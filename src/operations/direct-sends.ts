@@ -48,6 +48,11 @@ const bounce_of = (body: Record<string, unknown>): Record<string, unknown>=>({
     ...(typeof body.bouncedAt === 'string' || body.bouncedAt === null ? {bounced_at: body.bouncedAt} : {}),
 });
 
+// The reference of the earlier direct email a follow-up was sent in the thread of, as text, or null for a send that follows
+// none, only when Reply gives it in that shape: a Reply before follow-ups gives none, and the send prints as it did before.
+const follows_of = (body: Record<string, unknown>): Record<string, unknown>=>
+    typeof body.follows === 'string' || body.follows === null ? {follows: body.follows} : {};
+
 // A send as Reply holds it, under the CLI's names; one of its first fields that Reply leaves out is null. Its state is Reply's word, passed on as given, so a state the CLI does
 // not know yet reaches the caller instead of failing the read. failure_reason is a sentence for a person and failure_code
 // Reply's code for the same failure: neither is read here.
@@ -62,6 +67,7 @@ const direct_send_of = (a: Answer, kind: 'read' | 'write'): Record<string, unkno
         reference: body.reference, channel: field('channel'), contact_id: field('contactId'), state: body.state,
         send_after: field('sendAfter'), ...estimated_of(body), sent_at: field('sentAt'), message_id: field('messageId'),
         failure_reason: field('failureReason'), ...rendering_of(body), cancelled_at: field('cancelledAt'), ...bounce_of(body),
+        ...follows_of(body),
     };
 };
 

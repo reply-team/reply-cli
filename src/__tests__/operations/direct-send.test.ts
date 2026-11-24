@@ -1325,3 +1325,248 @@ describe('a direct email Reply refuses for its limits', ()=>{
         expect(await failure('linkedin-message', {body: TEXT}, LINKEDIN_OPTS)).toMatchObject({code: 'access.denied'});
     });
 });
+
+describe('contact send-email --follows', ()=>{
+    const FOLLOWS_OPTS: Direct_send_opts = {...EMAIL_OPTS, follows: 'email-1001'};
+    const FOLLOW_UP = 'https://api/v3/contacts/456/send-direct-email-follow-up';
+    const FOLLOW_UP_BODY = '<p>Hi Marta, just bringing this back up.</p>';
+    const MESSAGE = {body: FOLLOW_UP_BODY};
+    const QUEUED = {status: 'new', messageId: null, reference: 'email-1002', state: 'queued', sendAfter: '2026-11-06T14:00:00Z'};
+    const lines = ()=>sent().map(r=>`${r.method} ${r.url}`);
+    const problem = (body: Record<string, unknown>, status: number, headers: Record<string, string> = {})=>
+        json(body, status, {'Content-Type': 'application/problem+json', ...headers});
+
+    it('sends the body alone through the follow-up route, naming the email it follows and no subject, and answers as a plain send does', async()=>{
+        answer(json(QUEUED));
+        expect(await run('send-email', MESSAGE, {...FOLLOWS_OPTS, sendAfter: '2026-11-06T14:00:00Z'})).toStrictEqual({
+            status: 'sent', contact_id: 456, contact_created: false, message_id: null, sent_at: null, reply_status: 'new',
+            reference: 'email-1002', send_after: '2026-11-06T14:00:00Z', state: 'queued',
+        });
+        expect(sent()).toEqual([{method: 'POST', url: FOLLOW_UP,
+            body: {emailAccountId: 12, body: FOLLOW_UP_BODY, follows: 'email-1001', sendAfter: '2026-11-06T14:00:00.000Z'}}]);
+        expect(sent()[0].body).not.toHaveProperty('subject');
+    });
+
+    it('a follow-up Reply sent within the request adds its message id and the text as Reply filled it in', async()=>{
+        answer(json({status: 'sent', messageId: '<m2@example.com>', reference: 'email-1002', state: 'sent', sendAfter: null,
+            renderedSubject: 'Re: Quick question', renderedBody: FOLLOW_UP_BODY}));
+        expect(await run('send-email', MESSAGE, FOLLOWS_OPTS)).toStrictEqual({
+            status: 'sent', contact_id: 456, contact_created: false, message_id: '<m2@example.com>', sent_at: null, reply_status: 'sent',
+            reference: 'email-1002', state: 'sent', rendered_subject: 'Re: Quick question', rendered_body: FOLLOW_UP_BODY,
+        });
+        expect(sent()[0].body).toStrictEqual({emailAccountId: 12, body: FOLLOW_UP_BODY, follows: 'email-1001'});
+    });
+
+    it('takes the flags of a plain send as that send does: the moment, the schedule and its time zone, the tracking, and the key '
+        + 'as a header', async()=>{
+        answer(json(QUEUED));
+        await run('send-email', MESSAGE, {...FOLLOWS_OPTS, sendAfter: '2026-11-06T16:00:00+02:00', scheduleId: '41', useContactTimeZone: false,
+            trackLinks: true, trackOpens: true, idempotencyKey: 'follow-up-456-1', retryWindowMinutes: '30'});
+        expect(sent()[0].body).toStrictEqual({emailAccountId: 12, body: FOLLOW_UP_BODY, follows: 'email-1001',
+            sendAfter: '2026-11-06T14:00:00.000Z', scheduleId: 41, useContactTimeZone: false, trackLinks: true, trackOpens: true});
+        expect((mock_fetch.mock.calls[0] as [string, RequestInit])[1].headers).toMatchObject({'Idempotency-Key': 'follow-up-456-1'});
+    });
+
+    it('a mailbox id beyond 32 bits goes to Reply as the number given, and one not given is refused as on a plain send', async()=>{
+        answer(json(QUEUED));
+        await run('send-email', MESSAGE, {...FOLLOWS_OPTS, emailAccountId: '4294967296'});
+        expect((sent()[0].body as {emailAccountId: unknown}).emailAccountId).toBe(4294967296);
+        mock_fetch.mockReset();
+        expect(await failure('send-email', MESSAGE, {...FOLLOWS_OPTS, emailAccountId: undefined})).toMatchObject({code: 'usage.id', exit_code: 2});
+        expect(mock_fetch).not.toHaveBeenCalled();
+    });
+
+    it('maps Reply\'s refusals of the email it follows, each definite, Reply\'s code kept in reply_code, with the ids it was given', async()=>{
+        const cases: [number, string, string][] = [
+            [404, 'contact.followedSendNotFound', 'follows.not_found'],
+            [403, 'contact.followedSendNotOwned', 'follows.not_owned'],
+            [400, 'contact.followedSendOtherContact', 'follows.other_contact'],
+            [400, 'contact.followedSendOtherMailbox', 'follows.other_mailbox'],
+            [409, 'contact.followedSendNeverSent', 'follows.never_sent'],
+            [409, 'contact.followedSendNotSent', 'follows.not_sent'],
+            [409, 'contact.followUpBeforeFollowedSend', 'follows.too_early'],
+            [409, 'contact.followUpNotPlaced', 'follows.not_placed'],
+        ];
+        for (const [status, reply_code, code] of cases)
+        {
+            mock_fetch.mockReset();
+            answer(problem({title: 'Refused', status, code: reply_code, detail: 'Reply\'s words.'}, status));
+            const e = await failure('send-email', MESSAGE, FOLLOWS_OPTS);
+            expect(e, reply_code).toMatchObject({
+                code, exit_code: 1, status, reply_code, detail: 'Reply\'s words.', ids: {contact_id: 456, email_account_id: 12},
+            });
+            expect((e as {title: string}).title, reply_code).toContain('nothing was sent');
+            expect(shown(e), shown(e)).not.toContain('Marta');
+            expect(lines(), reply_code).toEqual([`POST ${FOLLOW_UP}`]);
+        }
+    });
+
+    it('reads those codes only under the status Reply publishes each with, and only from the follow-up route', async()=>{
+        const EMAIL = {subject: SUBJECT, body: BODY};
+        const cases: [unknown, Direct_send_opts, number, string, string][] = [
+            [MESSAGE, FOLLOWS_OPTS, 409, 'contact.followedSendNotFound', 'reply.refused'],
+            [MESSAGE, FOLLOWS_OPTS, 400, 'contact.followUpNotPlaced', 'reply.refused'],
+            [MESSAGE, FOLLOWS_OPTS, 404, 'contact.followedSendNotOwned', 'reply.refused'],
+            [EMAIL, EMAIL_OPTS, 404, 'contact.followedSendNotFound', 'reply.refused'],
+            [EMAIL, EMAIL_OPTS, 409, 'contact.followedSendNotSent', 'reply.refused'],
+            [EMAIL, EMAIL_OPTS, 403, 'contact.followedSendNotOwned', 'access.denied'],
+        ];
+        for (const [message, opts, status, reply_code, code] of cases)
+        {
+            mock_fetch.mockReset();
+            answer(problem({title: 'Refused', status, code: reply_code}, status));
+            const label = `${opts.follows ?? 'plain'} ${status} ${reply_code}`;
+            expect(await failure('send-email', message, opts), label).toMatchObject({code, exit_code: 1, status, reply_code});
+            expect(mock_fetch, label).toHaveBeenCalledTimes(1);
+        }
+    });
+
+    it('maps every other refusal as a plain send-email does, and nothing is sent', async()=>{
+        const cases: [Response, string, string | undefined][] = [
+            [problem({code: 'contact.notFound'}, 404), 'contact.not_found', 'contact.notFound'],
+            [problem({code: 'contact.emailAccountNotFound'}, 400), 'email_account.not_found', 'contact.emailAccountNotFound'],
+            [problem({code: 'contact.contactInBlackList'}, 400), 'contact.blacklisted', 'contact.contactInBlackList'],
+            [problem({code: 'contact.missingVariables', missingVariables: ['FirstName']}, 400), 'contact.missing_variables', 'contact.missingVariables'],
+            [problem({code: 'contact.renderingFailed'}, 400), 'contact.rendering_failed', 'contact.renderingFailed'],
+            [problem({code: 'contact.dailyLimitReached'}, 429, {'Retry-After': '3600'}), 'email.limit_reached', 'contact.dailyLimitReached'],
+            [problem({code: 'contact.activeContactsLimitReached'}, 429, {'Retry-After': '3600'}), 'email.limit_reached',
+                'contact.activeContactsLimitReached'],
+            [problem({code: 'contact.emailAccountSendingDisabled'}, 403), 'email.sending_disabled', 'contact.emailAccountSendingDisabled'],
+            [problem({code: 'contact.scheduleNotFound'}, 404), 'schedule.not_found', 'contact.scheduleNotFound'],
+            [problem({code: 'contact.scheduleHasNoSlot'}, 409), 'schedule.no_slot', 'contact.scheduleHasNoSlot'],
+            [problem({code: 'contact.contactTimeZoneMissing'}, 409), 'contact.time_zone_missing', 'contact.contactTimeZoneMissing'],
+            [problem({code: 'contact.idempotencyKeyInUse'}, 409), 'idempotency_key.in_use', 'contact.idempotencyKeyInUse'],
+            [problem({code: 'contact.idempotencyKeyReused', reference: 'email-1002', state: 'queued'}, 409), 'idempotency_key.reused',
+                'contact.idempotencyKeyReused'],
+            [problem({title: 'Validation failed', errors: [{pointer: '/subject', detail: 'A follow-up takes no subject.'}]}, 400),
+                'reply.invalid_request', undefined],
+            [problem({code: 'contact.forbidden'}, 403), 'access.feature_unavailable', 'contact.forbidden'],
+            [problem({code: 'contact.somethingElse'}, 400), 'reply.refused', 'contact.somethingElse'],
+        ];
+        for (const [res, code, reply_code] of cases)
+        {
+            mock_fetch.mockReset();
+            answer(res);
+            const e = await failure('send-email', MESSAGE, {...FOLLOWS_OPTS, idempotencyKey: 'follow-up-456-1'});
+            expect(e, code).toMatchObject({code, exit_code: 1, ids: {contact_id: 456, email_account_id: 12}});
+            expect((e as {reply_code?: string}).reply_code, code).toBe(reply_code);
+            expect(lines(), code).toEqual([`POST ${FOLLOW_UP}`]);
+        }
+    });
+
+    it('an answer that may hide the follow-up is outcome.unknown (exit 3), made once, and says a repeat may send it twice', async()=>{
+        const answers: [string, ()=>void][] = [
+            ['lost answer', ()=>{ mock_fetch.mockRejectedValueOnce(lost_connection()); }],
+            ['503', ()=>answer(json({title: 'Service Unavailable'}, 503))],
+            ['500', ()=>answer(problem({title: 'Internal Server Error', status: 500}, 500))],
+            ['400 with neither a code nor errors[]', ()=>answer(problem({title: 'Internal error', status: 400}, 400))],
+            ['201', ()=>answer(json({}, 201))],
+            ['unreadable 200', ()=>answer(json('<html>ok</html>', 200))],
+        ];
+        for (const [label, give] of answers)
+        {
+            mock_fetch.mockReset();
+            give();
+            const e = await failure('send-email', MESSAGE, FOLLOWS_OPTS);
+            expect(e, label).toMatchObject({code: 'outcome.unknown', exit_code: 3, ids: {contact_id: 456, email_account_id: 12}});
+            const hint = (e as {hint?: string}).hint ?? '';
+            expect(hint, `${label}: ${hint}`).toBe('The follow-up may have been sent; running the command again may send it twice.');
+            expect(mock_fetch, label).toHaveBeenCalledTimes(1);
+        }
+    });
+
+    it('a 404 with no code of Reply\'s own is follows.not_available: this Reply has no follow-ups, nothing was sent, and nothing '
+        + 'is called after it', async()=>{
+        const bare: [string, ()=>Response][] = [
+            ['empty', ()=>new Response(null, {status: 404})],
+            ['problem without a code', ()=>problem({title: 'Not Found', status: 404}, 404)],
+            ['html page', ()=>new Response('<html>Not Found</html>', {status: 404, headers: {'Content-Type': 'text/html'}})],
+            ['plain text', ()=>new Response('Not Found', {status: 404, headers: {'Content-Type': 'text/plain'}})],
+        ];
+        for (const [label, res] of bare)
+        {
+            mock_fetch.mockReset();
+            // Were anything called after the 404, a plain send among them, it would take this answer and the count would show it.
+            answer(res(), json({status: 'sent', messageId: '<m1@example.com>'}));
+            const e = await failure('send-email', MESSAGE, FOLLOWS_OPTS);
+            expect(e, label).toMatchObject({code: 'follows.not_available', status: 404, exit_code: 1, ids: {contact_id: 456, email_account_id: 12}});
+            expect((e as {reply_code?: string}).reply_code, label).toBeUndefined();
+            expect((e as {title: string}).title, label).toBe('This Reply does not offer follow-ups in an earlier email\'s thread, so nothing was sent.');
+            expect(lines(), label).toEqual([`POST ${FOLLOW_UP}`]);
+        }
+        // The same 404 to a plain send stays what it was.
+        mock_fetch.mockReset();
+        answer(problem({title: 'Not Found', status: 404}, 404));
+        expect(await failure('send-email', {subject: SUBJECT, body: BODY}, EMAIL_OPTS)).toMatchObject({code: 'reply.refused', status: 404});
+    });
+
+    it('refuses a reference of any other form before stdin is read or any call is made', async()=>{
+        const malformed = ['', 'email-0', 'email-01', 'email-', 'email', 'email-1a', 'email--1', 'email-12345678901', 'EMAIL-1', ' email-1',
+            'email-1 ', 'email-1\n', 'linkedin-1', 'linkedin-scheduled-1', '1001', 'email-1001/cancel', '../email-1'];
+        const never = ()=>{ throw new Error('stdin was read'); };
+        for (const follows of malformed)
+        {
+            const e = await handle_direct_send('send-email', {...FOLLOWS_OPTS, follows}, ctx(), {json: true}, never).catch((x: unknown)=>x);
+            expect(e, JSON.stringify(follows)).toMatchObject({code: 'usage.reference', exit_code: 2});
+            expect((e as Error).message, JSON.stringify(follows)).toBe('--follows must be the reference of an earlier direct email: email-<n>, n from 1.');
+        }
+        expect(mock_fetch).not.toHaveBeenCalled();
+        // The reference as Reply spells it, from 1 to ten digits, goes as given.
+        for (const follows of ['email-1', 'email-9999999999'])
+        {
+            mock_fetch.mockReset();
+            answer(json(QUEUED));
+            await run('send-email', MESSAGE, {...FOLLOWS_OPTS, follows});
+            expect((sent()[0].body as {follows: unknown}).follows, follows).toBe(follows);
+        }
+    });
+
+    it('refuses a message that carries a subject, saying why, before any call and without repeating it', async()=>{
+        for (const subject of [SUBJECT, '', null])
+        {
+            for (const [input, opts] of [
+                [{subject, body: FOLLOW_UP_BODY}, FOLLOWS_OPTS],
+                [{contact: {email: 'marta@example.com', first_name: 'Marta'}, message: {subject, body: FOLLOW_UP_BODY}},
+                    {...FOLLOWS_OPTS, contactId: undefined, contact: '-'}],
+            ] as [unknown, Direct_send_opts][])
+            {
+                const e = await failure('send-email', input, opts);
+                const label = `${JSON.stringify(subject)} ${opts.contact ?? 'by id'}`;
+                expect(e, label).toMatchObject({code: 'usage.message', exit_code: 2});
+                expect((e as Error).message, label).toBe('A follow-up takes no subject: it goes under its thread\'s subject, so the message is {body} alone.');
+                expect(shown(e), shown(e)).not.toMatch(/marta|quick question|bringing/i);
+            }
+        }
+        expect(mock_fetch).not.toHaveBeenCalled();
+    });
+
+    it('refuses a body that is missing, blank or not text, and a field it does not know, as a plain send does', async()=>{
+        for (const text of [{}, {body: '   '}, {body: 7}, {body: FOLLOW_UP_BODY, cc: 'marta@example.com'}, [MESSAGE], `not json, ${FOLLOW_UP_BODY}`])
+        {
+            const e = await failure('send-email', text, FOLLOWS_OPTS);
+            expect(e, JSON.stringify(text)).toMatchObject({code: 'usage.message', exit_code: 2});
+            expect(shown(e), shown(e)).not.toMatch(/marta|bringing/i);
+        }
+        for (const source of [JSON.stringify(MESSAGE), '@message.json', undefined])
+        {
+            expect(await failure('send-email', MESSAGE, {...FOLLOWS_OPTS, message: source}), String(source))
+                .toMatchObject({code: 'usage.message', exit_code: 2});
+        }
+        expect(mock_fetch).not.toHaveBeenCalled();
+    });
+
+    it('a person given by their fields is looked up and imported as on a plain send, and the follow-up goes to the contact it '
+        + 'created; one Reply already holds is refused before anything is sent', async()=>{
+        const LOOKUP = 'GET https://api/v3/contacts?email=marta%40example.com&top=100&skip=0';
+        const IMPORT = 'POST https://api/v3/contacts/import';
+        const input = {contact: {email: 'marta@example.com', first_name: 'Marta'}, message: MESSAGE};
+        const opts = {...FOLLOWS_OPTS, contactId: undefined, contact: '-'};
+        answer(json({items: [], hasMore: false}), json({items: [{id: 457, status: 'created'}]}), json(QUEUED));
+        expect(await run('send-email', input, opts)).toMatchObject({status: 'sent', contact_id: 457, contact_created: true, reference: 'email-1002'});
+        expect(lines()).toEqual([LOOKUP, IMPORT, 'POST https://api/v3/contacts/457/send-direct-email-follow-up']);
+        mock_fetch.mockReset();
+        answer(json({items: [{id: 456, email: 'marta@example.com'}], hasMore: false}), json(QUEUED));
+        expect(await failure('send-email', input, opts)).toMatchObject({code: 'contact.already_held', exit_code: 1, ids: {contact_id: 456}});
+        expect(lines()).toEqual([LOOKUP]);
+    });
+});
