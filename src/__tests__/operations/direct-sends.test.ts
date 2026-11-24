@@ -118,6 +118,43 @@ describe('direct-send get', ()=>{
         }
     });
 
+    it('adds follows, the reference of the email a follow-up went in the thread of, as text or null and only when Reply gives it, '
+        + 'to get and cancel', async()=>{
+        const FOLLOW_UP = {...QUEUED, reference: 'email-1002'};
+        const cases: [unknown, Record<string, unknown>][] = [['email-1001', {follows: 'email-1001'}], [null, {follows: null}]];
+        for (const fn of [get, cancel])
+        {
+            for (const [follows, added] of cases)
+            {
+                mock_fetch.mockReset();
+                answer(json({...FOLLOW_UP, follows}));
+                expect(await fn('email-1002'), JSON.stringify(follows)).toStrictEqual({
+                    reference: 'email-1002', channel: 'email', contact_id: 456, state: 'queued', send_after: '2026-11-03T14:00:00Z',
+                    sent_at: null, message_id: null, failure_reason: null, cancelled_at: null, ...added,
+                });
+            }
+            // A Reply before follow-ups gives none, and the send prints as it did before; a member of another shape is left out.
+            for (const odd of [undefined, 1001, ['email-1001'], {reference: 'email-1001'}])
+            {
+                mock_fetch.mockReset();
+                answer(json({...FOLLOW_UP, follows: odd}));
+                expect(await fn('email-1002'), JSON.stringify(odd)).not.toHaveProperty('follows');
+            }
+        }
+    });
+
+    it('passes a failed follow-up\'s failure_code on as Reply gives it, translating none', async()=>{
+        for (const failureCode of ['contact.followedSendNotSent', 'contact.followedSendNeverSent', 'contact.followUpNotPlaced'])
+        {
+            mock_fetch.mockReset();
+            answer(json({...QUEUED, reference: 'email-1002', state: 'failed', failureReason: 'The letter this one follows did not go out.',
+                failureCode, follows: 'email-1001'}));
+            expect(await get('email-1002'), failureCode).toMatchObject({
+                state: 'failed', failure_reason: 'The letter this one follows did not go out.', failure_code: failureCode, follows: 'email-1001',
+            });
+        }
+    });
+
     it('gives missing_variables only as a list of names, and the others only as text: anything else is left out', async()=>{
         for (const missing of [[], ['FirstName']])
         {
