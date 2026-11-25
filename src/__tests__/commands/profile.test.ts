@@ -1,4 +1,4 @@
-import {describe, it, expect, beforeEach, afterEach} from 'vitest';
+import {describe, it, expect, beforeEach, afterEach, vi} from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -28,7 +28,9 @@ beforeEach(()=>{ dir = fs.mkdtempSync(path.join(os.tmpdir(), 'reply-cmd-')); });
 afterEach(()=>{ fs.rmSync(dir, {recursive: true, force: true}); });
 
 describe('handle_rename', ()=>{
-    it('moves the stored credential from old key to new key', async()=>{
+    // Breaks if the move is two locked writes: another process that refreshes the old key's sign-in
+    // between them stores its new token there, and the move then drops it.
+    it('moves the stored credential from old key to new key, in one locked step', async()=>{
         add_profile('alice@reply.io', {}, env_for());
         const store = store_for();
         await store.set('alice@reply.io', api_key);
@@ -36,6 +38,42 @@ describe('handle_rename', ()=>{
         expect(await store.get('alice@reply.io')).toBeUndefined();
         expect(await store.get('ally@reply.io')).toEqual(api_key);
         expect(list_profiles(env_for()).available).toContain('ally@reply.io');
+
+        // The peer takes the lock the moment it is free and, as a refresh does, rewrites the old key
+        // only while the file still holds it.
+        add_profile('bob', {}, env_for());
+        await store.set('bob', api_key);
+        const credentials = path.join(dir, 'credentials.json');
+        const lock = `${credentials}.lock`;
+        const real = {read: fs.readFileSync, write: fs.writeFileSync, unlink: fs.unlinkSync, rm: fs.rmSync, exists: fs.existsSync};
+        let peer_between = false;
+        const peer = (target: unknown): void=>{
+            if (String(target) !== lock || real.exists(lock))
+            {
+                return;
+            }
+            real.write(lock, JSON.stringify({pid: process.ppid, host: os.hostname(), taken_at: Date.now()}), {flag: 'wx'});
+            const map = JSON.parse(String(real.read(credentials, 'utf8')));
+            if ('bob' in map && 'bobby' in map)
+            {
+                map.bob = {...api_key, key: 'refreshed'};
+                real.write(credentials, JSON.stringify(map));
+                peer_between = true;
+            }
+            real.unlink(lock);
+        };
+        const spies = [
+            vi.spyOn(fs, 'unlinkSync').mockImplementation(target=>{ real.unlink(target); peer(target); }),
+            vi.spyOn(fs, 'rmSync').mockImplementation((target, opts)=>{ real.rm(target, opts); peer(target); }),
+        ];
+        try {
+            await handle_rename('bob', 'bobby', {}, {store, env: env_for()});
+        } finally {
+            spies.forEach(s=>s.mockRestore());
+        }
+        expect(peer_between).toBe(false);
+        expect(await store.get('bob')).toBeUndefined();
+        expect(await store.get('bobby')).toEqual(api_key);
     });
 
     it('renames a profile that has no stored credential (no-op on store)', async()=>{

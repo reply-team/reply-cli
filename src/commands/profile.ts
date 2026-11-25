@@ -112,9 +112,18 @@ const handle_rename = async(
     let credential_moved = false;
     if (cred)
     {
-        await deps.store.set(new_name, cred);
-        await deps.store.remove(old_name);
-        credential_moved = true;
+        // One locked step that moves what the file holds by then, so a refresh of the old key by
+        // another process is neither lost in between nor overwritten by the copy read above.
+        credential_moved = await deps.store.with_lock(async()=>{
+            const latest = await deps.store.get(old_name);
+            if (!latest)
+            {
+                return false;
+            }
+            await deps.store.set(new_name, latest);
+            await deps.store.remove(old_name);
+            return true;
+        });
     }
     const current_updated = current_profile_name(env) === new_name;
     if (wants_json(g))

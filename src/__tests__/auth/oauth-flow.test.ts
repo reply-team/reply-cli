@@ -7,6 +7,7 @@ vi.stubGlobal('fetch', mock_fetch);
 
 import {build_authorize_url, run_login, refresh_stored, browser_open_command, CLIENT_ID, SCOPE} from '../../auth/oauth-flow';
 import {RuntimeError} from '../../utils/errors';
+import {cli_version} from '../../config';
 import type {Oauth_record} from '../../credentials/types';
 
 const AUTHORITY = 'https://oauth.dev.replyapp.io';
@@ -99,6 +100,7 @@ describe('auth/oauth-flow', ()=>{
             expect(token_url).toBe('https://oauth.dev.replyapp.io/connect/token');
             expect(String(init.body)).toContain('grant_type=authorization_code');
             expect(String(init.body)).toContain('code_verifier=');
+            expect(init.headers['User-Agent']).toMatch(/^reply-cli\/\d+\.\d+\.\d+/);
         });
 
         it('rejects on a state mismatch (CSRF guard) without exchanging a token', async()=>{
@@ -124,21 +126,36 @@ describe('auth/oauth-flow', ()=>{
     });
 
     describe('refresh_stored', ()=>{
-        it('posts a refresh_token grant and maps the new record, keeping the old refresh token', async()=>{
-            mock_fetch.mockResolvedValue(token_res({access_token: 'AT2', expires_in: 3600}));
+        // The User-Agent breaks if a refresh goes out as Node's default: the identity server's logs
+        // could no longer tell this CLI's refreshes, or the program running it, from anything else.
+        // The mapping breaks if an answer with a usable access token is thrown away over its other
+        // fields: the server has already spent the old one-time refresh token by then.
+        it('posts a refresh_token grant under the CLI\'s User-Agent and maps the new record, keeping the old refresh token', async()=>{
+            mock_fetch.mockResolvedValue(token_res({access_token: 'AT2', refresh_token: null, expires_in: null}));
             const prev: Oauth_record = {type: 'oauth', access_token: 'AT', refresh_token: 'RT', expires_at: 1};
-            const record = await refresh_stored({authority: AUTHORITY, record: prev, now: NOW});
-            expect(record.access_token).toBe('AT2');
-            expect(record.refresh_token).toBe('RT');
+            let record: Oauth_record;
+            try {
+                vi.stubEnv('REPLY_CLIENT', 'some-app/1.2.3');
+                record = await refresh_stored({authority: AUTHORITY, record: prev, now: NOW});
+            } finally {
+                vi.unstubAllEnvs();
+            }
+            expect(record).toEqual<Oauth_record>({type: 'oauth', access_token: 'AT2', refresh_token: 'RT', expires_at: NOW + 3_600_000});
             const [, init] = mock_fetch.mock.calls[0];
             expect(String(init.body)).toContain('grant_type=refresh_token');
+            expect(init.headers['User-Agent']).toBe(`some-app/1.2.3 reply-cli/${cli_version()}`);
         });
 
-        it('throws when the token endpoint returns an error', async()=>{
-            mock_fetch.mockResolvedValue(token_res({error: 'invalid_grant'}, 400));
+        // Breaks if the status or the OAuth error of a failed refresh is lost: whether the sign-in is
+        // kept depends on them.
+        it('throws with the status and the OAuth error when the token endpoint returns an error', async()=>{
+            mock_fetch.mockResolvedValue(token_res({error: 'invalid_grant', error_description: 'Token was used'}, 400));
             const prev: Oauth_record = {type: 'oauth', access_token: 'AT', refresh_token: 'RT', expires_at: 1};
-            await expect(refresh_stored({authority: AUTHORITY, record: prev, now: NOW}))
-                .rejects.toBeInstanceOf(RuntimeError);
+            const e = await refresh_stored({authority: AUTHORITY, record: prev, now: NOW}).catch((x: unknown)=>x);
+            expect(e).toBeInstanceOf(RuntimeError);
+            expect(e).toMatchObject({
+                code: 'oauth.token', detail: 'HTTP 400: Token was used', failure: {status: 400, error: 'invalid_grant'},
+            });
         });
     });
 });

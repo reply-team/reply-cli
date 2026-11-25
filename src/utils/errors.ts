@@ -59,13 +59,15 @@ abstract class CliError extends Error {
 class UsageError extends CliError {
     readonly exit_code = 2;
 
-    constructor(message: string, opts: {code?: string; hint?: string} = {})
+    constructor(message: string, opts: {code?: string; hint?: string; detail?: string; details?: Record<string, unknown>} = {})
     {
-        super(message);
+        super(opts.detail ? `${message}\n  Detail: ${opts.detail}` : message);
         this.name = 'UsageError';
         this.title = message;
         this.code = opts.code;
         this.hint = opts.hint;
+        this.detail = opts.detail;
+        this.details = opts.details;
     }
 }
 
