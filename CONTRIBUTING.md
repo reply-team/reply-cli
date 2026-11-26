@@ -64,14 +64,17 @@ touching callers.
 
 Every write (a refresh, `auth login`, `auth logout`, a profile rename or delete)
 reads, changes and rewrites the whole file while holding `credentials.json.lock`
-beside it, and the rewrite is a temp file renamed into place, retried briefly
-when Windows refuses the rename for a moment. The lock file is created
+beside it, and the rewrite is a temp file renamed into place. While another
+program has the file open (an antivirus scan, say), Windows can refuse the
+write's read of the file and its rename over it; the two are retried together,
+for about 5 s in all, before the write fails. The lock file is created
 exclusively and holds the holder's pid, host name, pid namespace (on Linux) and
 the time it was taken. A lock older than 30 s, or whose holder is gone, is taken
 over; a live one is waited on for up to 45 s. The pid is trusted only on the host
 and in the pid namespace that wrote it: sandboxes and containers that give each
 command a pid namespace of its own give them equal pids, so elsewhere a lock is
-judged by its age alone. A lock is
+judged by its age alone. A Linux process that can't read its own pid namespace
+(a sandbox that hides `/proc`) trusts no other process's pid. A lock is
 only ever removed, by its holder letting go or by a takeover, under a second
 exclusive file, `credentials.json.lock.guard`, after reading it again, so no
 process removes a lock it hasn't just checked. Letting go is best effort: a lock

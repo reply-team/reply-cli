@@ -82,8 +82,9 @@ describe('auth/resolve — credential precedence', ()=>{
     });
 
     // Breaks if a record with nothing to refresh it is kept, or if one another process stored while
-    // this one waited for the lock (a new login, say) is removed in its place.
-    it('clears the record and errors when an expired token has no refresh token, unless the lock shows a newer one', async()=>{
+    // this one waited for the lock (a new login, say) is removed in its place. Or if a caller that
+    // can't refresh deletes a sign-in nothing refused.
+    it('fails auth.expired on an expired token it can\'t refresh, removing it only when the record has no refresh token and the lock shows nothing newer', async()=>{
         const {store, map} = fake_store({[HOST]: fresh_oauth({expires_at: NOW - 1, refresh_token: undefined})});
         await expect(resolve_credential({}, {key: HOST, store, env: {}, now: NOW, refresh: vi.fn()}))
             .rejects.toMatchObject({code: 'auth.expired'});
@@ -97,6 +98,18 @@ describe('auth/resolve — credential precedence', ()=>{
         const r = await resolve_credential({}, {key: HOST, store: peer.store, env: {}, now: NOW, refresh: vi.fn()});
         expect(r).toMatchObject({token: 'peer_at', type: 'oauth', source: 'store'});
         expect(peer.map[HOST]).toEqual(fresh_oauth({access_token: 'peer_at'}));
+
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'reply-expired-'));
+        try {
+            const file = path.join(dir, 'credentials.json');
+            fs.writeFileSync(file, JSON.stringify({[HOST]: fresh_oauth({expires_at: NOW - 1})}, null, 2));
+            const before = fs.readFileSync(file);
+            await expect(resolve_credential({}, {key: HOST, store: new FileCredentialStore(file), env: {}, now: NOW}))
+                .rejects.toMatchObject({code: 'auth.expired'});
+            expect(fs.readFileSync(file).equals(before)).toBe(true);
+        } finally {
+            fs.rmSync(dir, {recursive: true, force: true});
+        }
     });
 
     it('errors (UsageError) when nothing is available and writes nothing', async()=>{

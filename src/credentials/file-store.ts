@@ -9,9 +9,14 @@ import type {Credential_record, CredentialStore} from './types';
 
 type Key_map = Record<string, Credential_record>;
 
-// On Windows a rename over a file another process has open can fail for a moment.
-const RENAME_RETRY_MS = [20, 40, 80, 160, 320];
-const RENAME_BUSY = ['EPERM', 'EACCES', 'EBUSY'];
+// On Windows, while another program has the file open (an antivirus scan or a backup can take
+// seconds), a read of it and a rename over it can be refused. A write's read and rename wait out
+// those refusals from one copy of these waits: about 5 s in all, so that with the token request a
+// refresh still lets go of the lock before it counts as stale.
+const BUSY_RETRY_MS = [20, 40, 80, 160, 320, 640, 1_000, 1_000, 1_000, 1_000];
+const BUSY = ['EPERM', 'EACCES', 'EBUSY'];
+
+const pause = (ms: number): Promise<void>=>new Promise(resolve=>setTimeout(resolve, ms));
 
 // v1 credential backend: a single JSON file keyed by profile name, written
 // with strict 0600 perms in a 0700 dir (the gh/aws/az plaintext-file model).
@@ -29,35 +34,37 @@ class FileCredentialStore implements CredentialStore {
 
     async get(key: string): Promise<Credential_record | undefined>
     {
-        return this.read()[key];
+        return (await this.read())[key];
     }
 
     async set(key: string, record: Credential_record): Promise<void>
     {
         await this.with_lock(async()=>{
-            const map = this.read();
+            const waits = [...BUSY_RETRY_MS];
+            const map = await this.read(waits);
             map[key] = record;
-            await this.write(map);
+            await this.write(map, waits);
         });
     }
 
     async remove(key: string, only_if?: (record: Credential_record) => boolean): Promise<boolean>
     {
         return this.with_lock(async()=>{
-            const map = this.read();
+            const waits = [...BUSY_RETRY_MS];
+            const map = await this.read(waits);
             if (!(key in map) || (only_if && !only_if(map[key])))
             {
                 return false;
             }
             delete map[key];
-            await this.write(map);
+            await this.write(map, waits);
             return true;
         });
     }
 
     async keys(): Promise<string[]>
     {
-        return Object.keys(this.read());
+        return Object.keys(await this.read());
     }
 
     async with_lock<T>(fn: () => Promise<T>): Promise<T>
@@ -74,20 +81,34 @@ class FileCredentialStore implements CredentialStore {
         }
     }
 
-    private read(): Key_map
+    // Only the read a write starts with waits, from the write's `waits`, and only on Windows:
+    // elsewhere these codes are a permission no wait fixes. A plain read fails at once and loses
+    // nothing, since a refresh reads before it sends its request; waiting there would add to its
+    // time under the lock.
+    private async read(waits: number[] = []): Promise<Key_map>
     {
         let raw: string;
-        try {
-            raw = fs.readFileSync(this.file, 'utf8');
-        } catch (e) {
-            if ((e as NodeJS.ErrnoException).code === 'ENOENT')
-            {
-                return {};
+        for (;;)
+        {
+            try {
+                raw = fs.readFileSync(this.file, 'utf8');
+                break;
+            } catch (e) {
+                const code = (e as NodeJS.ErrnoException).code;
+                if (code === 'ENOENT')
+                {
+                    return {};
+                }
+                const wait = process.platform === 'win32' && BUSY.includes(String(code)) ? waits.shift() : undefined;
+                if (wait === undefined)
+                {
+                    throw new RuntimeError('Could not read the credential store.', {
+                        code: 'store.read', detail: this.file,
+                        hint: (e as Error).message,
+                    });
+                }
+                await pause(wait);
             }
-            throw new RuntimeError('Could not read the credential store.', {
-                code: 'store.read', detail: this.file,
-                hint: (e as Error).message,
-            });
         }
         if (!raw.trim())
         {
@@ -114,7 +135,7 @@ class FileCredentialStore implements CredentialStore {
 
     // Atomic write: temp file created 0600, then renamed into place so the
     // final file is never briefly world-readable and rewrites keep 0600.
-    private async write(map: Key_map): Promise<void>
+    private async write(map: Key_map, waits: number[]): Promise<void>
     {
         const dir = path.dirname(this.file);
         fs.mkdirSync(dir, {recursive: true, mode: 0o700});
@@ -123,19 +144,20 @@ class FileCredentialStore implements CredentialStore {
         const tmp = `${this.file}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`;
         fs.writeFileSync(tmp, JSON.stringify(map, null, 2), {mode: 0o600});
         fs.chmodSync(tmp, 0o600);
-        for (let attempt = 0; ; attempt++)
+        for (;;)
         {
             try {
                 fs.renameSync(tmp, this.file);
                 return;
             } catch (e) {
-                if (attempt >= RENAME_RETRY_MS.length || !RENAME_BUSY.includes(String((e as NodeJS.ErrnoException).code)))
+                const wait = BUSY.includes(String((e as NodeJS.ErrnoException).code)) ? waits.shift() : undefined;
+                if (wait === undefined)
                 {
                     fs.rmSync(tmp, {force: true});
                     throw e;
                 }
+                await pause(wait);
             }
-            await new Promise(resolve=>setTimeout(resolve, RENAME_RETRY_MS[attempt]));
         }
     }
 }
