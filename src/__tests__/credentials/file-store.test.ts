@@ -1,4 +1,4 @@
-import {describe, it, expect, beforeEach, afterEach, vi} from 'vitest';
+import {describe, it, expect, beforeAll, beforeEach, afterEach, vi} from 'vitest';
 import {spawnSync} from 'child_process';
 import fs from 'fs';
 import os from 'os';
@@ -109,48 +109,133 @@ describe('credentials/FileCredentialStore', ()=>{
         await expect(store.keys()).rejects.toBeInstanceOf(RuntimeError);
     });
 
-    // Breaks if a write gives up the moment Windows refuses a rename over a file another process
-    // is reading: a token the server already rotated would be lost with it. Or if two writes share
-    // a temp file: two writers with one pid (each in a pid namespace of its own) would rename each
-    // other's.
-    it('retries a rename refused for a moment, from a temp file of its own', async()=>{
-        const rename = fs.renameSync;
-        let refused = false;
+    // Breaks if a write gives up while Windows still refuses its read or its rename because another
+    // program has the file open, which an antivirus scan or a backup can keep up for seconds: a token
+    // the server already rotated would be lost with it. Or if the read and the rename each wait a
+    // budget of their own, so a refresh can outlast the lock's stale age; or if a refusal that doesn't
+    // end hangs the write or leaves its temp file behind; or if a read is retried off Windows, where a
+    // refusal is a permission no retry fixes; or if a plain read waits too: a refresh's re-read comes
+    // before its request, and would push it past the stale age. Or if two writes share a temp file:
+    // two writers with one pid (each in a pid namespace of its own) would rename each other's.
+    it('retries a write\'s read (on Windows) and its rename refused for seconds, from a temp file of its own, within one budget of about 5 s per write', async()=>{
+        await store.set('h', API_KEY);
+        const real = {
+            read: fs.readFileSync, rename: fs.renameSync,
+            platform: Object.getOwnPropertyDescriptor(process, 'platform') as PropertyDescriptor,
+        };
+        let refused = {read_until: 0, read_code: 'EBUSY', rename_until: 0};
         const temps: string[] = [];
-        const spy = vi.spyOn(fs, 'renameSync').mockImplementation((from, to)=>{
-            if (String(to) === file)
+        const spies = [
+            vi.spyOn(fs, 'readFileSync').mockImplementation(((target: fs.PathOrFileDescriptor, ...rest: unknown[])=>{
+                if (String(target) === file && Date.now() < refused.read_until)
+                {
+                    throw Object.assign(new Error(`${refused.read_code}: refused, open '${target}'`), {code: refused.read_code});
+                }
+                return (real.read as (...a: unknown[]) => unknown)(target, ...rest);
+            }) as typeof fs.readFileSync),
+            vi.spyOn(fs, 'renameSync').mockImplementation((from, to)=>{
+                if (String(to) === file)
+                {
+                    temps.push(String(from));
+                    if (Date.now() < refused.rename_until)
+                    {
+                        throw Object.assign(new Error(`EPERM: operation not permitted, rename '${from}'`), {code: 'EPERM'});
+                    }
+                }
+                real.rename(from, to);
+            }),
+        ];
+        type Case = {
+            name: string;
+            platform?: NodeJS.Platform;
+            op?: 'get' | 'keys';
+            read?: {code: string; for_ms: number};
+            rename_for_ms?: number;
+            ends: string;
+            within_ms: [number, number];
+        };
+        const CASES: Case[] = [
+            {name: 'a rename refused for 2 s', rename_for_ms: 2_000, ends: 'stored', within_ms: [2_000, 3_000]},
             {
-                temps.push(String(from));
-            }
-            if (!refused && String(to) === file)
+                name: 'on Windows, a read refused for 1 s, then the rename until 2 s', platform: 'win32',
+                read: {code: 'EBUSY', for_ms: 1_000}, rename_for_ms: 2_000, ends: 'stored', within_ms: [2_000, 3_000],
+            },
             {
-                refused = true;
-                throw Object.assign(new Error(`EPERM: operation not permitted, rename '${from}'`), {code: 'EPERM'});
-            }
-            rename(from, to);
-        });
+                name: 'on Windows, a read refused for 3 s, then the rename for good', platform: 'win32',
+                read: {code: 'EBUSY', for_ms: 3_000}, rename_for_ms: Infinity, ends: 'EPERM', within_ms: [4_500, 6_000],
+            },
+            {
+                name: 'on Windows, a read refused for good', platform: 'win32',
+                read: {code: 'EBUSY', for_ms: Infinity}, ends: 'store.read', within_ms: [4_500, 6_000],
+            },
+            {name: 'a rename refused for good', rename_for_ms: Infinity, ends: 'EPERM', within_ms: [4_500, 6_000]},
+            {
+                name: 'on Linux, a read refused', platform: 'linux',
+                read: {code: 'EACCES', for_ms: Infinity}, ends: 'store.read', within_ms: [0, 0],
+            },
+            {
+                name: 'on Windows, a plain get with the read refused for good', platform: 'win32', op: 'get',
+                read: {code: 'EBUSY', for_ms: Infinity}, ends: 'store.read', within_ms: [0, 0],
+            },
+            {
+                name: 'on Windows, a plain keys with the read refused for good', platform: 'win32', op: 'keys',
+                read: {code: 'EBUSY', for_ms: Infinity}, ends: 'store.read', within_ms: [0, 0],
+            },
+        ];
+        const got: Record<string, {ends: string; ms: number}> = {};
+        vi.useFakeTimers();
         try {
-            await store.set('h', API_KEY);
-            await store.set('h2', OAUTH);
+            for (const [i, c] of CASES.entries())
+            {
+                const started = Date.now();
+                refused = {
+                    read_until: started + (c.read?.for_ms ?? 0), read_code: c.read?.code ?? 'EBUSY',
+                    rename_until: started + (c.rename_for_ms ?? 0),
+                };
+                Object.defineProperty(process, 'platform', {...real.platform, value: c.platform ?? real.platform.value});
+                try {
+                    const op = c.op === 'get' ? store.get('h') : c.op === 'keys' ? store.keys() : store.set(`k${i}`, OAUTH);
+                    const ends = op.then(()=>(c.op ? 'read' : 'stored'), (e: {code?: string})=>String(e.code));
+                    await vi.runAllTimersAsync();
+                    got[c.name] = {ends: await ends, ms: Date.now() - started};
+                } finally {
+                    Object.defineProperty(process, 'platform', real.platform);
+                }
+            }
         } finally {
-            spy.mockRestore();
+            vi.useRealTimers();
+            spies.forEach(s=>s.mockRestore());
         }
-        expect(refused).toBe(true);
-        expect(await store.get('h')).toEqual(API_KEY);
-        expect(temps).toHaveLength(3);
-        expect(new Set(temps).size).toBe(2);
+        expect(Object.fromEntries(CASES.map(c=>[c.name, got[c.name].ends])))
+            .toEqual(Object.fromEntries(CASES.map(c=>[c.name, c.ends])));
+        for (const c of CASES)
+        {
+            expect(got[c.name].ms, c.name).toBeGreaterThanOrEqual(c.within_ms[0]);
+            expect(got[c.name].ms, c.name).toBeLessThanOrEqual(c.within_ms[1]);
+        }
+        expect(await store.keys()).toEqual(['h', 'k0', 'k1']);
+        expect(fs.readdirSync(path.dirname(file)).filter(name=>name.endsWith('.tmp'))).toEqual([]);
+        // The four writes that reached a rename: one temp file each, kept through its retries.
+        expect(new Set(temps).size).toBe(4);
+        expect(temps.length).toBeGreaterThan(4);
     });
 });
 
 describe('credentials/FileCredentialStore — the lock beside the file', ()=>{
     const HOST = os.hostname();
-    const PID_NS = ((): string | undefined=>{
+    // This process's pid namespace as the store names it, read from a lock the store writes: where
+    // /proc is hidden, that name is the store's own making.
+    let PID_NS: string | undefined;
+    beforeAll(async()=>{
+        const probe = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'reply-ns-')), 'credentials.json');
         try {
-            return fs.readlinkSync('/proc/self/ns/pid');
-        } catch {
-            return undefined;
+            await new FileCredentialStore(probe).with_lock(async()=>{
+                PID_NS = JSON.parse(fs.readFileSync(`${probe}.lock`, 'utf8')).ns;
+            });
+        } finally {
+            fs.rmSync(path.dirname(probe), {recursive: true, force: true});
         }
-    })();
+    });
     const lock = ()=>`${file}.lock`;
     // Another process's lock as it sits on disk, by default from this host and pid namespace. A
     // live holder is this test's parent process.
@@ -283,11 +368,34 @@ describe('credentials/FileCredentialStore — the lock beside the file', ()=>{
         expect(await s.get('h')).toEqual(API_KEY);
     });
 
+    // The store as loaded by a process on `platform` that can't read its pid namespace, as in a
+    // sandbox that hides /proc.
+    const load_without_ns = async(platform: NodeJS.Platform): Promise<typeof FileCredentialStore>=>{
+        const real = {platform: Object.getOwnPropertyDescriptor(process, 'platform') as PropertyDescriptor, readlink: fs.readlinkSync};
+        const spy = vi.spyOn(fs, 'readlinkSync').mockImplementation(((target: fs.PathLike, ...rest: unknown[])=>{
+            if (String(target) === '/proc/self/ns/pid')
+            {
+                throw Object.assign(new Error(`ENOENT: no such file or directory, readlink '${target}'`), {code: 'ENOENT'});
+            }
+            return (real.readlink as (...a: unknown[]) => unknown)(target, ...rest);
+        }) as typeof fs.readlinkSync);
+        Object.defineProperty(process, 'platform', {...real.platform, value: platform});
+        try {
+            vi.resetModules();
+            return (await import('../../credentials/file-store')).FileCredentialStore;
+        } finally {
+            spy.mockRestore();
+            Object.defineProperty(process, 'platform', real.platform);
+        }
+    };
+
     // Breaks if a pid from another host or another pid namespace is read as this one's: a holder
     // alive there would be taken over at once. Sandboxes that give every command its own pid
     // namespace give them all the same pid, so a lock with this process's pid that it didn't leave
-    // itself is a live peer's. Or if a holder that hangs keeps the lock for good.
-    it('judges a lock from another host or pid namespace by its age alone, and takes over one held longer than a refresh can run', async()=>{
+    // itself is a live peer's. On Linux, two processes that can't read their namespaces can't tell
+    // whether they share one, so neither trusts the other's pid; elsewhere no process has one, and
+    // a dead holder's lock is taken over at once. Or if a holder that hangs keeps the lock for good.
+    it('judges a lock from another host or pid namespace, or from a Linux process that can\'t read its own, by its age alone, and takes over one held longer than a refresh can run', async()=>{
         const peers = [
             {pid: gone_pid(), host: `not-${HOST}`, taken_at: Date.now()},
             {pid: gone_pid(), ns: `${PID_NS ?? 'pid:[1]'}-elsewhere`, taken_at: Date.now()},
@@ -302,6 +410,22 @@ describe('credentials/FileCredentialStore — the lock beside the file', ()=>{
             fs.rmSync(file, {force: true});
         }
         expect(outcomes).toEqual(['store.locked', 'store.locked', 'store.locked']);
+
+        const blind: Record<string, string> = {};
+        for (const platform of ['linux', 'win32'] as const)
+        {
+            fs.rmSync(lock(), {force: true});
+            const [Peer, Mine] = [await load_without_ns(platform), await load_without_ns(platform)];
+            let peer_lock: {ns?: string; id?: string} = {};
+            await new Peer(file).with_lock(async()=>{
+                peer_lock = JSON.parse(fs.readFileSync(lock(), 'utf8'));
+            });
+            hold_lock({pid: gone_pid(), ns: peer_lock.ns, id: peer_lock.id, taken_at: Date.now()});
+            blind[platform] = await new Mine(file, {lock: {wait_ms: 300}}).set('h', API_KEY)
+                .then(()=>'taken over', (e: {code?: string})=>String(e.code));
+            fs.rmSync(file, {force: true});
+        }
+        expect(blind).toEqual({linux: 'store.locked', win32: 'taken over'});
 
         hold_lock({pid: process.ppid, taken_at: Date.now() - 5_000});
         const s = new FileCredentialStore(file, {lock: {wait_ms: 2_000, stale_ms: 1_000}});

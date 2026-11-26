@@ -13,6 +13,13 @@ import {RuntimeError} from '../utils/errors';
 // holder letting go or a stale one taken over, happens under a second exclusive file, the guard,
 // after reading the lock again: so the lock read is the lock removed, and no process removes a
 // lock it has not just checked.
+//
+// Breaking a guard left stale is not serialised in turn: try_guard reads it, compares and unlinks
+// it as separate steps, so two processes breaking one stale guard together can unlink a guard a
+// third has just taken (as can a holder that stalled that long, letting go when it wakes), and two
+// processes can then hold the lock at once. That is accepted: a guard goes stale only when its
+// holder dies, stalls for 5 s in the instant it holds it, or can't delete it, and closing the gap
+// would take an OS file lock, which Node has no API for.
 
 type Lock_opts = {
     wait_ms?: number;    // how long to wait for another holder before giving up
@@ -24,7 +31,8 @@ type Lock_opts = {
 const LOCK_STALE_MS = TOKEN_TIMEOUT_MS + 10_000;
 const LOCK_WAIT_MS = LOCK_STALE_MS + 15_000;
 const POLL_MS = 50;
-// The guard is held for a read and an unlink; one this old was left by a process that died holding it.
+// The guard is held for a read and an unlink; one this old was left by a holder that died, stalled
+// or couldn't delete it.
 const GUARD_STALE_MS = 5_000;
 // How long Windows may refuse a create with no lock in place: a lock being deleted refuses it for
 // a moment, and a directory that can't be written refuses it for good.
@@ -32,22 +40,24 @@ const CREATE_GRACE_MS = 1_000;
 const RELEASE_RETRY_MS = [20, 40, 80, 160, 320];
 const WINDOWS_BUSY = ['EPERM', 'EACCES', 'EBUSY'];
 
+const new_id = (): string=>crypto.randomBytes(8).toString('hex');
+
 // A pid means something only in its own pid namespace: sandboxes and containers that give each
 // command a namespace of its own give them all the same pid, or each other's. Linux names the
-// namespace; elsewhere there is none to tell apart.
+// namespace; elsewhere there is none to tell apart. A Linux process that can't read its own (a
+// sandbox that hides /proc) can't tell whether a peer shares it, so it takes a name no other
+// process has, and judges every other process's lock by its age alone.
 const PID_NS = ((): string | undefined=>{
     try {
         return fs.readlinkSync('/proc/self/ns/pid');
     } catch {
-        return undefined;
+        return process.platform === 'linux' ? `unknown:${new_id()}` : undefined;
     }
 })();
 
 // The locks this process let go of but couldn't delete, by id: the only locks with this process's
 // pid that are known not to be held.
 const left_here = new Set<string>();
-
-const new_id = (): string=>crypto.randomBytes(8).toString('hex');
 
 class Lock_timeout_error extends RuntimeError {
     constructor(file: string)

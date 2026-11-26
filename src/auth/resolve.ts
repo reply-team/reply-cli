@@ -177,7 +177,8 @@ const refresh_under_lock = async(
 // STRICT precedence: 1) --api-key flag  2) <PREFIX>_API_KEY env  3) stored
 // credential. Flag/env are ephemeral and are never written to disk. A stored
 // oauth record is refreshed when expired, one process at a time. It is removed
-// only when the server refuses the grant; any other failure keeps it.
+// only when the server refuses the grant or it has no refresh token; any other
+// failure keeps it.
 const resolve_credential = async(
     opts: Resolve_opts,
     deps: Resolve_deps,
@@ -208,7 +209,6 @@ const resolve_credential = async(
     const refresh = deps.refresh;
     if (!refresh)
     {
-        await deps.store.remove(deps.key);
         throw session_expired();
     }
 
