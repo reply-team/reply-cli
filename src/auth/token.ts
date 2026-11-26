@@ -6,6 +6,9 @@ const DEFAULT_SKEW_MS = 60_000;
 
 const DEFAULT_EXPIRES_IN_S = 3600;
 
+// The longest a token request may take before it counts as unanswered.
+const TOKEN_TIMEOUT_MS = 20_000;
+
 type Token_response = {
     access_token: string;
     refresh_token?: string;
@@ -20,8 +23,9 @@ const needs_refresh = (
     skew_ms: number = DEFAULT_SKEW_MS,
 ): boolean=>record.expires_at - skew_ms <= now;
 
+// The answer's fields are typed as the server should send them; a value of another type falls back.
 const expires_at_from = (resp: Token_response, now: number): number=>
-    now + (resp.expires_in ?? DEFAULT_EXPIRES_IN_S) * 1000;
+    now + (typeof resp.expires_in === 'number' && Number.isFinite(resp.expires_in) ? resp.expires_in : DEFAULT_EXPIRES_IN_S) * 1000;
 
 const build_token_exchange_body = (p: {
     code: string;
@@ -45,8 +49,8 @@ const build_refresh_body = (p: {
     client_id: p.client_id,
 });
 
-// A token endpoint may rotate the refresh token or omit it; when omitted, keep
-// the previous one so subsequent refreshes still work. The token endpoint never
+// A token endpoint may rotate the refresh token or omit it; when omitted (or not
+// a string), keep the previous one so subsequent refreshes still work. The token endpoint never
 // returns the principal, so carry the previous `user` forward — otherwise the
 // first silent refresh would wipe the identity shown by `auth status`.
 const to_oauth_record = (
@@ -56,13 +60,14 @@ const to_oauth_record = (
 ): Oauth_record=>({
     type: 'oauth',
     access_token: resp.access_token,
-    refresh_token: resp.refresh_token ?? prev?.refresh_token,
+    refresh_token: typeof resp.refresh_token === 'string' && resp.refresh_token ? resp.refresh_token : prev?.refresh_token,
     expires_at: expires_at_from(resp, now),
     user: prev?.user,
 });
 
 export {
     DEFAULT_SKEW_MS,
+    TOKEN_TIMEOUT_MS,
     needs_refresh,
     expires_at_from,
     build_token_exchange_body,

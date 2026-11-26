@@ -6,7 +6,7 @@ description: >
   Use when executing any Reply.io operation from a shell, setting up authentication,
   or when another Reply skill needs commands executed.
 metadata:
-  version: 1.5.0
+  version: 1.5.1
   pack: reply-adapter
   category: execution
   maturity: reviewed
@@ -58,8 +58,10 @@ reply auth logout
 ```
 
 Credential precedence (strict): `--api-key` flag → `REPLY_API_KEY` env → stored credential.
-Flag/env are ephemeral — never written to disk. Expired OAuth sessions refresh automatically; if
-refresh fails the CLI asks to log in again.
+Flag/env are ephemeral — never written to disk. Expired OAuth sessions refresh automatically, one
+process at a time. Only `auth.refresh_failed` (exit 2) needs `reply auth login`. A refresh that
+failed with `rate_limited` or `reply.unavailable` (exit 1) keeps the sign-in: run the command again,
+after `retry_after` seconds when the error gives it.
 
 A user with no Reply.io account can create one during `reply auth login` — the sign-in page
 offers registration, and a trial costs nothing. Say that rather than treating a missing account
@@ -170,6 +172,9 @@ explicit confirmation its Safety section requires.
 
 ## Changelog
 
+- 1.5.1 (2026-11-25): *Authentication* says which failed refresh needs a new sign-in: only
+  `auth.refresh_failed`. After `rate_limited` or `reply.unavailable` the sign-in is kept and the
+  command can run again.
 - 1.5.0 (2026-11-21): *Failure modes* no longer offers the hosted mailbox page: the CLI prints only
   one-mailbox connection links, and `--allow-shared-page` is deprecated and does nothing.
 - 1.4.1 (2026-11-21): `reply api` says that a 429 saying an active contacts limit was reached is

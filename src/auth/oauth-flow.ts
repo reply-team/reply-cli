@@ -1,10 +1,13 @@
 import http from 'http';
 import {spawn} from 'child_process';
 import {URL} from 'url';
+import {user_agent} from '../config';
+import {failure_detail, parse_retry_after} from '../utils/client';
 import {RuntimeError} from '../utils/errors';
 import {info} from '../utils/output';
 import {create_pkce, create_state} from './pkce';
 import {
+    TOKEN_TIMEOUT_MS,
     build_token_exchange_body,
     build_refresh_body,
     to_oauth_record,
@@ -175,24 +178,91 @@ const parse_token_error = (text: string): string=>{
     }
 };
 
-const post_token = async(authority: string, body: URLSearchParams): Promise<Token_response>=>{
-    const res = await fetch(`${authority}/connect/token`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'Accept': 'application/json',
-        },
-        body: body.toString(),
-    });
-    const text = await res.text();
+const parse_json = (text: string): unknown=>{
+    try {
+        return JSON.parse(text);
+    } catch {
+        return undefined;
+    }
+};
+
+const is_object = (v: unknown): v is Record<string, unknown>=>typeof v === 'object' && v !== null && !Array.isArray(v);
+
+// The OAuth `error` code of an error answer (RFC 6749 §5.2), if the answer is one.
+const oauth_error_of = (text: string): string | undefined=>{
+    const body = parse_json(text);
+    return is_object(body) && typeof body.error === 'string' && body.error ? body.error : undefined;
+};
+
+// A 2xx is a token answer whenever it carries an access token: by then the server has spent the old
+// one-time refresh token, so an odd field elsewhere must not cost the new one (to_oauth_record
+// falls back for those).
+const token_answer_of = (text: string): Token_response | undefined=>{
+    const body = parse_json(text);
+    return is_object(body) && typeof body.access_token === 'string' && body.access_token
+        ? body as Token_response
+        : undefined;
+};
+
+// What is known of a token request that failed. Never a token or the request body.
+type Token_failure = {
+    status?: number;     // the HTTP status, when the server answered
+    error?: string;      // the OAuth `error` code of its answer, when it was one
+    reason?: 'timeout' | 'network' | 'unreadable';   // why no usable answer came
+    retry_after?: number;   // seconds, from a 429's Retry-After
+};
+
+class Token_request_error extends RuntimeError {
+    readonly failure: Token_failure;
+
+    constructor(detail: string, failure: Token_failure)
+    {
+        super('OAuth token request failed.', {code: 'oauth.token', detail});
+        this.name = 'Token_request_error';
+        this.failure = failure;
+    }
+}
+
+const post_token = async(
+    authority: string, body: URLSearchParams, timeout_ms: number = TOKEN_TIMEOUT_MS,
+): Promise<Token_response>=>{
+    let res: Response;
+    let text: string;
+    try {
+        res = await fetch(`${authority}/connect/token`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Accept': 'application/json',
+                'User-Agent': user_agent(),
+            },
+            body: body.toString(),
+            signal: AbortSignal.timeout(timeout_ms),
+        });
+        text = await res.text();
+    } catch (e) {
+        if ((e as Error)?.name === 'TimeoutError' || (e as Error)?.name === 'AbortError')
+        {
+            throw new Token_request_error(`No answer within ${timeout_ms / 1000} s.`, {reason: 'timeout'});
+        }
+        throw new Token_request_error(failure_detail(e), {reason: 'network'});
+    }
     if (!res.ok)
     {
-        throw new RuntimeError('OAuth token request failed.', {
-            code: 'oauth.token',
-            detail: `HTTP ${res.status}: ${parse_token_error(text)}`,
+        throw new Token_request_error(`HTTP ${res.status}: ${parse_token_error(text)}`, {
+            status: res.status,
+            error: oauth_error_of(text),
+            retry_after: res.status === 429 ? parse_retry_after(res.headers.get('Retry-After')) ?? undefined : undefined,
         });
     }
-    return JSON.parse(text) as Token_response;
+    const answer = token_answer_of(text);
+    if (!answer)
+    {
+        throw new Token_request_error(`HTTP ${res.status}: the answer is not a token response.`, {
+            status: res.status, reason: 'unreadable',
+        });
+    }
+    return answer;
 };
 
 const exchange_code = async(p: {
@@ -215,6 +285,7 @@ const refresh_stored = async(p: {
     record: Oauth_record;
     client_id?: string;
     now?: number;
+    timeout_ms?: number;
 }): Promise<Oauth_record>=>{
     if (!p.record.refresh_token)
     {
@@ -223,7 +294,7 @@ const refresh_stored = async(p: {
     const now = p.now ?? Date.now();
     const resp = await post_token(p.authority, build_refresh_body({
         refresh_token: p.record.refresh_token, client_id: p.client_id ?? CLIENT_ID,
-    }));
+    }), p.timeout_ms);
     return to_oauth_record(resp, now, p.record);
 };
 
@@ -251,6 +322,7 @@ const run_login = async(opts: {
 };
 
 export {
-    CLIENT_ID, SCOPE,
+    CLIENT_ID, SCOPE, Token_request_error,
     build_authorize_url, run_login, exchange_code, refresh_stored, browser_open_command,
 };
+export type {Token_failure};

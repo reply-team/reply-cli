@@ -30,8 +30,12 @@ type Credential_record = Oauth_record | Api_key_record;
 interface CredentialStore {
     get(key: string): Promise<Credential_record | undefined>;
     set(key: string, record: Credential_record): Promise<void>;
-    remove(key: string): Promise<boolean>;
+    // With only_if, the record is removed only while only_if holds for it, decided on the same read
+    // the removal rewrites.
+    remove(key: string, only_if?: (record: Credential_record) => boolean): Promise<boolean>;
     keys(): Promise<string[]>;
+    // Runs fn while no other process writes the store; set and remove inside it don't wait again.
+    with_lock<T>(fn: () => Promise<T>): Promise<T>;
 }
 
 export type {Principal, Oauth_record, Api_key_record, Credential_record, CredentialStore};

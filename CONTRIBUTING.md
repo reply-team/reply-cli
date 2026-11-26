@@ -21,8 +21,10 @@ npm link          # put the built `reply` binary on your PATH
 
 The suite is fully offline — no test contacts the Reply.io API or the identity
 server. `fetch` is stubbed, and the OAuth loopback flow is exercised against a
-local `127.0.0.1` listener with an injected browser stub. CI runs the build and
-tests on Linux and Windows.
+local `127.0.0.1` listener with an injected browser stub. One test runs two
+built CLI processes (`dist/`) against a fake identity server on `127.0.0.1`, so
+run `npm run build` before `npm test`. CI runs the build and tests on Linux and
+Windows.
 
 `npm run smoke:hosts` is a separate check that runs `reply skills install`
 entirely inside a throwaway `HOME`/`USERPROFILE` sandbox, and proves your real
@@ -56,10 +58,44 @@ do.
 
 Each record is keyed by profile name, so multiple accounts never collide even
 when they hit the same backend. A record is either an OAuth entry (access token
-+ refresh token + expiry) or an API-key entry. Expired OAuth tokens refresh
-automatically; if a refresh fails the record is cleared and the user is prompted
-to log in again. The store sits behind a `CredentialStore` interface so an
-OS-keychain backend can be added later without touching callers.
++ refresh token + expiry) or an API-key entry. The store sits behind a
+`CredentialStore` interface so an OS-keychain backend can be added later without
+touching callers.
+
+Every write (a refresh, `auth login`, `auth logout`, a profile rename or delete)
+reads, changes and rewrites the whole file while holding `credentials.json.lock`
+beside it, and the rewrite is a temp file renamed into place, retried briefly
+when Windows refuses the rename for a moment. The lock file is created
+exclusively and holds the holder's pid, host name, pid namespace (on Linux) and
+the time it was taken. A lock older than 30 s, or whose holder is gone, is taken
+over; a live one is waited on for up to 45 s. The pid is trusted only on the host
+and in the pid namespace that wrote it: sandboxes and containers that give each
+command a pid namespace of its own give them equal pids, so elsewhere a lock is
+judged by its age alone. A lock is
+only ever removed, by its holder letting go or by a takeover, under a second
+exclusive file, `credentials.json.lock.guard`, after reading it again, so no
+process removes a lock it hasn't just checked. Letting go is best effort: a lock
+left behind is taken over by the same rules.
+
+Expired OAuth tokens refresh automatically, one process at a time: the identity
+server hands out one-time refresh tokens, so two processes refreshing together
+would otherwise spend the same one. Under the lock the record is read again, and
+a token another process already refreshed is used with no request sent. The token
+request times out after 20 s, and the new record is stored as soon as the answer
+is read. What a failed refresh does:
+
+| The token endpoint's answer | The stored record | The command fails with |
+|---|---|---|
+| `400` `invalid_grant` | removed — unless the file by then holds another record (another process refreshed first): that one is used, nothing is removed, and the command goes on | `auth.refresh_failed`, exit 2 |
+| another OAuth error, `400` or `401` with an `error` | kept | `auth.refresh_failed`, exit 2 |
+| `429` | kept | `rate_limited`, exit 1, with `retry_after` when it sent `Retry-After` |
+| a `5xx`, any other status, a `2xx` that isn't a token answer, a timeout, a network error, or a lock wait that ran out | kept | `reply.unavailable`, exit 1 |
+
+The error carries the failed refresh under `details.refresh`: `status` (the token
+endpoint's HTTP status) and `error` (its OAuth error code) when it answered, and
+`reason` (`timeout`, `network`, `unreadable` or `lock_wait`) when no usable
+answer came. The top-level `status` stays unset, since it is Reply's answer to the
+command itself, and no token or request body is ever printed.
 
 ## Credential resolution
 

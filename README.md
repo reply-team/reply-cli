@@ -120,6 +120,16 @@ Pass a key for a single command with `--api-key` or the `REPLY_API_KEY`
 environment variable; both take precedence over a stored login and are never
 written to disk.
 
+An OAuth login refreshes itself when it expires, one `reply` process at a time,
+so commands started together don't sign you out. Only a refresh the sign-in
+server refuses outright fails with `auth.refresh_failed` (exit 2) and needs a new
+`reply auth login`. A refresh that hits a rate limit (`rate_limited`, with
+`retry_after`), or a server error, an error page, a timeout or a network error
+(`reply.unavailable`), keeps the login and exits 1: run the command again. With
+`--json`, the error's `details.refresh` says what the sign-in server answered
+(`status`, and `error`, its OAuth error code) or why no answer came (`reason`:
+`timeout`, `network`, `unreadable` or `lock_wait`). Tokens are never printed.
+
 ## Profiles
 
 Profiles keep more than one Reply.io account signed in at once — each stores its
@@ -776,7 +786,8 @@ sets it for each command it runs. The value must be one lower-case name of up to
 32 letters, digits or dashes, a `/`, and a version of up to 32 letters, digits,
 dots, `+` or `-`; anything else is left out and the User-Agent stays as it is.
 It is a label, not an input: it never refuses a command and never prints
-anything, and it is read only from the environment of the process.
+anything, and it is read only from the environment of the process. The token
+requests a sign-in and its refreshes make carry the same User-Agent.
 
 ## Contributing
 
