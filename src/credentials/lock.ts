@@ -26,7 +26,8 @@ type Lock_opts = {
     stale_ms?: number;   // a lock held longer than this is taken over, its holder alive or not
 };
 
-// The longest a holder needs is one token request and one write. A waiter outlasts a stale lock,
+// The longest a holder needs is one request to the sign-in server (a refresh's token request or a
+// logout's revocation, each bounded by TOKEN_TIMEOUT_MS) and one write. A waiter outlasts a stale lock,
 // so a holder that hangs never blocks the others for good.
 const LOCK_STALE_MS = TOKEN_TIMEOUT_MS + 10_000;
 const LOCK_WAIT_MS = LOCK_STALE_MS + 15_000;

@@ -298,6 +298,48 @@ const refresh_stored = async(p: {
     return to_oauth_record(resp, now, p.record);
 };
 
+// What became of a revocation: confirmed, or why not. Never a token or the request body.
+type Revocation =
+    | {revoked: true}
+    | {revoked: false; status?: number; reason?: 'timeout' | 'network'};
+
+// Ends a refresh token at the sign-in server (RFC 7009), so the sign-in can't be refreshed again. The
+// server answers 200 for a token it revoked and for one it doesn't know, so any 2xx counts as
+// confirmed. A redirect isn't followed: following one would post the token wherever it points, and
+// a page answering there would read as confirmed. It doesn't throw: a logout removes the stored
+// record whatever the server says. A logout holds the credentials lock across it, so it waits no
+// longer than a token request.
+const revoke_refresh_token = async(p: {
+    authority: string;
+    refresh_token: string;
+    client_id?: string;
+    timeout_ms?: number;
+}): Promise<Revocation>=>{
+    const timeout_ms = p.timeout_ms ?? TOKEN_TIMEOUT_MS;
+    try {
+        const res = await fetch(`${p.authority}/connect/revocation`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'User-Agent': user_agent(),
+            },
+            body: new URLSearchParams({
+                token: p.refresh_token,
+                token_type_hint: 'refresh_token',
+                client_id: p.client_id ?? CLIENT_ID,
+            }).toString(),
+            redirect: 'manual',
+            signal: AbortSignal.timeout(timeout_ms),
+        });
+        // The answer's body says nothing more (RFC 7009 §2.2); dropping it frees the connection.
+        await res.body?.cancel().catch(()=>undefined);
+        return res.ok ? {revoked: true} : {revoked: false, status: res.status};
+    } catch (e) {
+        const timed_out = (e as Error)?.name === 'TimeoutError' || (e as Error)?.name === 'AbortError';
+        return {revoked: false, reason: timed_out ? 'timeout' : 'network'};
+    }
+};
+
 // Full authorization-code + PKCE loopback login. `open` is injectable so the
 // loopback can be exercised without a real browser/IdP in tests.
 const run_login = async(opts: {
@@ -323,6 +365,6 @@ const run_login = async(opts: {
 
 export {
     CLIENT_ID, SCOPE, Token_request_error,
-    build_authorize_url, run_login, exchange_code, refresh_stored, browser_open_command,
+    build_authorize_url, run_login, exchange_code, refresh_stored, revoke_refresh_token, browser_open_command,
 };
-export type {Token_failure};
+export type {Token_failure, Revocation};
