@@ -5,8 +5,9 @@ import {build_context, type Cli_context} from '../context';
 import {create_client} from '../utils/client';
 import {resolve_credential} from '../auth/resolve';
 import {resolve_request_identity} from '../auth/request-identity';
-import {run_login} from '../auth/oauth-flow';
+import {run_login, revoke_refresh_token} from '../auth/oauth-flow';
 import {describe_status} from '../auth/status';
+import {TOKEN_TIMEOUT_MS} from '../auth/token';
 import {UsageError} from '../utils/errors';
 import {success, info, warn, print, pc, type Print_opts} from '../utils/output';
 import type {Api_key_record, Credential_record, Principal} from '../credentials/types';
@@ -171,19 +172,71 @@ const handle_login_token = async(
     success(`Stored API key for ${principal_label(user)}${profile_note(ctx.profile)}.`);
 };
 
+// A logout's revocation, or 'replaced' when the record changed under the logout while it was out.
+type Logout_revocation =
+    | {revoked: true}
+    | {revoked: false; status?: number; reason?: 'timeout' | 'network' | 'replaced'};
+
+const revocation_failure = (r: Extract<Logout_revocation, {revoked: false}>): string=>{
+    if (r.reason === 'replaced')
+    {
+        return 'the stored sign-in changed while the logout was ending it';
+    }
+    if (r.status !== undefined)
+    {
+        return `the sign-in server answered HTTP ${r.status}`;
+    }
+    return r.reason === 'timeout'
+        ? `the sign-in server did not answer within ${TOKEN_TIMEOUT_MS / 1000} s`
+        : 'the sign-in server could not be reached';
+};
+
+// The stored record is the one logged out, whatever key --api-key or the environment supplies. Its
+// read, the revocation of its refresh token and its removal share one hold of the credentials lock,
+// so a refresh by another process can't store a newer token in between. Only a stall past the
+// lock's stale limit (a suspended machine, say) lets another process take the lock over and store
+// one; the removal's own read sees that, and the logout then reports the sign-in as not ended,
+// since the token it revoked is no longer the live one. The record is removed whatever the server
+// says.
 const handle_logout = async(ctx: Cli_context, g: Global_opts): Promise<void>=>{
-    const removed = await ctx.store.remove(ctx.key);
+    type Logout = {removed: boolean; revocation?: Logout_revocation};
+    const {removed, revocation} = await ctx.store.with_lock(async(): Promise<Logout>=>{
+        const record = await ctx.store.get(ctx.key);
+        if (!record)
+        {
+            return {removed: false};
+        }
+        if (record.type !== 'oauth' || !record.refresh_token)
+        {
+            return {removed: await ctx.store.remove(ctx.key)};
+        }
+        const token = record.refresh_token;
+        let revocation: Logout_revocation = await revoke_refresh_token({authority: ctx.authority, refresh_token: token});
+        const removed = await ctx.store.remove(ctx.key, r=>{
+            if (revocation.revoked && (r.type !== 'oauth' || r.refresh_token !== token))
+            {
+                revocation = {revoked: false, reason: 'replaced'};
+            }
+            return true;
+        });
+        return {removed, revocation};
+    });
     if (wants_json(g))
     {
-        print({logged_out: removed}, print_opts(g));
-        return;
+        print({logged_out: removed, ...(revocation ? {revoked: revocation.revoked} : {})}, print_opts(g));
     }
-    if (removed)
+    else if (removed)
     {
         success('Logged out.');
-        return;
     }
-    info('No stored credential to remove.');
+    else
+    {
+        info('No stored credential to remove.');
+    }
+    if (revocation && !revocation.revoked)
+    {
+        warn(`The sign-in may still be valid at Reply: ${revocation_failure(revocation)}.`);
+    }
 };
 
 const handle_status = async(ctx: Cli_context, g: Global_opts): Promise<void>=>{
@@ -291,7 +344,7 @@ auth_command
 
 auth_command
     .command('logout')
-    .description('Remove the stored credential')
+    .description('End the stored sign-in at Reply and remove the stored credential')
     .action(async function(this: Command) {
         const g = read_globals(this);
         await handle_logout(build_context({profile: g.profile}), g);

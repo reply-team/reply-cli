@@ -21,10 +21,11 @@ npm link          # put the built `reply` binary on your PATH
 
 The suite is fully offline — no test contacts the Reply.io API or the identity
 server. `fetch` is stubbed, and the OAuth loopback flow is exercised against a
-local `127.0.0.1` listener with an injected browser stub. One test runs two
-built CLI processes (`dist/`) against a fake identity server on `127.0.0.1`, so
-run `npm run build` before `npm test`. CI runs the build and tests on Linux and
-Windows.
+local `127.0.0.1` listener with an injected browser stub. Some tests run built
+CLI processes (`dist/`) against a fake identity server on `127.0.0.1` (two
+refreshing one sign-in together, a logout during a refresh, a logout the server
+refuses), so run `npm run build` before `npm test`. CI runs the build and tests
+on Linux and Windows.
 
 `npm run smoke:hosts` is a separate check that runs `reply skills install`
 entirely inside a throwaway `HOME`/`USERPROFILE` sandbox, and proves your real
@@ -67,9 +68,12 @@ reads, changes and rewrites the whole file while holding `credentials.json.lock`
 beside it, and the rewrite is a temp file renamed into place. While another
 program has the file open (an antivirus scan, say), Windows can refuse the
 write's read of the file and its rename over it; the two are retried together,
-for about 5 s in all, before the write fails. The lock file is created
-exclusively and holds the holder's pid, host name, pid namespace (on Linux) and
-the time it was taken. A lock older than 30 s, or whose holder is gone, is taken
+for about 5 s in all, before the write fails. A refresh and a logout also read the
+record once under the lock before their request to the identity server, and that
+read isn't retried: a refused read fails the command at once, before anything is
+sent, which keeps their time under the lock within the sum given below. The lock
+file is created exclusively and holds the holder's pid, host name, pid namespace
+(on Linux) and the time it was taken. A lock older than 30 s, or whose holder is gone, is taken
 over; a live one is waited on for up to 45 s. The pid is trusted only on the host
 and in the pid namespace that wrote it: sandboxes and containers that give each
 command a pid namespace of its own give them equal pids, so elsewhere a lock is
@@ -99,6 +103,25 @@ endpoint's HTTP status) and `error` (its OAuth error code) when it answered, and
 `reason` (`timeout`, `network`, `unreadable` or `lock_wait`) when no usable
 answer came. The top-level `status` stays unset, since it is Reply's answer to the
 command itself, and no token or request body is ever printed.
+
+`auth logout` ends an OAuth sign-in at the identity server before it removes the
+record. Holding the lock once, it reads the record, posts its refresh token to the
+revocation endpoint (`/connect/revocation`, RFC 7009, with
+`token_type_hint=refresh_token` and the CLI's client id) and removes the record,
+so a refresh by another process can't store a newer token in between that would
+stay valid at the server. The revocation times out after 20 s, as the token
+request does, so a logout holds the lock no longer than a refresh: one request of
+up to 20 s and one write of about 5 s at most, inside the 30 s after which a lock
+is taken over. Only a stall past that (a suspended machine, say) lets another
+process take the lock over and store a newer token; the removal's own read sees
+that the record changed, and the logout reports the sign-in as not ended. The
+record is removed whatever the answer. A `2xx` counts as confirmed (RFC 7009
+answers `200` for a token the server doesn't know, too). A redirect isn't
+followed, so the token is posted nowhere else. A redirect, another status, a
+timeout, a network error or a record that changed leaves one warning line on
+stderr and `revoked: false` under `--json`. Nothing is sent for an API-key record
+or when nothing is stored, and an API key, stored or from `--api-key` or
+`REPLY_API_KEY`, is never sent.
 
 ## Credential resolution
 

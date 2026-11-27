@@ -11,8 +11,8 @@ type Key_map = Record<string, Credential_record>;
 
 // On Windows, while another program has the file open (an antivirus scan or a backup can take
 // seconds), a read of it and a rename over it can be refused. A write's read and rename wait out
-// those refusals from one copy of these waits: about 5 s in all, so that with the token request a
-// refresh still lets go of the lock before it counts as stale.
+// those refusals from one copy of these waits: about 5 s in all, so that with its request to the
+// sign-in server a refresh or a logout still lets go of the lock before it counts as stale.
 const BUSY_RETRY_MS = [20, 40, 80, 160, 320, 640, 1_000, 1_000, 1_000, 1_000];
 const BUSY = ['EPERM', 'EACCES', 'EBUSY'];
 

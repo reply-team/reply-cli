@@ -1,11 +1,15 @@
 import {describe, it, expect, beforeEach, afterEach, vi} from 'vitest';
 import http from 'http';
+import type {AddressInfo} from 'net';
 import {URL} from 'url';
 
+const real_fetch = globalThis.fetch;
 const mock_fetch = vi.fn();
 vi.stubGlobal('fetch', mock_fetch);
 
-import {build_authorize_url, run_login, refresh_stored, browser_open_command, CLIENT_ID, SCOPE} from '../../auth/oauth-flow';
+import {
+    build_authorize_url, run_login, refresh_stored, revoke_refresh_token, browser_open_command, CLIENT_ID, SCOPE,
+} from '../../auth/oauth-flow';
 import {RuntimeError} from '../../utils/errors';
 import {cli_version} from '../../config';
 import type {Oauth_record} from '../../credentials/types';
@@ -156,6 +160,25 @@ describe('auth/oauth-flow', ()=>{
             expect(e).toMatchObject({
                 code: 'oauth.token', detail: 'HTTP 400: Token was used', failure: {status: 400, error: 'invalid_grant'},
             });
+        });
+    });
+
+    describe('revoke_refresh_token', ()=>{
+        // Breaks if a revocation that got no answer in time is taken for one that couldn't reach the
+        // server: Node names the abort a TimeoutError, and a check that misses it makes a logout warn
+        // that the sign-in server could not be reached.
+        it('comes back unconfirmed, as a timeout, when the server never answers', async()=>{
+            const server = http.createServer(()=>{ /* takes the request and never answers */ });
+            await new Promise<void>(resolve=>server.listen(0, '127.0.0.1', resolve));
+            const {port} = server.address() as AddressInfo;
+            mock_fetch.mockImplementationOnce(real_fetch);
+            try {
+                expect(await revoke_refresh_token({authority: `http://127.0.0.1:${port}`, refresh_token: 'RT', timeout_ms: 100}))
+                    .toEqual({revoked: false, reason: 'timeout'});
+            } finally {
+                server.closeAllConnections();
+                await new Promise<void>(resolve=>server.close(()=>resolve()));
+            }
         });
     });
 });

@@ -113,7 +113,7 @@ Inspect and manage the active credential:
 ```sh
 reply auth status     # who you're signed in as, and how — no secrets shown
 reply auth whoami     # verify the stored credential against the API
-reply auth logout     # remove the stored credential
+reply auth logout     # end the sign-in at Reply and remove the stored credential
 ```
 
 Pass a key for a single command with `--api-key` or the `REPLY_API_KEY`
@@ -129,6 +129,18 @@ server refuses outright fails with `auth.refresh_failed` (exit 2) and needs a ne
 `--json`, the error's `details.refresh` says what the sign-in server answered
 (`status`, and `error`, its OAuth error code) or why no answer came (`reason`:
 `timeout`, `network`, `unreadable` or `lock_wait`). Tokens are never printed.
+
+`reply auth logout` ends an OAuth login at Reply too: it revokes the stored refresh
+token at the sign-in server, then removes the stored credential, so the login can't
+be refreshed again from anywhere. If the sign-in server can't be reached, doesn't
+answer within 20 s, refuses or redirects, the credential is still removed and a
+warning on stderr says the login may still be valid at Reply. With `--json` the
+result is `{"logged_out":true,"revoked":true}`, or `"revoked":false` when the logout
+couldn't confirm the login ended at Reply; `revoked` is left out when there was
+nothing to revoke (a stored API key,
+or nothing stored). A logout always acts on the stored credential, whatever
+`--api-key` or `REPLY_API_KEY` says, and an API key is never sent to the sign-in
+server.
 
 ## Profiles
 
@@ -787,7 +799,8 @@ sets it for each command it runs. The value must be one lower-case name of up to
 dots, `+` or `-`; anything else is left out and the User-Agent stays as it is.
 It is a label, not an input: it never refuses a command and never prints
 anything, and it is read only from the environment of the process. The token
-requests a sign-in and its refreshes make carry the same User-Agent.
+requests a sign-in and its refreshes make, and the revocation a logout sends,
+carry the same User-Agent.
 
 ## Contributing
 
